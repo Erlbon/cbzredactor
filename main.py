@@ -1,5 +1,5 @@
 """
-The CBZ Redactor - entry point.
+The ƆBZ Redactor - entry point.
 
 Run with:  python main.py
 Build a standalone .exe with:  build_exe.bat  (see README.md)

@@ -1,4 +1,4 @@
-# PyInstaller spec file for The CBZ Redactor.
+# PyInstaller spec file for The ƆBZ Redactor.
 #
 # Build on Windows with: pyinstaller cbzredactor.spec
 # (PyInstaller builds for whatever platform it runs ON -- cannot be
@@ -7,10 +7,6 @@
 # redactor_common is not listed in datas/hiddenimports -- it's a plain
 # importable Python package installed via pip, same as PyQt6/lxml, so
 # PyInstaller's static import analysis picks it up automatically.
-#
-# No icon=... yet -- see README.md's "Building a standalone Windows
-# .exe" note. Add assets/icon.ico and an `icon="assets/icon.ico"` /
-# datas entry once one exists.
 
 block_cipher = None
 
@@ -19,6 +15,7 @@ a = Analysis(
     pathex=[],
     binaries=[],
     datas=[
+        ("assets/icon.ico", "assets"),
         ("README.md", "."),
         ("CHANGELOG.md", "."),
         ("ABOUT.md", "."),
@@ -57,4 +54,5 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
+    icon="assets/icon.ico",
 )

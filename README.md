@@ -1,4 +1,4 @@
-# The CBZ Redactor
+# The ƆBZ Redactor
 
 A PyQt6 desktop tool for viewing and editing the `ComicInfo.xml`
 metadata embedded in CBZ comic book archives -- title, series,
@@ -74,10 +74,6 @@ for the OS it runs on).
 2. Copy this whole folder to the Windows machine.
 3. Double-click `build_exe.bat`, or run it from a command prompt.
 4. When it finishes, your standalone app is at `dist\cbzredactor.exe`.
-
-Note: there's no `assets/icon.ico` yet in this initial scaffold -- the
-app runs fine without one (falls back to the default Qt window icon),
-but `cbzredactor.spec` will need an `icon=` value added once one exists.
 
 ## Development
 

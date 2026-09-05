@@ -1,4 +1,4 @@
-# The CBZ Redactor
+# The ƆBZ Redactor
 
 A desktop tool for viewing and editing the [ComicInfo.xml](https://github.com/anansi-project/comicinfo)
 metadata embedded in CBZ comic book archives -- title, series, credits,
