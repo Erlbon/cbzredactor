@@ -1,10 +1,14 @@
 """
 gui/metadata_panel.py
 
-The right-hand side panel: a first-page thumbnail (the "cover", per the
-project's Sept 2026 scoping conversation) on top, and a scrollable
-ComicInfo.xml field editor below it. Same collapsible-side-panel role
-as epubredactor's gui/tag_panel.py, rebuilt here for CBZ's field set.
+The right-hand side panel: a scrollable ComicInfo.xml field editor on
+top, and a first-page thumbnail (the "cover", per the project's Sept
+2026 scoping conversation) below it, in a resizable vertical splitter --
+fields on top, cover below, exactly like epubredactor's own
+gui/tag_panel.py ("Bulk Edit Tags" above, "Cover Image" below, with a
+draggable divider between them). This panel had briefly had that
+inverted (cover above, fixed-height, unresizable) until the user
+flagged it as wrong relative to the established convention.
 
 Deliberately dumb: this widget owns no CbzBook and does no file I/O --
 MainWindow calls load_metadata()/read back edited fields via
@@ -19,6 +23,12 @@ click "Apply to N Selected Files", via bulkApplyRequested. A field
 left blank is left untouched on every file, not cleared -- same
 "blank means don't touch" convention used throughout the sibling
 Redactor tools' own bulk-edit features.
+
+The Genre and Language (ISO) fields each get a small "+" quick-pick
+button (same role as epubredactor's own Genre/Language "+" menus) --
+built from gui/app_settings.py's hideable-defaults-plus-custom lists
+(core/comic_genres.py, core/comic_languages.py), manageable via
+Settings > Add/Remove Genres.../Add/Remove Languages... in MainWindow.
 """
 
 from __future__ import annotations
@@ -33,11 +43,15 @@ from PyQt6.QtWidgets import (
     QFormLayout,
     QGroupBox,
     QHBoxLayout,
+    QInputDialog,
     QLabel,
     QLineEdit,
+    QMenu,
     QPlainTextEdit,
     QPushButton,
     QScrollArea,
+    QSplitter,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -45,6 +59,7 @@ from PyQt6.QtWidgets import (
 from redactor_common.gui.collapsible_splitter import CollapseToggleButton
 from redactor_common.gui.image_label import AspectRatioImageLabel
 
+from core.comic_genres import add_genre
 from core.comicinfo import AGE_RATING_VALUES, BLACK_AND_WHITE_VALUES, MANGA_VALUES, ComicInfoMetadata
 
 # (label, attribute name on ComicInfoMetadata) pairs, grouped the same
@@ -70,6 +85,10 @@ PUBLICATION_FIELDS = [
     ("Language (ISO)", "language_iso"), ("Format", "format"),
     ("Year", "year"), ("Month", "month"), ("Day", "day"),
 ]
+
+# Fields that get a "+" quick-pick button next to their QLineEdit --
+# handled specially in _build_group(); see _show_quick_pick_menu().
+_QUICK_PICK_ATTRS = {"genre", "language_iso"}
 
 
 class ComicInfoPanel(QWidget):
@@ -97,24 +116,6 @@ class ComicInfoPanel(QWidget):
         header.addWidget(self.collapse_toggle_btn)
         outer.addLayout(header)
 
-        self.cover_label = AspectRatioImageLabel()
-        # An explicit small minimum WIDTH too, not just height -- a plain
-        # QLabel's auto minimumSizeHint is based on its current text
-        # ("No file selected" etc, whenever there's no pixmap loaded),
-        # which would otherwise impose a much wider floor than 220px-tall
-        # actually needs and fight the side panel's collapse-to-slim-strip
-        # behavior (same fix epubredactor's own cover_preview uses -- see
-        # its COVER_PREVIEW_MIN_SIZE).
-        self.cover_label.setMinimumSize(60, 220)
-        self.cover_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.cover_label.setStyleSheet("background-color: palette(base); border: 1px solid palette(mid);")
-        self.cover_label.setText("No pages")
-        outer.addWidget(self.cover_label)
-
-        self.page_count_label = QLabel("")
-        self.page_count_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        outer.addWidget(self.page_count_label)
-
         # Only shown in bulk mode (set_bulk_mode()) -- explains the
         # "blank means unchanged" convention and gives the explicit
         # apply action, since silently auto-applying edits to N files
@@ -131,12 +132,33 @@ class ComicInfoPanel(QWidget):
         self.bulk_apply_btn.setVisible(False)
         outer.addWidget(self.bulk_apply_btn)
 
+        self._line_edits: dict[str, QLineEdit] = {}
+        scroll = self._build_fields_scroll_area()
+        cover_box = self._build_cover_box()
+
+        # A real draggable divider between the two sections -- same
+        # role as epubredactor's tag_panel.py: lets the cover be given
+        # much more room by dragging, even if that squeezes the field
+        # form down to something that needs to scroll, or vice versa.
+        # Fields on top, cover below -- matching that established order.
+        splitter = QSplitter(Qt.Orientation.Vertical)
+        splitter.addWidget(scroll)
+        splitter.addWidget(cover_box)
+        splitter.setStretchFactor(0, 1)
+        splitter.setStretchFactor(1, 1)
+        splitter.setSizes([600, 300])  # initial bias toward fields; purely a starting hint
+        outer.addWidget(splitter, 1)
+
+    # ------------------------------------------------------------------
+    # Widget construction
+    # ------------------------------------------------------------------
+
+    def _build_fields_scroll_area(self) -> QScrollArea:
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         form_container = QWidget()
         form_layout = QVBoxLayout(form_container)
 
-        self._line_edits: dict[str, QLineEdit] = {}
         form_layout.addWidget(self._build_group("Identity / Sequence", IDENTITY_FIELDS))
         form_layout.addWidget(self._build_group("Story", STORY_FIELDS))
         form_layout.addWidget(self._build_group("Credits", CREDIT_FIELDS))
@@ -148,11 +170,31 @@ class ComicInfoPanel(QWidget):
         form_layout.addStretch(1)
 
         scroll.setWidget(form_container)
-        outer.addWidget(scroll, 1)
+        return scroll
 
-    # ------------------------------------------------------------------
-    # Widget construction
-    # ------------------------------------------------------------------
+    def _build_cover_box(self) -> QGroupBox:
+        self.cover_box = QGroupBox("Cover (First Page)")
+        box = self.cover_box
+        layout = QVBoxLayout(box)
+
+        self.cover_label = AspectRatioImageLabel()
+        # An explicit small minimum WIDTH too, not just height -- a plain
+        # QLabel's auto minimumSizeHint is based on its current text
+        # ("No file selected" etc, whenever there's no pixmap loaded),
+        # which would otherwise impose a much wider floor than needed
+        # and fight the side panel's collapse-to-slim-strip behavior
+        # (same fix epubredactor's own cover_preview uses).
+        self.cover_label.setMinimumSize(60, 80)
+        self.cover_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.cover_label.setStyleSheet("background-color: palette(base); border: 1px solid palette(mid);")
+        self.cover_label.setText("No pages")
+        layout.addWidget(self.cover_label, 1)
+
+        self.page_count_label = QLabel("")
+        self.page_count_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(self.page_count_label)
+
+        return box
 
     def _build_group(self, title: str, fields: list) -> QGroupBox:
         box = QGroupBox(title)
@@ -161,8 +203,73 @@ class ComicInfoPanel(QWidget):
             edit = QLineEdit()
             edit.textChanged.connect(self._on_field_changed)
             self._line_edits[attr] = edit
-            layout.addRow(label, edit)
+            if attr in _QUICK_PICK_ATTRS:
+                layout.addRow(label, self._wrap_with_quick_pick(attr, edit))
+            else:
+                layout.addRow(label, edit)
         return box
+
+    def _wrap_with_quick_pick(self, attr: str, edit: QLineEdit) -> QWidget:
+        """A QLineEdit plus a small "+" button opening a menu of
+        quick-pick values (see _show_quick_pick_menu()) -- used for
+        Genre and Language (ISO), the two fields with a curated
+        default list plus user-manageable custom entries (Settings >
+        Add/Remove Genres.../Add/Remove Languages...)."""
+        container = QWidget()
+        row = QHBoxLayout(container)
+        row.setContentsMargins(0, 0, 0, 0)
+        row.addWidget(edit, 1)
+
+        button = QToolButton()
+        button.setText("+")
+        button.setToolTip("Pick from list, or add a custom entry")
+        button.clicked.connect(lambda: self._show_quick_pick_menu(attr, edit, button))
+        row.addWidget(button)
+        return container
+
+    def _show_quick_pick_menu(self, attr: str, edit: QLineEdit, button: QToolButton) -> None:
+        from gui import app_settings  # local import: avoids a hard Qt/app_settings dependency at module load
+
+        menu = QMenu(button)
+        if attr == "genre":
+            for genre in app_settings.load_genres():
+                action = menu.addAction(genre)
+                action.triggered.connect(lambda _checked=False, g=genre: edit.setText(add_genre(edit.text(), g)))
+            menu.addSeparator()
+            add_action = menu.addAction("Add Custom Genre…")
+            add_action.triggered.connect(lambda: self._prompt_add_custom_genre(edit))
+        elif attr == "language_iso":
+            for code, name in app_settings.load_languages():
+                action = menu.addAction(f"{name} ({code})")
+                action.triggered.connect(lambda _checked=False, c=code: edit.setText(c))
+            menu.addSeparator()
+            add_action = menu.addAction("Add Custom Language…")
+            add_action.triggered.connect(lambda: self._prompt_add_custom_language(edit))
+        menu.exec(button.mapToGlobal(button.rect().bottomLeft()))
+
+    def _prompt_add_custom_genre(self, edit: QLineEdit) -> None:
+        from gui import app_settings
+
+        text, ok = QInputDialog.getText(self, "Add Custom Genre", "New genre name:")
+        text = text.strip()
+        if ok and text:
+            app_settings.add_custom_genre(text)
+            edit.setText(add_genre(edit.text(), text))
+
+    def _prompt_add_custom_language(self, edit: QLineEdit) -> None:
+        from gui import app_settings
+
+        code, ok = QInputDialog.getText(
+            self, "Add Custom Language", 'Language code (ISO 639-1, e.g. "pt" for Portuguese):'
+        )
+        code = code.strip()
+        if not (ok and code):
+            return
+        name, ok = QInputDialog.getText(self, "Add Custom Language", "Display name for this language:")
+        name = name.strip()
+        if ok and name:
+            app_settings.add_custom_language(code, name)
+            edit.setText(code)
 
     def _build_text_group(self, title: str, attr: str) -> QGroupBox:
         box = QGroupBox(title)
@@ -231,8 +338,7 @@ class ComicInfoPanel(QWidget):
         the user actually fills in get applied, to every selected file,
         when bulkApplyRequested fires."""
         self.bulk_mode = count > 1
-        self.cover_label.setVisible(not self.bulk_mode)
-        self.page_count_label.setVisible(not self.bulk_mode)
+        self.cover_box.setVisible(not self.bulk_mode)
         self.bulk_info_label.setVisible(self.bulk_mode)
         self.bulk_apply_btn.setVisible(self.bulk_mode)
         if self.bulk_mode:

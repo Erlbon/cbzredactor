@@ -1,16 +1,21 @@
 """
 gui/main_window.py
 
-The main window: a table of loaded CBZ files on the left, and the
-collapsible metadata side panel (gui/metadata_panel.py, cover
-thumbnail + ComicInfo.xml form) on the right -- same 2-pane layout
-convention as the sibling Redactor tools, built on
-redactor_common.gui.collapsible_splitter.
+The main window: a collapsible metadata side panel (gui/metadata_panel.py,
+scrollable ComicInfo.xml form + cover thumbnail) on the left, and a table
+of loaded CBZ files on the right -- same 2-pane layout convention as the
+sibling Redactor tools, built on redactor_common.gui.collapsible_splitter.
+
+The table's columns are field-name-based (redactor_common.core.
+table_settings), not index-based -- drag a header to reorder, right-click
+a header for a show/hide checklist or "Add/Remove Columns...", and both
+order and visibility persist across restarts via gui/app_settings.py.
 """
 
 from __future__ import annotations
 
 import os
+import shutil
 import sys
 
 from PyQt6.QtCore import Qt
@@ -18,6 +23,8 @@ from PyQt6.QtWidgets import (
     QAbstractItemView,
     QFileDialog,
     QHeaderView,
+    QInputDialog,
+    QLineEdit,
     QMainWindow,
     QMessageBox,
     QSplitter,
@@ -26,10 +33,17 @@ from PyQt6.QtWidgets import (
     QTableWidgetItem,
 )
 
+from redactor_common.core.table_settings import is_column_visible, merge_column_order, sanitize_hidden_fields
 from redactor_common.gui.about_dialog import AboutDialog, ChangelogDialog, CreditsDialog
 from redactor_common.gui.collapsible_splitter import SplitterPaneCollapser
+from redactor_common.gui.column_menu import show_column_header_context_menu
+from redactor_common.gui.column_settings_dialog import ColumnSettingsDialog
+from redactor_common.gui.context_menu import show_table_context_menu
+from redactor_common.gui.manage_list_dialog import ManageListDialog
 from redactor_common.gui.menu_builder import MenuAction, Separator, build_menu_bar
+from redactor_common.gui.parse_filename_dialog import ParseFilenameDialog
 from redactor_common.gui.progress import run_with_progress
+from redactor_common.gui.rename_pattern_dialog import RenamePatternDialog
 from redactor_common.core.version import REDACTOR_COMMON_REPO_URL, REDACTOR_COMMON_VERSION
 
 from core.cbr_convert import CbrConversionError, convert_cbr_to_cbz
@@ -46,13 +60,38 @@ from gui.metadata_panel import (
     ComicInfoPanel,
 )
 
-COLUMNS = ["Filename", "Title", "Series", "Number", "Pages", "Status"]
+# Table columns, field-key based -- see redactor_common.core.table_settings's
+# own docstring for why (a persisted index-based preference silently
+# breaks the moment a column is added/removed/reordered in code).
+COLUMN_SPECS: list[tuple[str, str]] = [
+    ("filename", "Filename"),
+    ("title", "Title"),
+    ("series", "Series"),
+    ("number", "Number"),
+    ("pages", "Pages"),
+    ("status", "Status"),
+]
+_COLUMN_LABELS: dict[str, str] = dict(COLUMN_SPECS)
+_ALL_COLUMN_KEYS: list[str] = [key for key, _ in COLUMN_SPECS]
+PROTECTED_COLUMNS = frozenset({"filename"})  # the one column you always need to tell rows apart
+
+# Metadata fields offered as %placeholder% tokens in Rename/Export and
+# Parse Filename -- a curated subset of every ComicInfo field (the ones
+# that actually make sense in a filename), not the full form.
+FILENAME_PLACEHOLDERS: list[tuple[str, str]] = [
+    ("series", "Series"), ("number", "Number"), ("title", "Title"),
+    ("volume", "Volume"), ("year", "Year"), ("publisher", "Publisher"),
+    ("writer", "Writer"),
+]
+NUMERIC_FILENAME_FIELDS = {"number", "volume", "year"}
+DEFAULT_RENAME_PATTERN = "%series% %number% - %title%"
+
 LOAD_PROGRESS_THRESHOLD = 3
 SAVE_PROGRESS_THRESHOLD = 3
 # Slim strip, not zero -- keeps the panel's own toggle button reachable
 # (same convention as epubredactor's TAG_PANEL_COLLAPSED_WIDTH). Not
 # 32 (redactor_common's own doc-comment default): ComicInfoPanel's
-# cover thumbnail has its own explicit 60px minimum width (see
+# cover box has its own explicit minimum height/width (see
 # metadata_panel.py), which a QSplitter's minimum-size clamping
 # enforces regardless of what's requested here -- setting this any
 # smaller than that real floor would make SplitterPaneCollapser.
@@ -61,11 +100,12 @@ SAVE_PROGRESS_THRESHOLD = 3
 PANEL_COLLAPSED_WIDTH = 70
 
 # attr -> human label, for the "this would overwrite existing data"
-# lookup-conflict prompt (see MainWindow._resolve_overwrite_conflicts).
-# Built from the same (label, attr) pairs the metadata form itself
-# uses, plus the handful of fields those groups don't cover, so the
-# prompt never drifts out of sync with what the form actually calls
-# each field.
+# conflict prompt (see MainWindow._resolve_overwrite_conflicts) --
+# shared by every metadata-writing path (lookups, bulk edit, Parse
+# Filename). Built from the same (label, attr) pairs the metadata form
+# itself uses, plus the handful of fields those groups don't cover, so
+# the prompt never drifts out of sync with what the form actually
+# calls each field.
 _FIELD_LABELS: dict[str, str] = {
     attr: label
     for label, attr in [*IDENTITY_FIELDS, *STORY_FIELDS, *CREDIT_FIELDS, *PUBLICATION_FIELDS]
@@ -107,9 +147,11 @@ class MainWindow(QMainWindow):
         self.books: list[CbzBook] = []
         self._selected_rows: list[int] = []
 
-        self.table = QTableWidget(0, len(COLUMNS))
-        self.table.setHorizontalHeaderLabels(COLUMNS)
-        self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        self._column_keys = merge_column_order(app_settings.load_column_order(), _ALL_COLUMN_KEYS)
+        self._col_index = {key: i for i, key in enumerate(self._column_keys)}
+
+        self.table = QTableWidget(0, len(self._column_keys))
+        self.table.setHorizontalHeaderLabels([_COLUMN_LABELS[key] for key in self._column_keys])
         self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         # Multi-select (ctrl/shift-click, same as Explorer) -- needed for
         # both bulk metadata editing (see ComicInfoPanel.set_bulk_mode())
@@ -117,6 +159,12 @@ class MainWindow(QMainWindow):
         self.table.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.table.itemSelectionChanged.connect(self._on_selection_changed)
+        self._setup_column_persistence()
+
+        self.table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.table.customContextMenuRequested.connect(self._show_table_context_menu)
+        self.table.horizontalHeader().setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.table.horizontalHeader().customContextMenuRequested.connect(self._show_header_context_menu)
 
         self.panel = ComicInfoPanel()
         self.panel.set_enabled(False)
@@ -154,9 +202,12 @@ class MainWindow(QMainWindow):
                 MenuAction("save", "&Save", self.save_current, shortcut="Ctrl+S"),
                 MenuAction("save_as", "Save &As...", self.save_current_as, shortcut="Ctrl+Shift+S"),
                 Separator(),
+                MenuAction("rename_files", "&Rename / Export Files...", self.open_rename_dialog, shortcut="F2"),
+                Separator(),
                 MenuAction("exit", "E&xit", self.close, shortcut="Ctrl+Q"),
             ],
             "Import": [
+                MenuAction("parse_filename", "&Parse Filename...", self.open_parse_filename_dialog, shortcut="F3"),
                 MenuAction("convert_cbr", "Convert &CBR to CBZ...", self.convert_cbr_dialog),
                 Separator(),
                 MenuAction("comicvine_lookup", "Look Up via Comic &Vine...", self.open_comicvine_lookup_dialog),
@@ -167,6 +218,10 @@ class MainWindow(QMainWindow):
             ],
             "Settings": [
                 MenuAction("comicvine_api_key", "Comic Vine API &Key...", self.change_comicvine_api_key),
+                Separator(),
+                MenuAction("column_settings", "Add/Remove &Columns...", self.open_column_settings_dialog),
+                MenuAction("genre_settings", "Add/Remove &Genres...", self.open_genre_settings_dialog),
+                MenuAction("language_settings", "Add/Remove &Languages...", self.open_language_settings_dialog),
             ],
             "Help": [
                 MenuAction("about", f"&About {APP_NAME}", self.open_about_dialog),
@@ -188,6 +243,80 @@ class MainWindow(QMainWindow):
         toolbar.addSeparator()
         toolbar.addAction(self.actions_["save"])
         toolbar.addAction(self.actions_["save_all"])
+
+    # ------------------------------------------------------------------
+    # Columns: order/visibility/widths, persisted by field key
+    # ------------------------------------------------------------------
+
+    def _setup_column_persistence(self) -> None:
+        header = self.table.horizontalHeader()
+        header.setSectionsMovable(True)  # drag headers to reorder columns
+        header.sectionMoved.connect(self._on_columns_reordered)
+
+        hidden = sanitize_hidden_fields(app_settings.load_hidden_columns(), PROTECTED_COLUMNS)
+        for key in hidden:
+            if key in self._col_index:
+                self.table.setColumnHidden(self._col_index[key], True)
+
+        # A persisted width for a field no longer present (e.g. removed
+        # in a later version) is silently skipped -- same "preference,
+        # not a hard requirement" tolerance as merge_column_order().
+        widths = app_settings.load_column_widths()
+        for key, width in widths.items():
+            if key in self._col_index:
+                header.resizeSection(self._col_index[key], width)
+        if not widths:
+            # First ever run: no saved widths yet -- give Filename the
+            # stretch behavior it always had, rather than every column
+            # starting at some arbitrary default width.
+            header.setSectionResizeMode(self._col_index["filename"], QHeaderView.ResizeMode.Stretch)
+
+    def _on_columns_reordered(self, *_args) -> None:
+        """`*_args` absorbs QHeaderView.sectionMoved's (logical,
+        old_visual, new_visual) arguments -- not needed here, we just
+        re-read the header's current full visual order and persist it."""
+        header = self.table.horizontalHeader()
+        visual_order = [self._column_keys[header.logicalIndex(v)] for v in range(header.count())]
+        app_settings.save_column_order(visual_order)
+
+    def _on_column_visibility_toggled(self, key: str, visible: bool) -> None:
+        if key not in self._col_index:
+            return
+        self.table.setColumnHidden(self._col_index[key], not visible)
+        hidden = {k for k in self._column_keys if self.table.isColumnHidden(self._col_index[k])}
+        app_settings.save_hidden_columns(sanitize_hidden_fields(hidden, PROTECTED_COLUMNS))
+
+    def _show_header_context_menu(self, pos) -> None:
+        hidden = {k for k in self._column_keys if self.table.isColumnHidden(self._col_index[k])}
+        show_column_header_context_menu(
+            self, self.table, pos,
+            column_order=self._column_keys,
+            label_lookup=_COLUMN_LABELS,
+            protected_columns=PROTECTED_COLUMNS,
+            hidden_fields=hidden,
+            is_visible=lambda key, hidden_set: is_column_visible(key, hidden_set, PROTECTED_COLUMNS),
+            on_toggle=self._on_column_visibility_toggled,
+            open_column_settings_dialog=self.open_column_settings_dialog,
+        )
+
+    def open_column_settings_dialog(self) -> None:
+        all_columns = [(key, _COLUMN_LABELS[key]) for key in self._column_keys]
+        hidden = {k for k in self._column_keys if self.table.isColumnHidden(self._col_index[k])}
+        dialog = ColumnSettingsDialog(all_columns, hidden, PROTECTED_COLUMNS, self)
+        dialog.exec()
+        new_hidden = dialog.hidden_fields()
+        for key in self._column_keys:
+            self.table.setColumnHidden(self._col_index[key], key in new_hidden)
+        app_settings.save_hidden_columns(new_hidden)
+
+    def _show_table_context_menu(self, pos) -> None:
+        # Selection-fix, and the generic Open Containing Folder/Copy
+        # Path actions, are handled by the shared helper.
+        show_table_context_menu(
+            self, self.table, pos,
+            get_selected_items=self._target_books,
+            get_path=lambda book: book.path,
+        )
 
     # ------------------------------------------------------------------
     # Loading files
@@ -247,16 +376,16 @@ class MainWindow(QMainWindow):
         status = book.load_error or ("Modified" if book.dirty else "OK")
         if book.page_count_mismatch and not book.load_error:
             status = "Page count mismatch"
-        values = [
-            os.path.basename(book.path),
-            book.metadata.title,
-            book.metadata.series,
-            book.metadata.number,
-            str(book.actual_page_count),
-            status,
-        ]
-        for col, value in enumerate(values):
-            self.table.setItem(row, col, QTableWidgetItem(value))
+        values_by_key = {
+            "filename": os.path.basename(book.path),
+            "title": book.metadata.title,
+            "series": book.metadata.series,
+            "number": book.metadata.number,
+            "pages": str(book.actual_page_count),
+            "status": status,
+        }
+        for key, value in values_by_key.items():
+            self.table.setItem(row, self._col_index[key], QTableWidgetItem(value))
 
     # ------------------------------------------------------------------
     # Selection / editing
@@ -402,6 +531,94 @@ class MainWindow(QMainWindow):
         self._update_status()
 
     # ------------------------------------------------------------------
+    # Rename / Export by pattern, and the reverse: Parse Filename
+    # ------------------------------------------------------------------
+
+    def open_rename_dialog(self) -> None:
+        self._commit_current_edits()
+        target_books = self._target_books()
+        if not target_books:
+            QMessageBox.information(self, "No Files", "Load some files first (or select the ones to rename).")
+            return
+
+        def get_values(book: CbzBook) -> dict[str, str]:
+            return {key: getattr(book.metadata, key, "") for key, _ in FILENAME_PLACEHOLDERS}
+
+        dialog = RenamePatternDialog(
+            target_books, FILENAME_PLACEHOLDERS, get_values, lambda book: book.path,
+            pattern_history=app_settings.load_pattern_history(),
+            default_pattern=DEFAULT_RENAME_PATTERN,
+            title="Rename / Export by Metadata Pattern",
+            item_noun="file",
+            zero_pad_field="number",
+            parent=self,
+        )
+        if dialog.exec() != dialog.DialogCode.Accepted:
+            return
+
+        app_settings.save_pattern_used(dialog.pattern_edit.text())
+        export_mode = dialog.is_export_mode()
+        errors: list[str] = []
+        for book, old_path, new_path in dialog.planned_renames():
+            try:
+                if export_mode:
+                    shutil.copy2(old_path, new_path)
+                else:
+                    os.rename(old_path, new_path)
+                    book.path = new_path
+            except OSError as exc:
+                errors.append(f"{os.path.basename(old_path)}: {exc}")
+
+        for book in target_books:
+            self._refresh_table_row(self.books.index(book), book)
+        if errors:
+            from redactor_common.core.error_summary import summarize_errors
+            QMessageBox.warning(self, "Some Files Failed", summarize_errors(errors))
+        self._update_status()
+
+    def open_parse_filename_dialog(self) -> None:
+        self._commit_current_edits()
+        target_books = self._target_books()
+        if not target_books:
+            QMessageBox.information(self, "No Files", "Load some files first (or select the ones to parse).")
+            return
+
+        dialog = ParseFilenameDialog(
+            target_books, FILENAME_PLACEHOLDERS, lambda book: book.path,
+            pattern_history=app_settings.load_pattern_history(),
+            default_pattern=DEFAULT_RENAME_PATTERN,
+            valid_field_keys={key for key, _ in FILENAME_PLACEHOLDERS},
+            numeric_fields=NUMERIC_FILENAME_FIELDS,
+            strip_leading_zeros_fields={"number"},
+            title="Parse Filename → Metadata",
+            item_noun="file",
+            parent=self,
+        )
+        if dialog.exec() != dialog.DialogCode.Accepted:
+            return
+
+        app_settings.save_pattern_used(dialog.pattern_edit.text())
+        changes = dialog.accepted_changes()  # index into target_books -> {field: value}
+        if not changes:
+            return
+
+        changes = self._resolve_overwrite_conflicts(target_books, changes)
+        if changes is None:
+            return
+
+        for index, fields in changes.items():
+            book = target_books[index]
+            for attr, value in fields.items():
+                setattr(book.metadata, attr, value)
+            book.dirty = True
+            row = self.books.index(book)
+            self._refresh_table_row(row, book)
+            if self._selected_rows == [row]:
+                page_count_text = f"{book.actual_page_count} page(s)"
+                self.panel.load_metadata(book.metadata, book.read_first_page_bytes(), page_count_text)
+        self._update_status()
+
+    # ------------------------------------------------------------------
     # Import
     # ------------------------------------------------------------------
 
@@ -482,8 +699,8 @@ class MainWindow(QMainWindow):
         """Checks whether applying `metadata_changes` would overwrite
         any field that already has a non-blank, different value, and
         if so asks once how to proceed -- applies uniformly no matter
-        which lookup source produced the changes, since every dialog
-        funnels through this same method (see _run_lookup_dialog()).
+        which path produced the changes (a lookup, bulk edit, or Parse
+        Filename all funnel through this same method).
 
         Returns the changes to actually apply (all of them, or only
         the ones that don't clobber existing data), or None if the
@@ -507,7 +724,7 @@ class MainWindow(QMainWindow):
         box.setIcon(QMessageBox.Icon.Warning)
         box.setWindowTitle("Existing Metadata Found")
         box.setText(
-            f"{len(conflicts)} field(s) already have a value that this lookup would "
+            f"{len(conflicts)} field(s) already have a value that this would "
             f"overwrite:\n\n{preview}\n\nHow do you want to proceed?"
         )
         overwrite_btn = box.addButton("Overwrite All", QMessageBox.ButtonRole.AcceptRole)
@@ -541,8 +758,6 @@ class MainWindow(QMainWindow):
         self._run_lookup_dialog(GcdLookupDialog)
 
     def change_comicvine_api_key(self) -> None:
-        from PyQt6.QtWidgets import QInputDialog, QLineEdit
-
         current = app_settings.load_comicvine_api_key()
         text, ok = QInputDialog.getText(
             self,
@@ -553,6 +768,60 @@ class MainWindow(QMainWindow):
         )
         if ok:
             app_settings.save_comicvine_api_key(text)
+
+    # ------------------------------------------------------------------
+    # Settings menu: Genres / Languages
+    # ------------------------------------------------------------------
+
+    def open_genre_settings_dialog(self) -> None:
+        def load_defaults_fn() -> list[tuple[str, str]]:
+            return [(g, g) for g in app_settings.load_visible_default_genres()]
+
+        def load_custom_fn() -> list[tuple[str, str]]:
+            return [(g, g) for g in app_settings.load_custom_genres()]
+
+        def add_dialog_fn(parent_widget) -> None:
+            text, ok = QInputDialog.getText(parent_widget, "Add Genre", "New genre name:")
+            if ok and text.strip():
+                app_settings.add_custom_genre(text.strip())
+
+        dialog = ManageListDialog(
+            "Add/Remove Genres",
+            load_defaults_fn, load_custom_fn, add_dialog_fn,
+            remove_custom_fn=app_settings.remove_custom_genre,
+            hide_default_fn=app_settings.hide_default_genre,
+            restore_defaults_fn=app_settings.restore_default_genres,
+            parent=self,
+        )
+        dialog.exec()
+
+    def open_language_settings_dialog(self) -> None:
+        def load_defaults_fn() -> list[tuple[str, str]]:
+            return [(code, f"{name} ({code})") for code, name in app_settings.load_visible_default_languages()]
+
+        def load_custom_fn() -> list[tuple[str, str]]:
+            return [(code, f"{name} ({code})") for code, name in app_settings.load_custom_languages()]
+
+        def add_dialog_fn(parent_widget) -> None:
+            code, ok = QInputDialog.getText(
+                parent_widget, "Add Custom Language", 'Language code (ISO 639-1, e.g. "pt" for Portuguese):'
+            )
+            code = code.strip()
+            if not (ok and code):
+                return
+            name, ok = QInputDialog.getText(parent_widget, "Add Custom Language", "Display name for this language:")
+            if ok and name.strip():
+                app_settings.add_custom_language(code, name.strip())
+
+        dialog = ManageListDialog(
+            "Add/Remove Languages",
+            load_defaults_fn, load_custom_fn, add_dialog_fn,
+            remove_custom_fn=app_settings.remove_custom_language,
+            hide_default_fn=app_settings.hide_default_language,
+            restore_defaults_fn=app_settings.restore_default_languages,
+            parent=self,
+        )
+        dialog.exec()
 
     # ------------------------------------------------------------------
     # Help menu
@@ -600,4 +869,13 @@ class MainWindow(QMainWindow):
             if reply != QMessageBox.StandardButton.Yes:
                 event.ignore()
                 return
+
+        # Column widths are only persisted here (not live on every
+        # resize-drag tick) -- order and visibility persist immediately
+        # since a header-menu toggle should be reflected right away,
+        # but a width is only worth writing once, when it's settled.
+        header = self.table.horizontalHeader()
+        widths = {key: header.sectionSize(self._col_index[key]) for key in self._column_keys}
+        app_settings.save_column_widths(widths)
+
         event.accept()

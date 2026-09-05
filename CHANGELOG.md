@@ -1,5 +1,41 @@
 # Changelog
 
+## 2026-09-05#08 -- Column management, Rename/Parse Filename, Genre/Language lists, cover layout fix
+
+The rest of the shared Redactor-family toolkit this project had
+skipped in its initial build -- bumped redactor_common pin to
+2026-09-05-05 (adds `manage_list_dialog.py`, promoted from epub):
+
+- **Columns**: drag a header to reorder, right-click for a show/hide
+  checklist or "Add/Remove Columns...". Order/visibility/widths all
+  persist across restarts, keyed by column name (not index) via
+  `redactor_common.core.table_settings`. Right-click a row for "Open
+  Containing Folder"/"Copy Path".
+- **Rename / Export Files...** (File, F2) and **Parse Filename...**
+  (Import, F3): the mp3tag-style `%field%` pattern engine
+  (`redactor_common.gui.rename_pattern_dialog`/`parse_filename_dialog`),
+  wired to a curated subset of ComicInfo fields (series, number, title,
+  volume, year, publisher, writer). Parse Filename's results go through
+  the same overwrite-conflict protection as a lookup. Both share one
+  pattern history.
+- **Genre/Language quick-pick + management**: a "+" button next to the
+  Genre and Language (ISO) fields opens a curated default list (new
+  `core/comic_genres.py`/`core/comic_languages.py`) plus your own
+  custom entries; Settings > Add/Remove Genres.../Add/Remove
+  Languages... manages them (hide a default without deleting it,
+  restore all hidden defaults, add/remove custom ones) via the newly-
+  promoted `ManageListDialog`.
+- **Cover layout fixed**: was above the field form in a fixed-height
+  box; now below it, in a resizable splitter -- matching epubredactor's
+  own "Bulk Edit Tags above, Cover Image below, draggable divider
+  between them" convention, which this had inverted for no reason.
+
+All of the above -- table_settings, rename/parse-filename, and the
+genre/language management pattern -- were already fully generic pieces
+of `redactor_common` (or, for `manage_list_dialog.py`, a genuinely
+generic piece of epub that had just never been promoted) that this
+project's first build simply hadn't wired up yet.
+
 ## 2026-09-05#07 -- Toolbar, multi-select bulk editing, lookup query correction
 
 Four real usability gaps reported by the user in one go:

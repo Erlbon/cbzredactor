@@ -27,6 +27,23 @@ rather than requiring it up front.
 - A toolbar (Load Files / Save / Save All Changed) sits above the
   table for one-click access to the most common actions, alongside the
   same actions in the File/Operations menus.
+- **Columns are drag-to-reorder** (grab a header) **and hideable** (right-
+  click a header, or Settings > Add/Remove Columns...) -- both the
+  order and which columns are visible persist across restarts, keyed
+  by column name so a future column added in code can't silently
+  scramble a saved preference. Right-clicking a row offers "Open
+  Containing Folder"/"Copy Path" for the selection.
+- **Rename / Export Files...** (File menu, F2) renders a `%series%
+  %number% - %title%`-style pattern (any ComicInfo field as a
+  placeholder) into a new filename for every selected file, previewed
+  before you commit -- rename in place or export renamed copies to a
+  folder, originals untouched either way.
+- **Parse Filename...** (Import menu, F3) is the reverse: extracts
+  metadata FROM a filename using the same pattern syntax, auto-
+  detecting which of your past patterns fits the current batch best.
+  Routed through the same overwrite-conflict protection as a lookup
+  (see below) -- it won't silently clobber a field you've already set.
+  Both dialogs share one pattern history.
 - Edit the full set of common ComicInfo.xml fields, grouped as
   Identity/Sequence, Story, Credits, Publication, Classification, and
   free-text Summary/Notes/Review. Selecting more than one file switches
@@ -36,7 +53,16 @@ rather than requiring it up front.
   blank is left untouched on every file, not cleared.
 - Sidebar shows the first page (by filename sort order) as a cover
   thumbnail (single-file selection only -- bulk mode hides it, since
-  there's no one "the" cover across different files).
+  there's no one "the" cover across different files) -- **below the
+  field form, in a resizable splitter**, matching epubredactor's own
+  "Bulk Edit Tags" above / "Cover Image" below convention. Drag the
+  divider to give the cover more (or less) room.
+- Genre and Language (ISO) each have a "+" quick-pick button next to
+  the field -- a curated default list plus your own custom entries,
+  managed via Settings > Add/Remove Genres.../Add/Remove Languages...
+  (built on the same hideable-defaults-plus-custom-list pattern
+  epubredactor uses). Picking a genre adds it alongside whatever's
+  already typed; picking a language sets the ISO code.
 - `PageCount` is always recomputed from the archive's actual image
   count at save time -- never hand-edited -- with a mismatch against
   whatever was previously stored flagged in the file list beforehand.
