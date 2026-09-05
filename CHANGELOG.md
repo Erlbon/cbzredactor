@@ -1,5 +1,29 @@
 # Changelog
 
+## 2026-09-05#05 -- Migrate lookups onto redactor_common's shared template
+
+The Comic Vine and GCD lookups had independently arrived at the same
+shape epubredactor's own Google Books/Calibre/Open Library lookups
+already used -- promoted the shared parts into redactor_common
+(pinned to tag `2026-09-05-02`) rather than letting a third/fourth/
+fifth copy of the same boilerplate accumulate:
+
+- `core/comicvine_lookup.py` and `core/gcd_lookup.py` now build their
+  network calls on `redactor_common.core.lookup_client`'s
+  `fetch_json()`/`fetch_bytes()`/`make_default_fetch()` instead of
+  each keeping its own copy of the HTTPError/URLError/JSON-decode
+  translation (one copy for API calls, a second for cover-image
+  downloads). No behavior change -- all existing tests pass unchanged.
+- `gui/comicvine_lookup_dialog.py` and `gui/gcd_lookup_dialog.py` are
+  now thin `redactor_common.gui.lookup_dialog.LookupDialogBase`
+  subclasses supplying only `search_one()` -- the shared table/
+  progress-dialog/checkbox/Apply plumbing moved out entirely. Combined
+  line count for both dialogs dropped from ~460 to ~195.
+- epubredactor's three lookup dialogs are the same shape this was
+  generalized from but are NOT migrated -- deliberately scoped to
+  cbzredactor only, to avoid regression risk in a repo developed
+  elsewhere until this usage proves the abstraction out.
+
 ## 2026-09-05#04 -- Warn before a lookup overwrites existing metadata
 
 - Applying any lookup's results (Comic Vine, GCD, and any future

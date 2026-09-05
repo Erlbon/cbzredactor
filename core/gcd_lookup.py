@@ -42,23 +42,23 @@ real responses rather than trusted from documentation alone:
       this is a best-effort cleanup of free text, not a structured
       field, same caveat as Comic Vine's role-string parsing.
 
-Same injectable-`fetch` design as core/comicvine_lookup.py, for the
-same reason: unit-tested against canned responses shaped exactly like
-the real API, independent of live network access.
+Network mechanics (injectable `fetch`, User-Agent, HTTPError/URLError/
+JSON-decode-error translation) come from redactor_common's
+core/lookup_client.py, shared with core/comicvine_lookup.py -- unit-
+tested against canned responses shaped exactly like the real API,
+independent of live network access.
 """
 
 from __future__ import annotations
 
 import json
 import re
-import socket
-import urllib.error
-import urllib.request
 from dataclasses import dataclass
 from urllib.parse import quote
 
+from redactor_common.core.lookup_client import fetch_bytes, fetch_json, make_default_fetch
+
 API_BASE = "https://www.comics.org/api"
-DEFAULT_TIMEOUT = 8.0
 USER_AGENT = "cbzredactor (+https://github.com/Erlbon/cbzredactor)"
 
 # Only these story types count as the issue's actual attributable
@@ -134,26 +134,12 @@ class GcdIssueDetails:
         return {k: v for k, v in raw.items() if v}
 
 
-def _default_fetch(url: str, timeout: float = DEFAULT_TIMEOUT) -> bytes:
-    request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
-    with urllib.request.urlopen(request, timeout=timeout) as response:
-        return response.read()
+_default_fetch = make_default_fetch(USER_AGENT)
+_SOURCE_NAME = "the Grand Comics Database"
 
 
 def _get_json(url: str, fetch) -> dict:
-    try:
-        raw = fetch(url)
-    except urllib.error.HTTPError as exc:
-        if exc.code == 404:
-            raise GcdLookupError("No matching issue found on the Grand Comics Database.") from exc
-        raise GcdLookupError(f"GCD returned an error (HTTP {exc.code}): {exc.reason}") from exc
-    except (urllib.error.URLError, socket.timeout, TimeoutError, OSError) as exc:
-        raise GcdLookupError(f"Could not reach the Grand Comics Database: {exc}") from exc
-
-    try:
-        return json.loads(raw)
-    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
-        raise GcdLookupError("Received an unreadable response from the Grand Comics Database.") from exc
+    return fetch_json(url, fetch, error_cls=GcdLookupError, source_name=_SOURCE_NAME)
 
 
 _SERIES_YEAR_SUFFIX_RE = re.compile(r"\s*\(\d{4}(?:-\d{4})?\s*series\)\s*$")
@@ -245,19 +231,9 @@ def search_gcd(series: str, number: str, fetch=None, max_results: int = 8) -> li
 
     all_candidates: list[GcdCandidate] = []
     for _ in range(MAX_SEARCH_PAGES):
-        try:
-            raw = fetch(url)
-        except urllib.error.HTTPError as exc:
-            if exc.code == 404:
-                break
-            raise GcdLookupError(f"GCD returned an error (HTTP {exc.code}): {exc.reason}") from exc
-        except (urllib.error.URLError, socket.timeout, TimeoutError, OSError) as exc:
-            raise GcdLookupError(f"Could not reach the Grand Comics Database: {exc}") from exc
-
-        try:
-            data = json.loads(raw)
-        except (json.JSONDecodeError, UnicodeDecodeError) as exc:
-            raise GcdLookupError("Received an unreadable response from the Grand Comics Database.") from exc
+        data = fetch_json(url, fetch, error_cls=GcdLookupError, source_name=_SOURCE_NAME, ignore_404=True)
+        if data is None:
+            break  # no such series/number at all -- not a real error, just nothing to find
 
         page_candidates = _candidates_from_page(data)
         all_candidates.extend(page_candidates)
@@ -385,9 +361,4 @@ def download_cover_image(details: GcdIssueDetails, fetch=None) -> bytes:
     if not details.cover_image_url:
         raise GcdLookupError("This issue has no cover image available.")
     fetch = fetch or _default_fetch
-    try:
-        return fetch(details.cover_image_url)
-    except urllib.error.HTTPError as exc:
-        raise GcdLookupError(f"Could not download cover image (HTTP {exc.code}).") from exc
-    except (urllib.error.URLError, socket.timeout, TimeoutError, OSError) as exc:
-        raise GcdLookupError(f"Could not download cover image: {exc}") from exc
+    return fetch_bytes(details.cover_image_url, fetch, error_cls=GcdLookupError, what="cover image")

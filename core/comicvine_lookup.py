@@ -28,24 +28,24 @@ than this metadata lookup. The cover thumbnail is fetched and shown in
 the lookup dialog purely so the user can visually confirm they picked
 the right issue before applying its text fields.
 
-Same injectable-`fetch` design as core/google_books_lookup.py in the
-sibling EPUB tool, for the same reason: JSON-parsing logic is unit-
-tested with canned responses, independent of real network access or a
-real API key.
+Network mechanics (injectable `fetch`, User-Agent, HTTPError/URLError/
+JSON-decode-error translation) come from redactor_common's
+core/lookup_client.py, shared with core/gcd_lookup.py and with the
+sibling EPUB tool's own Google Books/Calibre/Open Library lookups.
+This module only adds what's actually Comic Vine-specific: URL shapes,
+the status_code convention, and field parsing.
 """
 
 from __future__ import annotations
 
 import json
 import re
-import socket
-import urllib.error
-import urllib.request
 from dataclasses import dataclass
 from urllib.parse import quote, urlencode
 
+from redactor_common.core.lookup_client import fetch_bytes, fetch_json, make_default_fetch
+
 API_BASE = "https://comicvine.gamespot.com/api"
-DEFAULT_TIMEOUT = 8.0
 # Comic Vine rejects requests with a generic/default User-Agent (e.g.
 # Python's own "Python-urllib/3.x") -- a descriptive one is required,
 # not just polite.
@@ -169,10 +169,7 @@ class ComicVineIssueDetails:
         return {k: v for k, v in raw.items() if v}
 
 
-def _default_fetch(url: str, timeout: float = DEFAULT_TIMEOUT) -> bytes:
-    request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
-    with urllib.request.urlopen(request, timeout=timeout) as response:
-        return response.read()
+_default_fetch = make_default_fetch(USER_AGENT)
 
 
 def _split_cover_date(cover_date: str) -> tuple[str, str, str]:
@@ -183,32 +180,21 @@ def _split_cover_date(cover_date: str) -> tuple[str, str, str]:
     return year, str(int(month)), str(int(day))
 
 
-def _get_json(url: str, fetch) -> dict:
-    """Runs one GET request and returns its parsed JSON body, raising
-    ComicVineLookupError for a network failure, an unparseable
-    response, or an application-level Comic Vine error (status_code
-    != 1, e.g. an invalid API key or an unrecognized issue id)."""
-    try:
-        raw = fetch(url)
-    except urllib.error.HTTPError as exc:
-        raise ComicVineLookupError(
-            f"Comic Vine returned an error (HTTP {exc.code}): {exc.reason}"
-        ) from exc
-    except (urllib.error.URLError, socket.timeout, TimeoutError, OSError) as exc:
-        raise ComicVineLookupError(
-            f"Could not reach Comic Vine (check your internet connection): {exc}"
-        ) from exc
-
-    try:
-        data = json.loads(raw)
-    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
-        raise ComicVineLookupError("Received an unreadable response from Comic Vine.") from exc
-
+def _check_status(data: dict) -> None:
+    """Comic Vine's application-level status_code (status_code != 1,
+    e.g. an invalid API key or an unrecognized issue id) rides inside
+    an HTTP 200 body -- lookup_client.fetch_json() only handles the
+    HTTP/network/JSON-decode layer, so this is checked separately,
+    right after every fetch_json() call this module makes."""
     status_code = data.get("status_code")
     if status_code != STATUS_OK:
         message = STATUS_MESSAGES.get(status_code, data.get("error", "Unknown error"))
         raise ComicVineLookupError(f"Comic Vine error: {message}")
 
+
+def _get_json(url: str, fetch) -> dict:
+    data = fetch_json(url, fetch, error_cls=ComicVineLookupError, source_name="Comic Vine")
+    _check_status(data)
     return data
 
 
@@ -258,18 +244,18 @@ def _strip_html(text: str) -> str:
     return _TAG_RE.sub("", text).strip()
 
 
+def _candidates_from_data(data: dict) -> list[ComicVineCandidate]:
+    _check_status(data)
+    return [_candidate_from_result(result) for result in data.get("results", []) or []]
+
+
 def parse_search_response(raw: bytes) -> list[ComicVineCandidate]:
     try:
         data = json.loads(raw)
     except (json.JSONDecodeError, UnicodeDecodeError) as exc:
         raise ComicVineLookupError("Received an unreadable response from Comic Vine.") from exc
 
-    status_code = data.get("status_code")
-    if status_code != STATUS_OK:
-        message = STATUS_MESSAGES.get(status_code, data.get("error", "Unknown error"))
-        raise ComicVineLookupError(f"Comic Vine error: {message}")
-
-    return [_candidate_from_result(result) for result in data.get("results", []) or []]
+    return _candidates_from_data(data)
 
 
 def search_comicvine(
@@ -291,17 +277,8 @@ def search_comicvine(
         )
     fetch = fetch or _default_fetch
     url = build_search_url(api_key, series, number, max_results)
-    try:
-        raw = fetch(url)
-    except urllib.error.HTTPError as exc:
-        raise ComicVineLookupError(
-            f"Comic Vine returned an error (HTTP {exc.code}): {exc.reason}"
-        ) from exc
-    except (urllib.error.URLError, socket.timeout, TimeoutError, OSError) as exc:
-        raise ComicVineLookupError(
-            f"Could not reach Comic Vine (check your internet connection): {exc}"
-        ) from exc
-    return parse_search_response(raw)
+    data = fetch_json(url, fetch, error_cls=ComicVineLookupError, source_name="Comic Vine")
+    return _candidates_from_data(data)
 
 
 def _credits_by_role(person_credits: list) -> dict[str, list[str]]:
@@ -396,9 +373,4 @@ def download_cover_image(candidate: ComicVineCandidate, fetch=None) -> bytes:
     if not candidate.image_url:
         raise ComicVineLookupError("This result has no cover image available.")
     fetch = fetch or _default_fetch
-    try:
-        return fetch(candidate.image_url)
-    except urllib.error.HTTPError as exc:
-        raise ComicVineLookupError(f"Could not download cover image (HTTP {exc.code}).") from exc
-    except (urllib.error.URLError, socket.timeout, TimeoutError, OSError) as exc:
-        raise ComicVineLookupError(f"Could not download cover image: {exc}") from exc
+    return fetch_bytes(candidate.image_url, fetch, error_cls=ComicVineLookupError, what="cover image")
