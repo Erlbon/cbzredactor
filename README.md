@@ -42,9 +42,18 @@ rather than requiring it up front.
   and untick anything before Apply, same pattern as epubredactor's
   Google Books/Calibre/Open Library lookups. Needs a free Comic Vine
   API key (Settings > Comic Vine API Key...); the cover image shown is
-  for visual confirmation only and is never written into the archive
-  (see "Other metadata sources" below for why other providers aren't
-  wired up yet).
+  for visual confirmation only and is never written into the archive.
+- `Import > Look Up via Grand Comics Database...` -- same Series +
+  Number search and review-then-Apply flow, against
+  [comics.org](https://www.comics.org/)'s open API (no key needed).
+  Best for older/obscure/international issues Comic Vine doesn't have.
+  GCD's search needs both Series AND Number (no free-text search like
+  Comic Vine), and its results come back alphabetically rather than by
+  relevance -- for a widely-reused title (e.g. searching "Watchmen"
+  turns up dozens of "Before Watchmen: ..." spin-offs), this tool
+  follows pagination and promotes an exact series-name match to the
+  top automatically, but an unusual or very generic series name may
+  still need reviewing the candidate list carefully.
 
 ### Deferred (not in this version)
 
@@ -53,14 +62,12 @@ rather than requiring it up front.
   already has `<Pages>` data, it's preserved untouched through
   load/edit/save -- just not editable yet.
 - **Other metadata sources**: [Metron](https://metron.cloud/) (whose
-  output maps almost 1:1 onto ComicInfo.xml fields), the
-  [Grand Comics Database](https://www.comics.org/) (best for
-  Golden/Silver Age issues Comic Vine misses), and
+  output maps almost 1:1 onto ComicInfo.xml fields) and
   [MangaDex](https://api.mangadex.org/) (for the `Manga` field) were
-  all scoped as follow-up sources alongside Comic Vine -- only Comic
-  Vine is implemented so far. Each would plug into the same
+  scoped as follow-up sources alongside Comic Vine and GCD -- not
+  implemented yet. Each would plug into the same
   `core/<source>_lookup.py` + `gui/<source>_lookup_dialog.py` shape as
-  `comicvine_lookup.py`.
+  `comicvine_lookup.py`/`gcd_lookup.py`.
 
 ## CBR support
 

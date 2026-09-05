@@ -1,5 +1,26 @@
 # Changelog
 
+## 2026-09-05#03 -- Grand Comics Database lookup
+
+- `Import > Look Up via Grand Comics Database...`: same review-then-
+  Apply flow as Comic Vine, against comics.org's open API (no API key
+  needed). Aggregates credits/genre/characters from an issue's "comic
+  story" entries only (covers, text stories, and credits pages are
+  real GCD data but not what a ComicInfo.xml field is meant to hold),
+  strips GCD's own "(credited)"/"(uncredited)"/translation annotations
+  down to bare names, and reads publisher directly from the issue
+  response (no second request needed, unlike Comic Vine).
+- GCD's search results come back alphabetically, not by relevance --
+  confirmed live that searching "Watchmen" #1 buries the real 1986
+  series behind dozens of "Before Watchmen: ..." spin-offs purely
+  because of sort order. search_gcd() now follows pagination (capped)
+  and promotes an exact series-name match to the top when found on any
+  page, rather than trusting page 1 alone.
+- Refactored the shared "guess series/number from a book's metadata or
+  filename" logic out of the Comic Vine dialog into
+  core/filename_guess.py so both lookup dialogs (and any future one)
+  use the same tested implementation instead of two copies.
+
 ## 2026-09-05#02 -- Comic Vine lookup, rebrand, app icon
 
 - Rebranded as "The ƆBZ Redactor" (Ɔ = LATIN CAPITAL LETTER OPEN O, a

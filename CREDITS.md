@@ -8,5 +8,6 @@ Third-party libraries and references this project depends on or draws from:
 - [PyInstaller](https://pyinstaller.org/) -- standalone Windows .exe packaging
 - [The Anansi Project](https://anansi-project.github.io/docs/comicinfo/intro) -- ComicInfo.xml schema documentation
 - [Comic Vine](https://comicvine.gamespot.com/api/) -- metadata source for Import > Look Up via Comic Vine
+- [Grand Comics Database](https://www.comics.org/) -- metadata source for Import > Look Up via Grand Comics Database
 - [ComicTagger](https://github.com/comictagger/comictagger) -- open-source prior art this lookup feature's design follows
 - [redactor_common](https://github.com/Erlbon/redactor_common) -- shared UI/core code across the Redactor family

@@ -37,6 +37,7 @@ from core.cbz_file import CbzBook, CbzError
 from core.version import APP_NAME, APP_REPO_URL, APP_VERSION, RELEASE_LABEL
 from gui import app_settings
 from gui.comicvine_lookup_dialog import ComicVineLookupDialog
+from gui.gcd_lookup_dialog import GcdLookupDialog
 from gui.metadata_panel import ComicInfoPanel
 
 COLUMNS = ["Filename", "Title", "Series", "Number", "Pages", "Status"]
@@ -109,6 +110,7 @@ class MainWindow(QMainWindow):
                 MenuAction("convert_cbr", "Convert &CBR to CBZ...", self.convert_cbr_dialog),
                 Separator(),
                 MenuAction("comicvine_lookup", "Look Up via Comic &Vine...", self.open_comicvine_lookup_dialog),
+                MenuAction("gcd_lookup", "Look Up via &Grand Comics Database...", self.open_gcd_lookup_dialog),
             ],
             "Operations": [
                 MenuAction("save_all", "Save &All Changed", self.save_all_changed, shortcut="Ctrl+Shift+A"),
@@ -322,15 +324,21 @@ class MainWindow(QMainWindow):
             return [self.books[self._current_row]]
         return list(self.books)
 
-    def open_comicvine_lookup_dialog(self) -> None:
+    def _run_lookup_dialog(self, dialog_class) -> None:
+        """Shared flow for every online lookup dialog (Comic Vine, GCD,
+        ...): they all take (target_books, parent) and expose the same
+        accepted_metadata() -> {index: {field: value}} shape (see
+        gui/comicvine_lookup_dialog.py / gui/gcd_lookup_dialog.py), so
+        opening one, applying its results, and refreshing the affected
+        rows is identical regardless of which source it is."""
         self._commit_current_edits()
         target_books = self._target_books()
         if not target_books:
             QMessageBox.information(self, "No Files", "Load some files first.")
             return
 
-        dialog = ComicVineLookupDialog(target_books, self)
-        if dialog.exec() != ComicVineLookupDialog.DialogCode.Accepted:
+        dialog = dialog_class(target_books, self)
+        if dialog.exec() != dialog_class.DialogCode.Accepted:
             return
 
         metadata_changes = dialog.accepted_metadata()  # index into target_books -> {field: value}
@@ -348,6 +356,12 @@ class MainWindow(QMainWindow):
                 page_count_text = f"{book.actual_page_count} page(s)"
                 self.panel.load_metadata(book.metadata, book.read_first_page_bytes(), page_count_text)
         self._update_status()
+
+    def open_comicvine_lookup_dialog(self) -> None:
+        self._run_lookup_dialog(ComicVineLookupDialog)
+
+    def open_gcd_lookup_dialog(self) -> None:
+        self._run_lookup_dialog(GcdLookupDialog)
 
     def change_comicvine_api_key(self) -> None:
         from PyQt6.QtWidgets import QInputDialog, QLineEdit
