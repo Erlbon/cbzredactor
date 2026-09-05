@@ -1,5 +1,42 @@
 # Changelog
 
+## 2026-09-06#01 -- Undo, Search/Replace, Case Conversion, list management, correct toolbar
+
+Still finishing the walk through redactor_common's full toolkit from
+the previous pass -- Search/Replace, Case Conversion, and Undo were
+still missing, and the toolbar didn't match the family's actual shape.
+Bumped redactor_common pin to 2026-09-06-01 (adds `core/undo.py`,
+generalized from epub's original `EpubBook`-specific version).
+
+- **Undo** (Ctrl+Z / toolbar / Operations menu): a bounded 5-deep
+  in-memory undo stack covering bulk edit, lookup-apply, Parse
+  Filename, Search/Replace, and Case Conversion. Excludes physical
+  file operations by design (see redactor_common's own module
+  docstring for why).
+- **Search/Replace...** and **Case Conversion...** (Operations menu):
+  built on `redactor_common.gui.search_replace_dialog`/
+  `case_conversion_dialog`, working across the full ComicInfo field
+  set (Search/Replace can also target the filename itself, performing
+  a real on-disk rename on accept).
+- **Remove Files** (Delete), **Refresh List** (F5/Ctrl+R), **Clear
+  List** (File menu): list-management actions that were entirely
+  missing. Found and fixed a real bug while building `remove_selected`:
+  `CbzBook` is a plain `@dataclass` (value-based `__eq__`, therefore
+  unhashable) -- an initial set-membership-based removal crashed
+  outright with a real book, and would have silently removed multiple
+  identical-looking books with a less lucky test case. Fixed to
+  exclude by row index instead; regression-tested.
+- **Toolbar corrected** to match epubredactor's actual shape: Load
+  Files, Load Folder, Save, Apply (bulk edit -- now a shared QAction
+  with the Operations menu, dynamic "Apply to N Selected File(s)"
+  label, not a button embedded in the panel), Undo, then a Panel
+  toggle and table-font zoom control (`redactor_common.gui.
+  zoom_toolbar.TableZoomController`) pushed to the far right.
+
+7 new tests cover the unhashable-book fix, clear-list confirmation
+(prompts when dirty, skips the prompt when nothing is, respects both
+Yes/No), and undo restoring metadata + the dirty flag together.
+
 ## 2026-09-05#08 -- Column management, Rename/Parse Filename, Genre/Language lists, cover layout fix
 
 The rest of the shared Redactor-family toolkit this project had

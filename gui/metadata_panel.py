@@ -48,7 +48,6 @@ from PyQt6.QtWidgets import (
     QLineEdit,
     QMenu,
     QPlainTextEdit,
-    QPushButton,
     QScrollArea,
     QSplitter,
     QToolButton,
@@ -94,7 +93,6 @@ _QUICK_PICK_ATTRS = {"genre", "language_iso"}
 class ComicInfoPanel(QWidget):
     fieldsChanged = pyqtSignal()
     collapseToggleRequested = pyqtSignal()
-    bulkApplyRequested = pyqtSignal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -117,20 +115,17 @@ class ComicInfoPanel(QWidget):
         outer.addLayout(header)
 
         # Only shown in bulk mode (set_bulk_mode()) -- explains the
-        # "blank means unchanged" convention and gives the explicit
-        # apply action, since silently auto-applying edits to N files
-        # the moment the user clicks away (like single-file editing
-        # does) would be too easy to trigger by accident.
+        # "blank means unchanged" convention. The actual apply action
+        # lives on the toolbar/Operations menu ("Apply to N Selected
+        # Files", MainWindow._apply_bulk_edit), same as epubredactor's
+        # tag_panel -- not a button embedded in this panel, so it's
+        # reachable without scrolling and shares one QAction (enabled
+        # state + dynamic label) between both places.
         self.bulk_info_label = QLabel("")
         self.bulk_info_label.setWordWrap(True)
         self.bulk_info_label.setStyleSheet("color: palette(mid); font-style: italic;")
         self.bulk_info_label.setVisible(False)
         outer.addWidget(self.bulk_info_label)
-
-        self.bulk_apply_btn = QPushButton("")
-        self.bulk_apply_btn.clicked.connect(self.bulkApplyRequested.emit)
-        self.bulk_apply_btn.setVisible(False)
-        outer.addWidget(self.bulk_apply_btn)
 
         self._line_edits: dict[str, QLineEdit] = {}
         scroll = self._build_fields_scroll_area()
@@ -334,19 +329,17 @@ class ComicInfoPanel(QWidget):
         area is shown; MainWindow separately calls load_metadata() for
         that one file). count > 1: bulk mode -- every field is cleared,
         the cover/page-count area (meaningless across different files)
-        is hidden in favor of the bulk-apply controls, and only fields
-        the user actually fills in get applied, to every selected file,
-        when bulkApplyRequested fires."""
+        is hidden, and only fields the user actually fills in get
+        applied, to every selected file, via the toolbar/Operations
+        menu's "Apply to N Selected Files" action."""
         self.bulk_mode = count > 1
         self.cover_box.setVisible(not self.bulk_mode)
         self.bulk_info_label.setVisible(self.bulk_mode)
-        self.bulk_apply_btn.setVisible(self.bulk_mode)
         if self.bulk_mode:
             self.bulk_info_label.setText(
                 f"Editing {count} selected files at once. Leave a field blank to leave it "
                 "unchanged on every file; fill one in to set it on all of them."
             )
-            self.bulk_apply_btn.setText(f"Apply to {count} Selected Files")
             self.load_metadata(ComicInfoMetadata(), None, "")
 
     def bulk_changed_fields(self) -> dict:

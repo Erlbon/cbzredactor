@@ -14,6 +14,7 @@ order and visibility persist across restarts via gui/app_settings.py.
 
 from __future__ import annotations
 
+import copy
 import os
 import shutil
 import sys
@@ -27,14 +28,19 @@ from PyQt6.QtWidgets import (
     QLineEdit,
     QMainWindow,
     QMessageBox,
+    QSizePolicy,
     QSplitter,
     QStatusBar,
     QTableWidget,
     QTableWidgetItem,
+    QWidget,
 )
 
 from redactor_common.core.table_settings import is_column_visible, merge_column_order, sanitize_hidden_fields
+from redactor_common.core.undo import UndoManager
 from redactor_common.gui.about_dialog import AboutDialog, ChangelogDialog, CreditsDialog
+from redactor_common.gui.action_factory import make_action
+from redactor_common.gui.case_conversion_dialog import CaseConversionDialog
 from redactor_common.gui.collapsible_splitter import SplitterPaneCollapser
 from redactor_common.gui.column_menu import show_column_header_context_menu
 from redactor_common.gui.column_settings_dialog import ColumnSettingsDialog
@@ -44,6 +50,8 @@ from redactor_common.gui.menu_builder import MenuAction, Separator, build_menu_b
 from redactor_common.gui.parse_filename_dialog import ParseFilenameDialog
 from redactor_common.gui.progress import run_with_progress
 from redactor_common.gui.rename_pattern_dialog import RenamePatternDialog
+from redactor_common.gui.search_replace_dialog import FILENAME_FIELD_KEY, SearchReplaceDialog
+from redactor_common.gui.zoom_toolbar import TableZoomController
 from redactor_common.core.version import REDACTOR_COMMON_REPO_URL, REDACTOR_COMMON_VERSION
 
 from core.cbr_convert import CbrConversionError, convert_cbr_to_cbz
@@ -146,6 +154,7 @@ class MainWindow(QMainWindow):
 
         self.books: list[CbzBook] = []
         self._selected_rows: list[int] = []
+        self.undo_manager: UndoManager[CbzBook] = UndoManager()
 
         self._column_keys = merge_column_order(app_settings.load_column_order(), _ALL_COLUMN_KEYS)
         self._col_index = {key: i for i, key in enumerate(self._column_keys)}
@@ -170,7 +179,8 @@ class MainWindow(QMainWindow):
         self.panel.set_enabled(False)
         self.panel.fieldsChanged.connect(self._on_fields_changed)
         self.panel.collapseToggleRequested.connect(self._toggle_panel)
-        self.panel.bulkApplyRequested.connect(self._apply_bulk_edit)
+
+        self.zoom = TableZoomController(self.table, parent=self)
 
         self.splitter = QSplitter(Qt.Orientation.Horizontal)
         # Side panel on the left, table on the right -- matches
@@ -204,6 +214,11 @@ class MainWindow(QMainWindow):
                 Separator(),
                 MenuAction("rename_files", "&Rename / Export Files...", self.open_rename_dialog, shortcut="F2"),
                 Separator(),
+                MenuAction("remove_files", "Remo&ve Files", self.remove_selected, shortcut="Delete"),
+                Separator(),
+                MenuAction("refresh_list", "Re&fresh List", self.refresh_list, shortcuts=["F5", "Ctrl+R"]),
+                MenuAction("clear_list", "&Clear List", self.clear_list),
+                Separator(),
                 MenuAction("exit", "E&xit", self.close, shortcut="Ctrl+Q"),
             ],
             "Import": [
@@ -214,7 +229,17 @@ class MainWindow(QMainWindow):
                 MenuAction("gcd_lookup", "Look Up via &Grand Comics Database...", self.open_gcd_lookup_dialog),
             ],
             "Operations": [
+                # Shared with the toolbar (see _build_toolbar) -- one
+                # QAction instance, so its dynamic "Apply to N selected
+                # file(s)" text and enabled state never drift out of
+                # sync between the two places it appears.
+                MenuAction("apply_bulk_edit", "&Apply to 0 Selected File(s)", self._apply_bulk_edit),
+                MenuAction("search_replace", "&Search/Replace...", self.open_search_replace_dialog),
+                MenuAction("case_conversion", "&Case Conversion...", self.open_case_conversion_dialog),
+                Separator(),
                 MenuAction("save_all", "Save &All Changed", self.save_all_changed, shortcut="Ctrl+Shift+A"),
+                Separator(),
+                MenuAction("undo", "&Undo", self.undo_last_action, shortcut="Ctrl+Z"),
             ],
             "Settings": [
                 MenuAction("comicvine_api_key", "Comic Vine API &Key...", self.change_comicvine_api_key),
@@ -230,19 +255,43 @@ class MainWindow(QMainWindow):
             ],
         }
         self.actions_ = build_menu_bar(self, specs)
+        self.actions_["apply_bulk_edit"].setEnabled(False)
+        self.actions_["undo"].setEnabled(False)
 
     def _build_toolbar(self) -> None:
         """Quick-access buttons for the most common actions -- reuses
         the exact QAction objects the menu bar already built (per
         menu_builder.py's own docstring: "actions['save'] is the QAction,
         reusable on a toolbar"), so enabled state/shortcuts stay in sync
-        with the menu automatically rather than needing a second copy."""
+        with the menu automatically rather than needing a second copy.
+        Same shape as epubredactor's own toolbar: the frequent actions
+        on the left, a Panel toggle + zoom control pushed to the far
+        right by an expanding spacer."""
         toolbar = self.addToolBar("Main")
         toolbar.setMovable(False)
+
         toolbar.addAction(self.actions_["load_files"])
+        toolbar.addAction(self.actions_["load_folder"])
         toolbar.addSeparator()
         toolbar.addAction(self.actions_["save"])
-        toolbar.addAction(self.actions_["save_all"])
+        toolbar.addSeparator()
+        toolbar.addAction(self.actions_["apply_bulk_edit"])
+        toolbar.addSeparator()
+        toolbar.addAction(self.actions_["undo"])
+        toolbar.addSeparator()
+
+        spacer = QWidget()
+        spacer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        toolbar.addWidget(spacer)
+
+        toggle_panel_act = make_action(self, "Panel", self._toggle_panel)
+        toggle_panel_act.setToolTip("Minimize or restore the metadata panel")
+        toolbar.addAction(toggle_panel_act)
+        toolbar.addSeparator()
+
+        toolbar.addAction(self.zoom.zoom_out_action)
+        toolbar.addWidget(self.zoom.label)
+        toolbar.addAction(self.zoom.zoom_in_action)
 
     # ------------------------------------------------------------------
     # Columns: order/visibility/widths, persisted by field key
@@ -409,6 +458,12 @@ class MainWindow(QMainWindow):
             self.panel.load_metadata(book.metadata, book.read_first_page_bytes(), page_count_text)
         else:
             self.panel.set_bulk_mode(len(self._selected_rows))
+        self._update_apply_bulk_edit_action()
+
+    def _update_apply_bulk_edit_action(self) -> None:
+        count = len(self._selected_rows) if self.panel.bulk_mode else 0
+        self.actions_["apply_bulk_edit"].setText(f"&Apply to {count} Selected File(s)")
+        self.actions_["apply_bulk_edit"].setEnabled(self.panel.bulk_mode)
 
     def _commit_current_edits(self) -> None:
         """Writes the panel's current widget values back into whichever
@@ -433,6 +488,8 @@ class MainWindow(QMainWindow):
         self._refresh_table_row(row, self.books[row])
 
     def _apply_bulk_edit(self) -> None:
+        if not self.panel.bulk_mode:
+            return
         changed_fields = self.panel.bulk_changed_fields()
         if not changed_fields:
             QMessageBox.information(self, "Nothing to Apply", "No fields were filled in.")
@@ -444,6 +501,7 @@ class MainWindow(QMainWindow):
         if metadata_changes is None:
             return
 
+        self._push_undo("Bulk edit", target_books)
         for i, fields in metadata_changes.items():
             book = target_books[i]
             for attr, value in fields.items():
@@ -457,6 +515,141 @@ class MainWindow(QMainWindow):
     def _toggle_panel(self) -> None:
         self._panel_collapser.toggle()
         self.panel.collapse_toggle_btn.set_collapsed(self._panel_collapser.is_collapsed())
+
+    # ------------------------------------------------------------------
+    # Undo -- in-memory metadata/dirty-flag edits only (bulk edits,
+    # lookups, Parse Filename, Search/Replace, Case Conversion).
+    # Deliberately excludes physical file operations (Rename/Export,
+    # Save, filename-field Search/Replace) -- see
+    # redactor_common.core.undo's own module docstring for why.
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _snapshot_book(book: CbzBook) -> dict:
+        return {"metadata": copy.deepcopy(book.metadata), "dirty": book.dirty}
+
+    @staticmethod
+    def _restore_book(book: CbzBook, snapshot: dict) -> None:
+        book.metadata = snapshot["metadata"]
+        book.dirty = snapshot["dirty"]
+
+    def _push_undo(self, label: str, books: list[CbzBook]) -> None:
+        """Call BEFORE mutating `books`, to capture their pre-change
+        state."""
+        self.undo_manager.push(label, books, self._snapshot_book)
+        self._update_undo_action()
+
+    def _update_undo_action(self) -> None:
+        can_undo = self.undo_manager.can_undo()
+        self.actions_["undo"].setEnabled(can_undo)
+        label = self.undo_manager.peek_label()
+        self.actions_["undo"].setText(f"&Undo {label}" if label else "&Undo")
+
+    def undo_last_action(self) -> None:
+        affected = self.undo_manager.undo(self._restore_book)
+        for book in affected:
+            row = self.books.index(book)
+            self._refresh_table_row(row, book)
+            if self._selected_rows == [row]:
+                page_count_text = f"{book.actual_page_count} page(s)"
+                self.panel.load_metadata(book.metadata, book.read_first_page_bytes(), page_count_text)
+        self._update_undo_action()
+        self._update_status()
+
+    # ------------------------------------------------------------------
+    # List management: remove / clear / refresh
+    # ------------------------------------------------------------------
+
+    def _rebuild_table(self) -> None:
+        self.table.setRowCount(0)
+        for book in self.books:
+            self._add_table_row(book)
+
+    def _count_dirty(self) -> int:
+        return sum(1 for book in self.books if book.dirty)
+
+    def _confirm_discard(self, action_description: str) -> bool:
+        reply = QMessageBox.question(
+            self,
+            "Unsaved Changes",
+            f"This will {action_description}. Unsaved changes will be lost. Continue?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        return reply == QMessageBox.StandardButton.Yes
+
+    def remove_selected(self) -> None:
+        """Removes the selected files from this list only -- never
+        touches anything on disk (see Delete Files, if this app grows
+        one, for that; not offered here yet). Excludes by row index,
+        not object identity -- CbzBook is a plain @dataclass, so it has
+        a value-based __eq__ (and is therefore unhashable), making a
+        set-of-books membership check both wrong (two files with
+        identical in-memory state would compare equal) and impossible
+        (TypeError: unhashable) rather than just imprecise."""
+        if not self._selected_rows:
+            return
+        to_remove = set(self._selected_rows)
+        self.books = [book for i, book in enumerate(self.books) if i not in to_remove]
+        self._selected_rows = []
+        self.undo_manager.clear()  # its entries would reference book objects just discarded
+        self._update_undo_action()
+        self._rebuild_table()
+        self.panel.set_enabled(False)
+        self._update_status()
+
+    def clear_list(self) -> None:
+        if not self.books:
+            return
+        if self._count_dirty() and not self._confirm_discard("clear the entire list"):
+            return
+        self.books = []
+        self._selected_rows = []
+        self.undo_manager.clear()
+        self._update_undo_action()
+        self._rebuild_table()
+        self.panel.set_enabled(False)
+        self._update_status()
+
+    def refresh_list(self) -> None:
+        """Re-scans the folders your currently-loaded files live in
+        (picking up new .cbz/.cbr files added there since you loaded),
+        then re-reads every file still present from disk. Doesn't
+        discover a brand-new subfolder you haven't loaded anything
+        from yet (only folders already represented in your current
+        list get scanned, non-recursively) -- use Load Folder for that.
+        Discards unsaved in-memory edits (with confirmation first) and
+        clears the undo stack, since its entries would reference book
+        objects this replaces."""
+        if not self.books:
+            return
+        if self._count_dirty() and not self._confirm_discard("refresh the list (discarding unsaved changes)"):
+            return
+
+        existing_paths = [os.path.normpath(book.path) for book in self.books]
+        seen = set(existing_paths)
+        folders = {os.path.dirname(p) for p in existing_paths}
+        all_paths = list(existing_paths)
+        for folder in sorted(folders):
+            try:
+                names = sorted(os.listdir(folder))
+            except OSError:
+                continue
+            for name in names:
+                if not name.lower().endswith((".cbz", ".cbr")):
+                    continue
+                full = os.path.normpath(os.path.join(folder, name))
+                if full not in seen:
+                    seen.add(full)
+                    all_paths.append(full)
+
+        self.books = []
+        self._selected_rows = []
+        self.undo_manager.clear()
+        self._update_undo_action()
+        self.table.setRowCount(0)
+        self.panel.set_enabled(False)
+        self._load_paths(all_paths)
 
     # ------------------------------------------------------------------
     # Saving
@@ -606,6 +799,7 @@ class MainWindow(QMainWindow):
         if changes is None:
             return
 
+        self._push_undo("Parse Filename", target_books)
         for index, fields in changes.items():
             book = target_books[index]
             for attr, value in fields.items():
@@ -616,6 +810,89 @@ class MainWindow(QMainWindow):
             if self._selected_rows == [row]:
                 page_count_text = f"{book.actual_page_count} page(s)"
                 self.panel.load_metadata(book.metadata, book.read_first_page_bytes(), page_count_text)
+        self._update_status()
+
+    def open_search_replace_dialog(self) -> None:
+        self._commit_current_edits()
+        target_books = self._target_books()
+        if not target_books:
+            QMessageBox.information(self, "No Files", "Load some files first (or select the ones to search).")
+            return
+
+        def get_value(book: CbzBook, field_key: str) -> str:
+            if field_key == FILENAME_FIELD_KEY:
+                return os.path.splitext(os.path.basename(book.path))[0]
+            return getattr(book.metadata, field_key, "")
+
+        dialog = SearchReplaceDialog(
+            target_books,
+            list(_FIELD_LABELS.items()),
+            get_value,
+            lambda book: os.path.basename(book.path),
+            include_filename=True,
+            item_noun="file",
+            parent=self,
+        )
+        if dialog.exec() != dialog.DialogCode.Accepted:
+            return
+
+        field_key = dialog.result_field_key()
+        changes = dialog.accepted_changes()  # index into target_books -> new value (one field)
+        if not changes:
+            return
+
+        self._push_undo("Search & Replace", target_books)
+        errors: list[str] = []
+        for index, new_value in changes.items():
+            book = target_books[index]
+            if field_key == FILENAME_FIELD_KEY:
+                old_path = book.path
+                ext = os.path.splitext(old_path)[1]
+                new_path = os.path.join(os.path.dirname(old_path), new_value + ext)
+                try:
+                    os.rename(old_path, new_path)
+                    book.path = new_path
+                except OSError as exc:
+                    errors.append(f"{os.path.basename(old_path)}: {exc}")
+            else:
+                setattr(book.metadata, field_key, new_value)
+                book.dirty = True
+            self._refresh_table_row(self.books.index(book), book)
+
+        if errors:
+            from redactor_common.core.error_summary import summarize_errors
+            QMessageBox.warning(self, "Some Files Failed", summarize_errors(errors))
+        self._update_status()
+
+    def open_case_conversion_dialog(self) -> None:
+        self._commit_current_edits()
+        target_books = self._target_books()
+        if not target_books:
+            QMessageBox.information(self, "No Files", "Load some files first (or select the ones to convert).")
+            return
+
+        def get_value(book: CbzBook, field_key: str) -> str:
+            return getattr(book.metadata, field_key, "")
+
+        dialog = CaseConversionDialog(
+            target_books, list(_FIELD_LABELS.items()), get_value,
+            lambda book: os.path.basename(book.path),
+            item_noun="file", parent=self,
+        )
+        if dialog.exec() != dialog.DialogCode.Accepted:
+            return
+
+        field_key = dialog.result_field_key()
+        changes = dialog.accepted_changes()  # index into target_books -> new value (one field)
+        if not changes:
+            return
+
+        self._push_undo("Case Conversion", target_books)
+        for index, new_value in changes.items():
+            book = target_books[index]
+            setattr(book.metadata, field_key, new_value)
+            book.dirty = True
+            self._refresh_table_row(self.books.index(book), book)
         self._update_status()
 
     # ------------------------------------------------------------------
@@ -656,13 +933,15 @@ class MainWindow(QMainWindow):
             return [self.books[row] for row in self._selected_rows]
         return list(self.books)
 
-    def _run_lookup_dialog(self, dialog_class) -> None:
+    def _run_lookup_dialog(self, dialog_class, label: str) -> None:
         """Shared flow for every online lookup dialog (Comic Vine, GCD,
         ...): they all take (target_books, parent) and expose the same
         accepted_metadata() -> {index: {field: value}} shape (see
         gui/comicvine_lookup_dialog.py / gui/gcd_lookup_dialog.py), so
         opening one, applying its results, and refreshing the affected
-        rows is identical regardless of which source it is."""
+        rows is identical regardless of which source it is. `label`
+        names the source for the undo-stack entry (e.g. "Comic Vine
+        lookup")."""
         self._commit_current_edits()
         target_books = self._target_books()
         if not target_books:
@@ -681,6 +960,7 @@ class MainWindow(QMainWindow):
         if metadata_changes is None:
             return  # user cancelled outright
 
+        self._push_undo(label, target_books)
         for index, fields in metadata_changes.items():
             book = target_books[index]
             for attr, value in fields.items():
@@ -752,10 +1032,10 @@ class MainWindow(QMainWindow):
         return filtered
 
     def open_comicvine_lookup_dialog(self) -> None:
-        self._run_lookup_dialog(ComicVineLookupDialog)
+        self._run_lookup_dialog(ComicVineLookupDialog, "Comic Vine lookup")
 
     def open_gcd_lookup_dialog(self) -> None:
-        self._run_lookup_dialog(GcdLookupDialog)
+        self._run_lookup_dialog(GcdLookupDialog, "Grand Comics Database lookup")
 
     def change_comicvine_api_key(self) -> None:
         current = app_settings.load_comicvine_api_key()

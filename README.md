@@ -24,9 +24,27 @@ rather than requiring it up front.
 - Load one or many `.cbz` files (or a whole folder) and browse them in
   a table. Multi-select (ctrl/shift-click, same as Explorer) works for
   saving, looking up, or bulk-editing several files at once.
-- A toolbar (Load Files / Save / Save All Changed) sits above the
-  table for one-click access to the most common actions, alongside the
-  same actions in the File/Operations menus.
+- A toolbar sits above the table for one-click access to the most
+  common actions -- Load Files, Load Folder, Save, Apply (bulk edit,
+  see below), Undo, then a Panel-minimize toggle and a table-font
+  zoom control pushed to the far right -- matching epubredactor's own
+  toolbar shape exactly, sharing the same `QAction`s as the menus so
+  neither drifts out of sync with the other.
+- **Undo** (Ctrl+Z, or the toolbar/Operations menu) reverts the last
+  in-memory metadata edit -- bulk edit, a lookup apply, Parse Filename,
+  Search/Replace, or Case Conversion -- up to 5 deep. Deliberately
+  doesn't cover physical file operations (Rename/Export, Save): those
+  are already deliberate, confirmed actions of their own.
+- **Search/Replace...** and **Case Conversion...** (Operations menu)
+  work across any ComicInfo field (Search/Replace can also target the
+  filename itself, actually renaming the file on accept) -- both show
+  a before/after preview with a per-row Apply checkbox before anything
+  is written.
+- **Remove Files** (Delete key), **Refresh List** (F5), and **Clear
+  List** (File menu) manage the loaded list itself -- Remove/Clear only
+  ever touch the in-memory list, never disk; Refresh re-scans the
+  folders your loaded files live in for new ones and re-reads
+  everything still present, discarding unsaved edits (confirmed first).
 - **Columns are drag-to-reorder** (grab a header) **and hideable** (right-
   click a header, or Settings > Add/Remove Columns...) -- both the
   order and which columns are visible persist across restarts, keyed
@@ -49,8 +67,9 @@ rather than requiring it up front.
   free-text Summary/Notes/Review. Selecting more than one file switches
   the panel to **bulk edit** mode: every field starts blank, and only
   the ones you actually fill in get applied -- to every selected file
-  at once -- when you click "Apply to N Selected Files". A field left
-  blank is left untouched on every file, not cleared.
+  at once -- via the toolbar/Operations menu's "Apply to N Selected
+  Files" action. A field left blank is left untouched on every file,
+  not cleared.
 - Sidebar shows the first page (by filename sort order) as a cover
   thumbnail (single-file selection only -- bulk mode hides it, since
   there's no one "the" cover across different files) -- **below the
