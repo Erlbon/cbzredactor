@@ -1,5 +1,24 @@
 # Changelog
 
+## 2026-09-05#06 -- Side panel moved to the left; fixed a stuck collapse toggle
+
+- Moved the metadata side panel (cover thumbnail + ComicInfo.xml form)
+  from the right side of the window to the left, with the file table on
+  the right -- matches epubredactor's and videoredactor's own layout,
+  which this had inverted for no real reason.
+- Found and fixed a real bug while re-verifying the panel's collapse
+  toggle after the move: it visibly shrank on click but never actually
+  reached its target width, so the toggle button got stuck and
+  couldn't expand the panel back open. Root cause was in
+  `redactor_common.gui.collapsible_splitter.CollapseToggleButton`
+  itself (missing `setMinimumWidth()` -- see that repo's own changelog
+  for detail) -- fixed there (pinned to tag `2026-09-05-03`) so every
+  consuming project's collapse toggle benefits, not just this one.
+- Also bumped `PANEL_COLLAPSED_WIDTH` from 32 to 70: the cover
+  thumbnail's own 60px minimum width means 32 was never actually
+  reachable regardless of the button fix -- see the constant's own
+  comment in `gui/main_window.py`.
+
 ## 2026-09-05#05 -- Migrate lookups onto redactor_common's shared template
 
 The Comic Vine and GCD lookups had independently arrived at the same

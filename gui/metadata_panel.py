@@ -75,8 +75,12 @@ class ComicInfoPanel(QWidget):
         outer = QVBoxLayout(self)
         outer.setContentsMargins(4, 4, 4, 4)
 
+        # No label in this row (just the toggle, right-aligned) --
+        # deliberately, matching epubredactor's tag_panel.py: a fixed-
+        # width text label here would impose a minimum width on the
+        # whole row, which fights SplitterPaneCollapser's attempt to
+        # shrink the panel down to near collapsed_width on toggle.
         header = QHBoxLayout()
-        header.addWidget(QLabel("<b>Metadata</b>"))
         header.addStretch(1)
         self.collapse_toggle_btn = CollapseToggleButton()
         self.collapse_toggle_btn.clicked.connect(self.collapseToggleRequested.emit)
@@ -84,7 +88,14 @@ class ComicInfoPanel(QWidget):
         outer.addLayout(header)
 
         self.cover_label = AspectRatioImageLabel()
-        self.cover_label.setMinimumHeight(220)
+        # An explicit small minimum WIDTH too, not just height -- a plain
+        # QLabel's auto minimumSizeHint is based on its current text
+        # ("No file selected" etc, whenever there's no pixmap loaded),
+        # which would otherwise impose a much wider floor than 220px-tall
+        # actually needs and fight the side panel's collapse-to-slim-strip
+        # behavior (same fix epubredactor's own cover_preview uses -- see
+        # its COVER_PREVIEW_MIN_SIZE).
+        self.cover_label.setMinimumSize(60, 220)
         self.cover_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.cover_label.setStyleSheet("background-color: palette(base); border: 1px solid palette(mid);")
         self.cover_label.setText("No pages")

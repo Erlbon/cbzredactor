@@ -49,6 +49,16 @@ from gui.metadata_panel import (
 COLUMNS = ["Filename", "Title", "Series", "Number", "Pages", "Status"]
 LOAD_PROGRESS_THRESHOLD = 3
 SAVE_PROGRESS_THRESHOLD = 3
+# Slim strip, not zero -- keeps the panel's own toggle button reachable
+# (same convention as epubredactor's TAG_PANEL_COLLAPSED_WIDTH). Not
+# 32 (redactor_common's own doc-comment default): ComicInfoPanel's
+# cover thumbnail has its own explicit 60px minimum width (see
+# metadata_panel.py), which a QSplitter's minimum-size clamping
+# enforces regardless of what's requested here -- setting this any
+# smaller than that real floor would make SplitterPaneCollapser.
+# is_collapsed() permanently disagree with the pane's actual achieved
+# width, leaving the toggle button stuck unable to expand it back.
+PANEL_COLLAPSED_WIDTH = 70
 
 # attr -> human label, for the "this would overwrite existing data"
 # lookup-conflict prompt (see MainWindow._resolve_overwrite_conflicts).
@@ -111,11 +121,14 @@ class MainWindow(QMainWindow):
         self.panel.collapseToggleRequested.connect(self._toggle_panel)
 
         self.splitter = QSplitter(Qt.Orientation.Horizontal)
-        self.splitter.addWidget(self.table)
+        # Side panel on the left, table on the right -- matches
+        # epubredactor's and videoredactor's own layout (both put their
+        # tag_panel/cover+metadata panel first, table second).
         self.splitter.addWidget(self.panel)
-        self.splitter.setSizes([760, 340])
+        self.splitter.addWidget(self.table)
+        self.splitter.setSizes([340, 760])
         self._panel_collapser = SplitterPaneCollapser(
-            self.splitter, pane_index=1, collapsed_width=32, default_width=340
+            self.splitter, pane_index=0, collapsed_width=PANEL_COLLAPSED_WIDTH, default_width=340
         )
         self.setCentralWidget(self.splitter)
 
