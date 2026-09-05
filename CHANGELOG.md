@@ -1,5 +1,23 @@
 # Changelog
 
+## 2026-09-05#02 -- Comic Vine lookup, rebrand, app icon
+
+- Rebranded as "The ƆBZ Redactor" (Ɔ = LATIN CAPITAL LETTER OPEN O, a
+  "reversed C" -- same reversed-letter mark as epubredactor's Ǝ).
+- Added a real app icon (assets/icon.png master, assets/icon.ico
+  multi-resolution) and wired it into the window/taskbar icon and the
+  PyInstaller build.
+- `Import > Look Up via Comic Vine...`: searches Comic Vine by
+  Series + Number (or a filename guess), fetches full issue credits
+  and a best-effort publisher name, shows a cover thumbnail for visual
+  confirmation only, and applies chosen fields on Apply -- same
+  review-before-apply table pattern as epubredactor's lookup dialogs.
+  Needs a free API key, entered via Settings > Comic Vine API Key...
+  and stored locally.
+- Scoped (not yet built): Metron, Grand Comics Database, and MangaDex
+  as additional lookup sources -- see README's "Other metadata
+  sources" section.
+
 ## 2026-09-05#01 -- Initial scaffold
 
 - First working version: load one or more `.cbz` files, view/edit

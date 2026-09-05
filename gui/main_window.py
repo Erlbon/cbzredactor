@@ -35,6 +35,8 @@ from redactor_common.core.version import REDACTOR_COMMON_REPO_URL, REDACTOR_COMM
 from core.cbr_convert import CbrConversionError, convert_cbr_to_cbz
 from core.cbz_file import CbzBook, CbzError
 from core.version import APP_NAME, APP_REPO_URL, APP_VERSION, RELEASE_LABEL
+from gui import app_settings
+from gui.comicvine_lookup_dialog import ComicVineLookupDialog
 from gui.metadata_panel import ComicInfoPanel
 
 COLUMNS = ["Filename", "Title", "Series", "Number", "Pages", "Status"]
@@ -105,11 +107,15 @@ class MainWindow(QMainWindow):
             ],
             "Import": [
                 MenuAction("convert_cbr", "Convert &CBR to CBZ...", self.convert_cbr_dialog),
+                Separator(),
+                MenuAction("comicvine_lookup", "Look Up via Comic &Vine...", self.open_comicvine_lookup_dialog),
             ],
             "Operations": [
                 MenuAction("save_all", "Save &All Changed", self.save_all_changed, shortcut="Ctrl+Shift+A"),
             ],
-            "Settings": [],
+            "Settings": [
+                MenuAction("comicvine_api_key", "Comic Vine API &Key...", self.change_comicvine_api_key),
+            ],
             "Help": [
                 MenuAction("about", f"&About {APP_NAME}", self.open_about_dialog),
                 MenuAction("changelog", "View &Changelog", self.open_changelog_dialog),
@@ -305,6 +311,57 @@ class MainWindow(QMainWindow):
                 self, "Conversion Complete", f"Converted {len(converted)} file(s) to .cbz."
             )
             self._load_paths(converted)
+
+    def _target_books(self) -> list[CbzBook]:
+        """The selected book, or every loaded book if none is selected --
+        same fallback epubredactor's own lookup dialogs use, so "look up
+        this one file" and "look up everything I loaded" both work
+        without a separate multi-select step (the table is single-
+        selection here, so this is effectively "one file" vs "all")."""
+        if self._current_row >= 0:
+            return [self.books[self._current_row]]
+        return list(self.books)
+
+    def open_comicvine_lookup_dialog(self) -> None:
+        self._commit_current_edits()
+        target_books = self._target_books()
+        if not target_books:
+            QMessageBox.information(self, "No Files", "Load some files first.")
+            return
+
+        dialog = ComicVineLookupDialog(target_books, self)
+        if dialog.exec() != ComicVineLookupDialog.DialogCode.Accepted:
+            return
+
+        metadata_changes = dialog.accepted_metadata()  # index into target_books -> {field: value}
+        if not metadata_changes:
+            return
+
+        for index, fields in metadata_changes.items():
+            book = target_books[index]
+            for attr, value in fields.items():
+                setattr(book.metadata, attr, value)
+            book.dirty = True
+            row = self.books.index(book)
+            self._refresh_table_row(row, book)
+            if row == self._current_row:
+                page_count_text = f"{book.actual_page_count} page(s)"
+                self.panel.load_metadata(book.metadata, book.read_first_page_bytes(), page_count_text)
+        self._update_status()
+
+    def change_comicvine_api_key(self) -> None:
+        from PyQt6.QtWidgets import QInputDialog, QLineEdit
+
+        current = app_settings.load_comicvine_api_key()
+        text, ok = QInputDialog.getText(
+            self,
+            "Comic Vine API Key",
+            "Enter your Comic Vine API key (free -- register at comicvine.gamespot.com/api/):",
+            QLineEdit.EchoMode.Normal,
+            current,
+        )
+        if ok:
+            app_settings.save_comicvine_api_key(text)
 
     # ------------------------------------------------------------------
     # Help menu

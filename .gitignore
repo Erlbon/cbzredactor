@@ -6,3 +6,7 @@ build/
 dist/
 *.spec.bak
 *.tmp_write
+
+# Local settings (holds the user's own Comic Vine API key) -- never
+# committed, same reasoning as any other per-machine credentials file.
+cbzredactor_settings.ini

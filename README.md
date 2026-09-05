@@ -35,13 +35,32 @@ rather than requiring it up front.
   byte-for-byte into a fresh archive, so pixel data is never
   re-encoded or reordered.
 - `Import > Convert CBR to CBZ` for RAR-based archives (see below).
+- `Import > Look Up via Comic Vine...` searches [Comic Vine](https://comicvine.gamespot.com/api/)
+  by Series + Number (guessed from the filename when Series is blank)
+  and offers to fill in series, issue title, summary, date, full
+  creator credits, characters/teams/locations, and publisher -- review
+  and untick anything before Apply, same pattern as epubredactor's
+  Google Books/Calibre/Open Library lookups. Needs a free Comic Vine
+  API key (Settings > Comic Vine API Key...); the cover image shown is
+  for visual confirmation only and is never written into the archive
+  (see "Other metadata sources" below for why other providers aren't
+  wired up yet).
 
 ### Deferred (not in this version)
 
-Per-page `<Pages>` tagging (marking specific pages as FrontCover,
-Story, BackCover, etc.) isn't yet exposed in the UI. If a file already
-has `<Pages>` data, it's preserved untouched through load/edit/save --
-just not editable yet.
+- Per-page `<Pages>` tagging (marking specific pages as FrontCover,
+  Story, BackCover, etc.) isn't yet exposed in the UI. If a file
+  already has `<Pages>` data, it's preserved untouched through
+  load/edit/save -- just not editable yet.
+- **Other metadata sources**: [Metron](https://metron.cloud/) (whose
+  output maps almost 1:1 onto ComicInfo.xml fields), the
+  [Grand Comics Database](https://www.comics.org/) (best for
+  Golden/Silver Age issues Comic Vine misses), and
+  [MangaDex](https://api.mangadex.org/) (for the `Manga` field) were
+  all scoped as follow-up sources alongside Comic Vine -- only Comic
+  Vine is implemented so far. Each would plug into the same
+  `core/<source>_lookup.py` + `gui/<source>_lookup_dialog.py` shape as
+  `comicvine_lookup.py`.
 
 ## CBR support
 
