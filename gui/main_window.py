@@ -38,11 +38,43 @@ from core.version import APP_NAME, APP_REPO_URL, APP_VERSION, RELEASE_LABEL
 from gui import app_settings
 from gui.comicvine_lookup_dialog import ComicVineLookupDialog
 from gui.gcd_lookup_dialog import GcdLookupDialog
-from gui.metadata_panel import ComicInfoPanel
+from gui.metadata_panel import (
+    CREDIT_FIELDS,
+    IDENTITY_FIELDS,
+    PUBLICATION_FIELDS,
+    STORY_FIELDS,
+    ComicInfoPanel,
+)
 
 COLUMNS = ["Filename", "Title", "Series", "Number", "Pages", "Status"]
 LOAD_PROGRESS_THRESHOLD = 3
 SAVE_PROGRESS_THRESHOLD = 3
+
+# attr -> human label, for the "this would overwrite existing data"
+# lookup-conflict prompt (see MainWindow._resolve_overwrite_conflicts).
+# Built from the same (label, attr) pairs the metadata form itself
+# uses, plus the handful of fields those groups don't cover, so the
+# prompt never drifts out of sync with what the form actually calls
+# each field.
+_FIELD_LABELS: dict[str, str] = {
+    attr: label
+    for label, attr in [*IDENTITY_FIELDS, *STORY_FIELDS, *CREDIT_FIELDS, *PUBLICATION_FIELDS]
+}
+_FIELD_LABELS.update(
+    {
+        "summary": "Summary",
+        "notes": "Notes",
+        "review": "Review",
+        "age_rating": "Age Rating",
+        "manga": "Manga",
+        "black_and_white": "Black & White",
+        "community_rating": "Community Rating",
+    }
+)
+
+
+def _field_label(attr: str) -> str:
+    return _FIELD_LABELS.get(attr, attr.replace("_", " ").title())
 
 
 def resource_path(*parts: str) -> str:
@@ -345,6 +377,10 @@ class MainWindow(QMainWindow):
         if not metadata_changes:
             return
 
+        metadata_changes = self._resolve_overwrite_conflicts(target_books, metadata_changes)
+        if metadata_changes is None:
+            return  # user cancelled outright
+
         for index, fields in metadata_changes.items():
             book = target_books[index]
             for attr, value in fields.items():
@@ -356,6 +392,64 @@ class MainWindow(QMainWindow):
                 page_count_text = f"{book.actual_page_count} page(s)"
                 self.panel.load_metadata(book.metadata, book.read_first_page_bytes(), page_count_text)
         self._update_status()
+
+    def _resolve_overwrite_conflicts(
+        self, target_books: list[CbzBook], metadata_changes: dict[int, dict[str, str]]
+    ) -> dict[int, dict[str, str]] | None:
+        """Checks whether applying `metadata_changes` would overwrite
+        any field that already has a non-blank, different value, and
+        if so asks once how to proceed -- applies uniformly no matter
+        which lookup source produced the changes, since every dialog
+        funnels through this same method (see _run_lookup_dialog()).
+
+        Returns the changes to actually apply (all of them, or only
+        the ones that don't clobber existing data), or None if the
+        user cancelled outright."""
+        conflicts: list[tuple[str, str]] = []  # (filename, field label) pairs, for the prompt text
+        for index, fields in metadata_changes.items():
+            book = target_books[index]
+            for attr, new_value in fields.items():
+                current_value = (getattr(book.metadata, attr, "") or "").strip()
+                if current_value and current_value != new_value:
+                    conflicts.append((os.path.basename(book.path), _field_label(attr)))
+
+        if not conflicts:
+            return metadata_changes
+
+        preview = "; ".join(f"{name} ({label})" for name, label in conflicts[:5])
+        if len(conflicts) > 5:
+            preview += f", and {len(conflicts) - 5} more"
+
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Icon.Warning)
+        box.setWindowTitle("Existing Metadata Found")
+        box.setText(
+            f"{len(conflicts)} field(s) already have a value that this lookup would "
+            f"overwrite:\n\n{preview}\n\nHow do you want to proceed?"
+        )
+        overwrite_btn = box.addButton("Overwrite All", QMessageBox.ButtonRole.AcceptRole)
+        keep_btn = box.addButton("Keep Existing (fill blanks only)", QMessageBox.ButtonRole.ActionRole)
+        box.addButton(QMessageBox.StandardButton.Cancel)
+        box.setDefaultButton(keep_btn)
+        box.exec()
+        clicked = box.clickedButton()
+
+        if clicked is overwrite_btn:
+            return metadata_changes
+        if clicked is not keep_btn:
+            return None  # Cancel (or the dialog was closed)
+
+        filtered: dict[int, dict[str, str]] = {}
+        for index, fields in metadata_changes.items():
+            book = target_books[index]
+            kept = {
+                attr: value
+                for attr, value in fields.items()
+                if not (getattr(book.metadata, attr, "") or "").strip()
+            }
+            if kept:
+                filtered[index] = kept
+        return filtered
 
     def open_comicvine_lookup_dialog(self) -> None:
         self._run_lookup_dialog(ComicVineLookupDialog)

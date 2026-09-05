@@ -54,6 +54,12 @@ rather than requiring it up front.
   follows pagination and promotes an exact series-name match to the
   top automatically, but an unusual or very generic series name may
   still need reviewing the candidate list carefully.
+- **Both lookups protect existing data the same way**: on Apply, if
+  any looked-up field would overwrite a value a file already has (a
+  hand-typed one, or from a prior lookup), you're asked once whether
+  to overwrite everything, keep the existing values and only fill in
+  blanks, or cancel -- rather than either silently clobbering it or
+  silently refusing to update it.
 
 ### Deferred (not in this version)
 
@@ -103,8 +109,12 @@ for the OS it runs on).
 
 ## Development
 
-Tests are plain pytest, no Qt required for the `core/` modules (the
-GUI layer isn't unit-tested, same convention as the sibling tools):
+Tests are plain pytest, no Qt required for the `core/` modules. Most
+of the GUI layer isn't unit-tested (same convention as the sibling
+tools) -- the one exception is the lookup-overwrite-conflict logic in
+`gui/main_window.py`, tested via a real (offscreen) QApplication since
+a regression there would affect data safety across every lookup
+source at once:
 
 ```bash
 pip install pytest

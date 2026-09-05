@@ -1,5 +1,14 @@
 # Changelog
 
+## 2026-09-05#04 -- Warn before a lookup overwrites existing metadata
+
+- Applying any lookup's results (Comic Vine, GCD, and any future
+  source -- enforced once in MainWindow._resolve_overwrite_conflicts(),
+  not per-dialog) now checks whether it would overwrite a field that
+  already has a different, non-blank value. If so, asks once: Overwrite
+  All, Keep Existing (fill blanks only), or Cancel -- instead of
+  silently clobbering hand-typed or previously-looked-up data.
+
 ## 2026-09-05#03 -- Grand Comics Database lookup
 
 - `Import > Look Up via Grand Comics Database...`: same review-then-
