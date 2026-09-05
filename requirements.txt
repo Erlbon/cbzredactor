@@ -1,0 +1,17 @@
+PyQt6>=6.6
+lxml>=5.0
+pyinstaller>=6.3
+
+# Optional: only needed for Import > Convert CBR to CBZ. Also needs a
+# real unrar/unar/bsdtar-compatible binary on PATH -- rarfile itself
+# just shells out to one. See core/cbr_convert.py and README.md's "CBR
+# support" section.
+rarfile>=4.1
+
+# Shared UI/core code with the epub, mp3, and video Redactor tools -- a
+# real pip dependency (github.com/Erlbon/redactor_common), not a
+# vendored copy. Pinned to a tag, not @main -- see that repo's README
+# ("Releasing a new version") for how to bump this pin deliberately
+# when it changes, rather than floating and having one bad push there
+# break this project's next install.
+redactor_common @ git+https://github.com/Erlbon/redactor_common.git@2026-09-04-10
