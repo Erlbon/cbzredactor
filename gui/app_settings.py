@@ -144,6 +144,17 @@ def save_hidden_columns(hidden: set[str]) -> None:
     _settings().setValue(_HIDDEN_COLUMNS_KEY, json.dumps(sorted(hidden)))
 
 
+def has_hidden_columns_preference() -> bool:
+    """True once the user has ever saved a hidden-columns choice --
+    including an explicit "show everything" (an empty set is still a
+    saved choice). Distinct from load_hidden_columns() returning an
+    empty set, which is ambiguous between "never configured" and
+    "deliberately show everything" on its own; callers that need to
+    apply a first-run default (see MainWindow.DEFAULT_HIDDEN_COLUMNS)
+    check this first."""
+    return _settings().contains(_HIDDEN_COLUMNS_KEY)
+
+
 # ------------------------------------------------------------------
 # Genres: built-in defaults (individually hideable/restorable) plus any
 # custom genres added via the Genre field's "+" menu or Settings >

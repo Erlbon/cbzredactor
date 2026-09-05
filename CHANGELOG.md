@@ -1,5 +1,40 @@
 # Changelog
 
+## 2026-09-06#02 -- v2.1 draft fields, every field as a column, ComicRack/ComicTagger comparison
+
+Prompted by a real ComicRack column-chooser screenshot: most of those
+columns turned out to be fields already editable in the side panel but
+never exposed as table columns, not a genre-list problem specifically.
+Also researched a related open question directly against source rather
+than guessing:
+
+- **ComicRack vs. ComicTagger**: confirmed against ComicTagger's own
+  `comicapi/tags/comicrack.py` that its comma-separated multi-value
+  convention (Genre/Characters/Teams/Locations/StoryArc/credits)
+  matches what this app already does. Real differences found: Web is
+  space-separated multiple URLs for ComicTagger (harmless here, this
+  app doesn't enforce any separator); ScanInformation gets a
+  ComicTagger-specific file-hash convention (`sum:{hash}`) this app
+  doesn't replicate, just edits as plain text like anything else.
+- **Four v2.1 draft fields added** (confirmed against the Anansi
+  Project's actual v2.1 draft XSD): Translator, Tags, StoryArcNumber,
+  GTIN. Not finalized, but already understood by ComicTagger and
+  Kavita, and purely additive -- a v2.0-only reader just ignores what
+  it doesn't recognize, same tolerance this app already extends to any
+  other unrecognized element.
+- **ScanInformation exposed in the form** -- it already round-tripped
+  correctly on save, but had no editable field at all until now.
+- **Every ComicInfo field is now an available table column** (45 total,
+  up from 6), not just Filename/Title/Series/Number/Pages/Status --
+  matching ComicRack's own "everything is an optional column"
+  philosophy. A brand-new install still only shows the original 6 by
+  default (DEFAULT_HIDDEN_COLUMNS); once you've saved any column
+  visibility choice at all (including "show everything"), your own
+  choice always wins over that default.
+
+2 new tests for the v2.1 fields (round-trip, correct schema-order
+placement).
+
 ## 2026-09-06#01 -- Undo, Search/Replace, Case Conversion, list management, correct toolbar
 
 Still finishing the walk through redactor_common's full toolkit from

@@ -98,3 +98,34 @@ def test_unrecognized_enum_value_is_preserved_not_rejected():
     assert metadata.age_rating == "SomeFutureRating"
     serialized = serialize_comicinfo_xml(metadata)
     assert b"SomeFutureRating" in serialized
+
+
+# v2.1 draft fields (Translator, Tags, StoryArcNumber, GTIN) -- not yet
+# finalized, but already understood by ComicTagger and Kavita; see
+# module docstring for the schema source.
+
+def test_v21_draft_fields_roundtrip():
+    metadata = ComicInfoMetadata(
+        title="Draft Fields", translator="Jane Translator", tags="cool, indie",
+        story_arc="Arc One, Arc Two", story_arc_number="1, 3", gtin="9780000000000",
+    )
+    serialized = serialize_comicinfo_xml(metadata)
+    reparsed = parse_comicinfo_xml(serialized)
+    assert reparsed.translator == "Jane Translator"
+    assert reparsed.tags == "cool, indie"
+    assert reparsed.story_arc_number == "1, 3"
+    assert reparsed.gtin == "9780000000000"
+
+
+def test_v21_draft_fields_sit_at_correct_schema_positions():
+    metadata = ComicInfoMetadata(
+        editor="Ed", translator="Trans", publisher="Pub", genre="Action", tags="Tag1",
+        story_arc="Arc", story_arc_number="1", series_group="Group",
+        review="A review", gtin="123",
+    )
+    root = etree.fromstring(serialize_comicinfo_xml(metadata))
+    order = [etree.QName(child).localname for child in root]
+    assert order.index("Editor") < order.index("Translator") < order.index("Publisher")
+    assert order.index("Translator") < order.index("Genre") < order.index("Tags")
+    assert order.index("StoryArc") < order.index("StoryArcNumber") < order.index("SeriesGroup")
+    assert order.index("Review") < order.index("GTIN")  # GTIN is always last

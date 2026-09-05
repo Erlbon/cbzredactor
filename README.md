@@ -19,6 +19,22 @@ the [Anansi Project](https://anansi-project.github.io/docs/comicinfo/intro).
 Not every CBZ has one; this tool creates one on save if it's missing,
 rather than requiring it up front.
 
+### ComicRack vs. ComicTagger
+
+ComicRack (no longer developed) originated ComicInfo.xml; ComicTagger
+is the actively-developed tool most people tagging comics today
+actually use. Checked directly against ComicTagger's own source
+(`comicapi/tags/comicrack.py`) rather than assumed: its comma-separated
+convention for Genre/Characters/Teams/Locations/StoryArc/credits
+matches what this app already uses. Two real differences worth
+knowing: ComicTagger treats `Web` as **space**-separated multiple URLs
+(this app treats it as a plain string either way, so nothing to
+reconcile); and ComicTagger auto-embeds a file hash into
+`ScanInformation` for its own duplicate detection (this app just
+treats it as a plain editable field, same as any other -- see
+Features below for the v2.1 draft fields ComicTagger already
+understands that this app now supports too).
+
 ## Features
 
 - Load one or many `.cbz` files (or a whole folder) and browse them in
@@ -50,7 +66,12 @@ rather than requiring it up front.
   order and which columns are visible persist across restarts, keyed
   by column name so a future column added in code can't silently
   scramble a saved preference. Right-clicking a row offers "Open
-  Containing Folder"/"Copy Path" for the selection.
+  Containing Folder"/"Copy Path" for the selection. Every ComicInfo
+  field is available as a column, not just the handful shown by
+  default (Filename/Title/Series/Number/Pages/Status) -- matching
+  ComicRack's own "everything is an optional column" convention, just
+  with a much smaller starting set so a fresh install isn't
+  overwhelming.
 - **Rename / Export Files...** (File menu, F2) renders a `%series%
   %number% - %title%`-style pattern (any ComicInfo field as a
   placeholder) into a new filename for every selected file, previewed
@@ -62,9 +83,13 @@ rather than requiring it up front.
   Routed through the same overwrite-conflict protection as a lookup
   (see below) -- it won't silently clobber a field you've already set.
   Both dialogs share one pattern history.
-- Edit the full set of common ComicInfo.xml fields, grouped as
-  Identity/Sequence, Story, Credits, Publication, Classification, and
-  free-text Summary/Notes/Review. Selecting more than one file switches
+- Edit the full ComicInfo.xml v2.0 field set, plus four fields from the
+  v2.1 **draft** schema already understood by ComicTagger and readers
+  like Kavita -- Translator, Tags, StoryArcNumber, and GTIN (purely
+  additive; a v2.0-only reader just ignores what it doesn't recognize).
+  Grouped as Identity/Sequence, Story, Credits, Publication,
+  Classification, and free-text Summary/Notes/Review. Selecting more
+  than one file switches
   the panel to **bulk edit** mode: every field starts blank, and only
   the ones you actually fill in get applied -- to every selected file
   at once -- via the toolbar/Operations menu's "Apply to N Selected

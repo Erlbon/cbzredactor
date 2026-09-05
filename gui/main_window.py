@@ -68,20 +68,62 @@ from gui.metadata_panel import (
     ComicInfoPanel,
 )
 
+# attr -> human label, for the "this would overwrite existing data"
+# conflict prompt (see MainWindow._resolve_overwrite_conflicts) --
+# shared by every metadata-writing path (lookups, bulk edit, Parse
+# Filename) -- AND for building the full column list just below, so
+# every field the form can edit is also available as a table column
+# (hidden by default -- see DEFAULT_HIDDEN_COLUMNS), matching
+# ComicRack's own "everything is an optional column" convention. Built
+# from the same (label, attr) pairs the metadata form itself uses, plus
+# the handful of fields those groups don't cover, so this never drifts
+# out of sync with what the form actually calls each field.
+_FIELD_LABELS: dict[str, str] = {
+    attr: label
+    for label, attr in [*IDENTITY_FIELDS, *STORY_FIELDS, *CREDIT_FIELDS, *PUBLICATION_FIELDS]
+}
+_FIELD_LABELS.update(
+    {
+        "summary": "Summary",
+        "notes": "Notes",
+        "review": "Review",
+        "age_rating": "Age Rating",
+        "manga": "Manga",
+        "black_and_white": "Black & White",
+        "community_rating": "Community Rating",
+    }
+)
+
+
+def _field_label(attr: str) -> str:
+    return _FIELD_LABELS.get(attr, attr.replace("_", " ").title())
+
+
 # Table columns, field-key based -- see redactor_common.core.table_settings's
 # own docstring for why (a persisted index-based preference silently
 # breaks the moment a column is added/removed/reordered in code).
-COLUMN_SPECS: list[tuple[str, str]] = [
-    ("filename", "Filename"),
-    ("title", "Title"),
-    ("series", "Series"),
-    ("number", "Number"),
-    ("pages", "Pages"),
-    ("status", "Status"),
-]
+# "filename"/"pages"/"status" are synthetic (derived, not a literal
+# ComicInfo field); everything else is every field _FIELD_LABELS knows
+# about, i.e. every field the side panel can edit.
+COLUMN_SPECS: list[tuple[str, str]] = (
+    [("filename", "Filename")]
+    + list(_FIELD_LABELS.items())
+    + [("pages", "Pages"), ("status", "Status")]
+)
 _COLUMN_LABELS: dict[str, str] = dict(COLUMN_SPECS)
 _ALL_COLUMN_KEYS: list[str] = [key for key, _ in COLUMN_SPECS]
 PROTECTED_COLUMNS = frozenset({"filename"})  # the one column you always need to tell rows apart
+
+# What a brand-new install shows by default -- everything else (every
+# other ComicInfo field) is available but starts hidden, same
+# "exhaustive but mostly tucked away" shape as ComicRack's own column
+# chooser. Only applied on a genuinely first run -- see
+# gui/app_settings.py's has_hidden_columns_preference(); once the user
+# has touched column visibility at all (via the header menu or Settings
+# > Add/Remove Columns...), their own saved choice always wins, even if
+# that choice is "show everything".
+_DEFAULT_VISIBLE_COLUMNS = frozenset({"filename", "title", "series", "number", "pages", "status"})
+DEFAULT_HIDDEN_COLUMNS: frozenset[str] = frozenset(_ALL_COLUMN_KEYS) - _DEFAULT_VISIBLE_COLUMNS
 
 # Metadata fields offered as %placeholder% tokens in Rename/Export and
 # Parse Filename -- a curated subset of every ComicInfo field (the ones
@@ -106,33 +148,6 @@ SAVE_PROGRESS_THRESHOLD = 3
 # is_collapsed() permanently disagree with the pane's actual achieved
 # width, leaving the toggle button stuck unable to expand it back.
 PANEL_COLLAPSED_WIDTH = 70
-
-# attr -> human label, for the "this would overwrite existing data"
-# conflict prompt (see MainWindow._resolve_overwrite_conflicts) --
-# shared by every metadata-writing path (lookups, bulk edit, Parse
-# Filename). Built from the same (label, attr) pairs the metadata form
-# itself uses, plus the handful of fields those groups don't cover, so
-# the prompt never drifts out of sync with what the form actually
-# calls each field.
-_FIELD_LABELS: dict[str, str] = {
-    attr: label
-    for label, attr in [*IDENTITY_FIELDS, *STORY_FIELDS, *CREDIT_FIELDS, *PUBLICATION_FIELDS]
-}
-_FIELD_LABELS.update(
-    {
-        "summary": "Summary",
-        "notes": "Notes",
-        "review": "Review",
-        "age_rating": "Age Rating",
-        "manga": "Manga",
-        "black_and_white": "Black & White",
-        "community_rating": "Community Rating",
-    }
-)
-
-
-def _field_label(attr: str) -> str:
-    return _FIELD_LABELS.get(attr, attr.replace("_", " ").title())
 
 
 def resource_path(*parts: str) -> str:
@@ -302,7 +317,18 @@ class MainWindow(QMainWindow):
         header.setSectionsMovable(True)  # drag headers to reorder columns
         header.sectionMoved.connect(self._on_columns_reordered)
 
-        hidden = sanitize_hidden_fields(app_settings.load_hidden_columns(), PROTECTED_COLUMNS)
+        # A genuinely first run (the user has never touched column
+        # visibility at all) gets DEFAULT_HIDDEN_COLUMNS -- otherwise
+        # every field would show as a column immediately, which is
+        # exhaustive but overwhelming for a brand-new install. Once
+        # they've saved ANY choice, even "show everything" (an empty
+        # hidden set), that saved choice always wins -- see
+        # app_settings.has_hidden_columns_preference()'s own docstring.
+        if app_settings.has_hidden_columns_preference():
+            raw_hidden = app_settings.load_hidden_columns()
+        else:
+            raw_hidden = set(DEFAULT_HIDDEN_COLUMNS)
+        hidden = sanitize_hidden_fields(raw_hidden, PROTECTED_COLUMNS)
         for key in hidden:
             if key in self._col_index:
                 self.table.setColumnHidden(self._col_index[key], True)
@@ -425,16 +451,17 @@ class MainWindow(QMainWindow):
         status = book.load_error or ("Modified" if book.dirty else "OK")
         if book.page_count_mismatch and not book.load_error:
             status = "Page count mismatch"
-        values_by_key = {
-            "filename": os.path.basename(book.path),
-            "title": book.metadata.title,
-            "series": book.metadata.series,
-            "number": book.metadata.number,
-            "pages": str(book.actual_page_count),
-            "status": status,
-        }
-        for key, value in values_by_key.items():
-            self.table.setItem(row, self._col_index[key], QTableWidgetItem(value))
+
+        self.table.setItem(row, self._col_index["filename"], QTableWidgetItem(os.path.basename(book.path)))
+        self.table.setItem(row, self._col_index["pages"], QTableWidgetItem(str(book.actual_page_count)))
+        self.table.setItem(row, self._col_index["status"], QTableWidgetItem(status))
+        # Every other column is a plain ComicInfo field -- one shared
+        # loop covers all of them (title/series/number plus every field
+        # only reachable as a column once you turn it on; see
+        # DEFAULT_HIDDEN_COLUMNS) instead of hand-listing each one.
+        for attr in _FIELD_LABELS:
+            value = getattr(book.metadata, attr, "")
+            self.table.setItem(row, self._col_index[attr], QTableWidgetItem(value))
 
     # ------------------------------------------------------------------
     # Selection / editing

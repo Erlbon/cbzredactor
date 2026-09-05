@@ -68,21 +68,26 @@ IDENTITY_FIELDS = [
     ("Count", "count"), ("Volume", "volume"),
     ("Alternate Series", "alternate_series"), ("Alternate Number", "alternate_number"),
     ("Alternate Count", "alternate_count"),
+    ("GTIN", "gtin"),  # v2.1 draft -- ISBN/ISSN/EAN/JAN/etc, whichever the publisher used
 ]
 STORY_FIELDS = [
-    ("Genre", "genre"), ("Characters", "characters"), ("Teams", "teams"),
+    ("Genre", "genre"), ("Tags", "tags"),  # Tags: v2.1 draft
+    ("Characters", "characters"), ("Teams", "teams"),
     ("Locations", "locations"), ("Main Character/Team", "main_character_or_team"),
-    ("Story Arc", "story_arc"), ("Series Group", "series_group"),
+    ("Story Arc", "story_arc"), ("Story Arc Number", "story_arc_number"),  # v2.1 draft
+    ("Series Group", "series_group"),
 ]
 CREDIT_FIELDS = [
     ("Writer", "writer"), ("Penciller", "penciller"), ("Inker", "inker"),
     ("Colorist", "colorist"), ("Letterer", "letterer"),
     ("Cover Artist", "cover_artist"), ("Editor", "editor"),
+    ("Translator", "translator"),  # v2.1 draft
 ]
 PUBLICATION_FIELDS = [
     ("Publisher", "publisher"), ("Imprint", "imprint"), ("Web", "web"),
     ("Language (ISO)", "language_iso"), ("Format", "format"),
     ("Year", "year"), ("Month", "month"), ("Day", "day"),
+    ("Scan Information", "scan_information"),
 ]
 
 # Fields that get a "+" quick-pick button next to their QLineEdit --

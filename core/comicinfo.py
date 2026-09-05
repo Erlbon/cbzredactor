@@ -14,6 +14,24 @@ they honor, and plenty of real CBZ files have no ComicInfo.xml at all.
 This module treats every field as optional and never invents a value
 the archive didn't already have.
 
+The v2.0 field set is supplemented here with four fields from the
+Anansi Project's v2.1 DRAFT schema (not yet finalized, but already
+understood by ComicTagger and by readers like Kavita):
+https://github.com/anansi-project/comicinfo/blob/main/drafts/v2.1/ComicInfo.xsd
+Translator, Tags, StoryArcNumber, and GTIN. Purely additive and safe
+either way -- a reader that only knows v2.0 simply ignores elements it
+doesn't recognize, the same tolerance this module itself extends to
+any *other* schema draft's fields via `extra_elements` below.
+
+Confirmed directly against ComicTagger's own source
+(comicapi/tags/comicrack.py) that its multi-value convention for
+Genre/Characters/Teams/Locations/StoryArc/credits is comma-separated,
+matching what this app's own GUI already uses (see gui/metadata_panel.py
+and core/comic_genres.py) -- one notable difference found: ComicTagger
+treats Web as space-separated multiple URLs, not comma-separated; this
+module has no opinion on that (Web is just a plain string here), so
+nothing to reconcile, just worth knowing when comparing files.
+
 Design notes (mirroring core/epub_metadata.py's approach for the
 sibling EPUB tool):
 - Every field is a plain string from the GUI's point of view -- a form
@@ -77,16 +95,16 @@ FIELD_ORDER_BEFORE_EXTRAS = [
     "Summary", "Notes",
     "Year", "Month", "Day",
     "Writer", "Penciller", "Inker", "Colorist", "Letterer",
-    "CoverArtist", "Editor",
+    "CoverArtist", "Editor", "Translator",  # Translator: v2.1 draft
     "Publisher", "Imprint",
-    "Genre", "Web", "PageCount", "LanguageISO", "Format",
+    "Genre", "Tags", "Web", "PageCount", "LanguageISO", "Format",  # Tags: v2.1 draft
     "BlackAndWhite", "Manga",
     "Characters", "Teams", "Locations",
-    "ScanInformation", "StoryArc", "SeriesGroup",
+    "ScanInformation", "StoryArc", "StoryArcNumber", "SeriesGroup",  # StoryArcNumber: v2.1 draft
     "AgeRating",
 ]
 FIELD_ORDER_AFTER_EXTRAS = [
-    "CommunityRating", "MainCharacterOrTeam", "Review",
+    "CommunityRating", "MainCharacterOrTeam", "Review", "GTIN",  # GTIN: v2.1 draft
 ]
 FIELD_ORDER = FIELD_ORDER_BEFORE_EXTRAS + FIELD_ORDER_AFTER_EXTRAS
 
@@ -99,16 +117,18 @@ TAG_TO_ATTR = {
     "Year": "year", "Month": "month", "Day": "day",
     "Writer": "writer", "Penciller": "penciller", "Inker": "inker",
     "Colorist": "colorist", "Letterer": "letterer",
-    "CoverArtist": "cover_artist", "Editor": "editor",
+    "CoverArtist": "cover_artist", "Editor": "editor", "Translator": "translator",
     "Publisher": "publisher", "Imprint": "imprint",
-    "Genre": "genre", "Web": "web", "PageCount": "page_count",
+    "Genre": "genre", "Tags": "tags", "Web": "web", "PageCount": "page_count",
     "LanguageISO": "language_iso", "Format": "format",
     "BlackAndWhite": "black_and_white", "Manga": "manga",
     "Characters": "characters", "Teams": "teams", "Locations": "locations",
     "ScanInformation": "scan_information", "StoryArc": "story_arc",
+    "StoryArcNumber": "story_arc_number",
     "SeriesGroup": "series_group", "AgeRating": "age_rating",
     "CommunityRating": "community_rating",
     "MainCharacterOrTeam": "main_character_or_team", "Review": "review",
+    "GTIN": "gtin",
 }
 ATTR_TO_TAG = {attr: tag for tag, attr in TAG_TO_ATTR.items()}
 
@@ -144,9 +164,11 @@ class ComicInfoMetadata:
     letterer: str = ""
     cover_artist: str = ""
     editor: str = ""
+    translator: str = ""  # v2.1 draft
     publisher: str = ""
     imprint: str = ""
     genre: str = ""
+    tags: str = ""  # v2.1 draft
     web: str = ""
     page_count: str = ""
     language_iso: str = ""
@@ -158,11 +180,13 @@ class ComicInfoMetadata:
     locations: str = ""
     scan_information: str = ""
     story_arc: str = ""
+    story_arc_number: str = ""  # v2.1 draft
     series_group: str = ""
     age_rating: str = ""
     community_rating: str = ""
     main_character_or_team: str = ""
     review: str = ""
+    gtin: str = ""  # v2.1 draft -- ISBN/ISSN/EAN/JAN/etc, whichever the publisher used
 
     # Verbatim clones of any child element not in TAG_TO_ATTR (most
     # notably <Pages>) -- see module docstring. Not compared by
