@@ -57,6 +57,7 @@ class ComicVineLookupDialog(LookupDialogBase):
             search_label="Searching Comic Vine…",
             item_label=lambda book: os.path.basename(book.path),
             search_one=self._search_one_book,
+            query_fields=[("series", "Series"), ("number", "Number")],
         )
 
         change_key_btn = QPushButton("Change API Key…")
@@ -87,17 +88,26 @@ class ComicVineLookupDialog(LookupDialogBase):
     # ------------------------------------------------------------------
     # Searching one book
 
-    def _search_one_book(self, book: CbzBook) -> LookupResult:
-        if not self._api_key:
-            return LookupResult(error='No Comic Vine API key set -- click "Change API Key…" to add one.')
+    def _search_one_book(self, book: CbzBook, query_override: dict) -> LookupResult:
+        guessed_series, guessed_number = guess_series_and_number(
+            book.path, book.metadata.series, book.metadata.number
+        )
+        series = query_override.get("series") or guessed_series
+        number = query_override.get("number") or guessed_number
+        used_query = {"series": series, "number": number}
 
-        series, number = guess_series_and_number(book.path, book.metadata.series, book.metadata.number)
+        if not self._api_key:
+            return LookupResult(
+                error='No Comic Vine API key set -- click "Change API Key…" to add one.',
+                used_query=used_query,
+            )
+
         try:
             candidates = search_comicvine(self._api_key, series, number)
         except ComicVineLookupError as exc:
-            return LookupResult(error=str(exc))
+            return LookupResult(error=str(exc), used_query=used_query)
         if not candidates:
-            return LookupResult()
+            return LookupResult(used_query=used_query)
 
         best = candidates[0]
         try:
@@ -105,7 +115,7 @@ class ComicVineLookupDialog(LookupDialogBase):
             details.publisher = fetch_publisher(self._api_key, best.volume_detail_url)
             fields = details.as_dict()
         except ComicVineLookupError as exc:
-            return LookupResult(error=str(exc))
+            return LookupResult(error=str(exc), used_query=used_query)
 
         cover_bytes = None
         if best.image_url:
@@ -114,4 +124,4 @@ class ComicVineLookupDialog(LookupDialogBase):
             except ComicVineLookupError:
                 pass  # cover is a nice-to-have preview only; never worth failing the row over
 
-        return LookupResult(fields=fields, cover_bytes=cover_bytes)
+        return LookupResult(fields=fields, cover_bytes=cover_bytes, used_query=used_query)

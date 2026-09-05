@@ -8,10 +8,17 @@ as epubredactor's gui/tag_panel.py, rebuilt here for CBZ's field set.
 
 Deliberately dumb: this widget owns no CbzBook and does no file I/O --
 MainWindow calls load_metadata()/read back edited fields via
-current_metadata(), and connects fieldsChanged to its own dirty-
+apply_to_metadata(), and connects fieldsChanged to its own dirty-
 tracking. Keeping I/O out of this class is what makes it painlessly
-reusable for a future "edit fields, apply to N selected files" batch
-flow without dragging file handling along with it.
+reusable for bulk editing too (set_bulk_mode()/bulk_changed_fields()):
+when MainWindow has more than one file selected, it puts this panel
+into bulk mode instead of loading any one file's metadata -- every
+field starts blank, and only the fields the user actually types
+something into get applied (to every selected file at once) when they
+click "Apply to N Selected Files", via bulkApplyRequested. A field
+left blank is left untouched on every file, not cleared -- same
+"blank means don't touch" convention used throughout the sibling
+Redactor tools' own bulk-edit features.
 """
 
 from __future__ import annotations
@@ -29,6 +36,7 @@ from PyQt6.QtWidgets import (
     QLabel,
     QLineEdit,
     QPlainTextEdit,
+    QPushButton,
     QScrollArea,
     QVBoxLayout,
     QWidget,
@@ -67,10 +75,12 @@ PUBLICATION_FIELDS = [
 class ComicInfoPanel(QWidget):
     fieldsChanged = pyqtSignal()
     collapseToggleRequested = pyqtSignal()
+    bulkApplyRequested = pyqtSignal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self._loading = False  # True while load_metadata() populates widgets, to suppress fieldsChanged
+        self.bulk_mode = False  # True when editing N>1 selected files at once -- see module docstring
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(4, 4, 4, 4)
@@ -104,6 +114,22 @@ class ComicInfoPanel(QWidget):
         self.page_count_label = QLabel("")
         self.page_count_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         outer.addWidget(self.page_count_label)
+
+        # Only shown in bulk mode (set_bulk_mode()) -- explains the
+        # "blank means unchanged" convention and gives the explicit
+        # apply action, since silently auto-applying edits to N files
+        # the moment the user clicks away (like single-file editing
+        # does) would be too easy to trigger by accident.
+        self.bulk_info_label = QLabel("")
+        self.bulk_info_label.setWordWrap(True)
+        self.bulk_info_label.setStyleSheet("color: palette(mid); font-style: italic;")
+        self.bulk_info_label.setVisible(False)
+        outer.addWidget(self.bulk_info_label)
+
+        self.bulk_apply_btn = QPushButton("")
+        self.bulk_apply_btn.clicked.connect(self.bulkApplyRequested.emit)
+        self.bulk_apply_btn.setVisible(False)
+        outer.addWidget(self.bulk_apply_btn)
 
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
@@ -191,9 +217,59 @@ class ComicInfoPanel(QWidget):
     def set_enabled(self, enabled: bool) -> None:
         self.setEnabled(enabled)
         if not enabled:
+            self.set_bulk_mode(0)
             self.cover_label.set_original_pixmap(None)
             self.cover_label.setText("No file selected")
             self.page_count_label.setText("")
+
+    def set_bulk_mode(self, count: int) -> None:
+        """count <= 1: normal single-file mode (the cover/page-count
+        area is shown; MainWindow separately calls load_metadata() for
+        that one file). count > 1: bulk mode -- every field is cleared,
+        the cover/page-count area (meaningless across different files)
+        is hidden in favor of the bulk-apply controls, and only fields
+        the user actually fills in get applied, to every selected file,
+        when bulkApplyRequested fires."""
+        self.bulk_mode = count > 1
+        self.cover_label.setVisible(not self.bulk_mode)
+        self.page_count_label.setVisible(not self.bulk_mode)
+        self.bulk_info_label.setVisible(self.bulk_mode)
+        self.bulk_apply_btn.setVisible(self.bulk_mode)
+        if self.bulk_mode:
+            self.bulk_info_label.setText(
+                f"Editing {count} selected files at once. Leave a field blank to leave it "
+                "unchanged on every file; fill one in to set it on all of them."
+            )
+            self.bulk_apply_btn.setText(f"Apply to {count} Selected Files")
+            self.load_metadata(ComicInfoMetadata(), None, "")
+
+    def bulk_changed_fields(self) -> dict:
+        """Only the fields with something actually typed/selected in
+        bulk mode -- what gets applied to every selected file on
+        bulkApplyRequested. A field left blank means "don't touch it",
+        not "clear it" (unlike apply_to_metadata(), single-file mode's
+        equivalent, where a blank field IS the value to write)."""
+        changed: dict = {}
+        for attr, widget in self._line_edits.items():
+            value = widget.toPlainText() if isinstance(widget, QPlainTextEdit) else widget.text()
+            value = value.strip()
+            if value:
+                changed[attr] = value
+
+        for attr, combo in (
+            ("age_rating", self.age_rating_combo),
+            ("manga", self.manga_combo),
+            ("black_and_white", self.black_and_white_combo),
+        ):
+            value = combo.currentText().strip()
+            if value:
+                changed[attr] = value
+
+        rating = self.community_rating_spin.value()
+        if rating > 0:
+            changed["community_rating"] = f"{rating:.1f}"
+
+        return changed
 
     def load_metadata(self, metadata: ComicInfoMetadata, cover_bytes: Optional[bytes], page_count_text: str) -> None:
         """Populates every field from `metadata` and shows `cover_bytes`

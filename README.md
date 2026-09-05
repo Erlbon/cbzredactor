@@ -22,12 +22,21 @@ rather than requiring it up front.
 ## Features
 
 - Load one or many `.cbz` files (or a whole folder) and browse them in
-  a table.
+  a table. Multi-select (ctrl/shift-click, same as Explorer) works for
+  saving, looking up, or bulk-editing several files at once.
+- A toolbar (Load Files / Save / Save All Changed) sits above the
+  table for one-click access to the most common actions, alongside the
+  same actions in the File/Operations menus.
 - Edit the full set of common ComicInfo.xml fields, grouped as
   Identity/Sequence, Story, Credits, Publication, Classification, and
-  free-text Summary/Notes/Review.
+  free-text Summary/Notes/Review. Selecting more than one file switches
+  the panel to **bulk edit** mode: every field starts blank, and only
+  the ones you actually fill in get applied -- to every selected file
+  at once -- when you click "Apply to N Selected Files". A field left
+  blank is left untouched on every file, not cleared.
 - Sidebar shows the first page (by filename sort order) as a cover
-  thumbnail.
+  thumbnail (single-file selection only -- bulk mode hides it, since
+  there's no one "the" cover across different files).
 - `PageCount` is always recomputed from the archive's actual image
   count at save time -- never hand-edited -- with a mismatch against
   whatever was previously stored flagged in the file list beforehand.
@@ -41,8 +50,7 @@ rather than requiring it up front.
   creator credits, characters/teams/locations, and publisher -- review
   and untick anything before Apply, same pattern as epubredactor's
   Google Books/Calibre/Open Library lookups. Needs a free Comic Vine
-  API key (Settings > Comic Vine API Key...); the cover image shown is
-  for visual confirmation only and is never written into the archive.
+  API key (Settings > Comic Vine API Key...).
 - `Import > Look Up via Grand Comics Database...` -- same Series +
   Number search and review-then-Apply flow, against
   [comics.org](https://www.comics.org/)'s open API (no key needed).
@@ -54,6 +62,18 @@ rather than requiring it up front.
   follows pagination and promotes an exact series-name match to the
   top automatically, but an unusual or very generic series name may
   still need reviewing the candidate list carefully.
+- **Both lookup dialogs show a large cover preview** (not a cramped
+  in-table icon) for whichever row is currently selected, alongside an
+  **editable Series/Number correction form** pre-filled with whatever
+  was actually searched (the filename guess, by default). If the guess
+  was wrong -- or GCD needs a number the filename didn't have -- correct
+  it and click "Search This Item" to re-run just that row, without
+  restarting the whole batch.
+- The filename guess used to seed a search strips common trailing
+  scene-release annotations first -- `Batman 001 (2016) (Digital)
+  (Empire).cbz` guesses series "Batman", number "1", not the whole
+  bracketed mess. Still just a best-effort guess for a blank Series
+  field; use the correction form above when it's wrong.
 - **Both lookups protect existing data the same way**: on Apply, if
   any looked-up field would overwrite a value a file already has (a
   hand-typed one, or from a prior lookup), you're asked once whether

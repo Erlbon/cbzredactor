@@ -105,13 +105,16 @@ class MainWindow(QMainWindow):
         self.resize(1100, 720)
 
         self.books: list[CbzBook] = []
-        self._current_row = -1
+        self._selected_rows: list[int] = []
 
         self.table = QTableWidget(0, len(COLUMNS))
         self.table.setHorizontalHeaderLabels(COLUMNS)
         self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
-        self.table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        # Multi-select (ctrl/shift-click, same as Explorer) -- needed for
+        # both bulk metadata editing (see ComicInfoPanel.set_bulk_mode())
+        # and looking up several files via one API search in one go.
+        self.table.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.table.itemSelectionChanged.connect(self._on_selection_changed)
 
@@ -119,6 +122,7 @@ class MainWindow(QMainWindow):
         self.panel.set_enabled(False)
         self.panel.fieldsChanged.connect(self._on_fields_changed)
         self.panel.collapseToggleRequested.connect(self._toggle_panel)
+        self.panel.bulkApplyRequested.connect(self._apply_bulk_edit)
 
         self.splitter = QSplitter(Qt.Orientation.Horizontal)
         # Side panel on the left, table on the right -- matches
@@ -134,6 +138,7 @@ class MainWindow(QMainWindow):
 
         self.setStatusBar(QStatusBar())
         self._build_menu()
+        self._build_toolbar()
         self._update_status()
 
     # ------------------------------------------------------------------
@@ -170,6 +175,19 @@ class MainWindow(QMainWindow):
             ],
         }
         self.actions_ = build_menu_bar(self, specs)
+
+    def _build_toolbar(self) -> None:
+        """Quick-access buttons for the most common actions -- reuses
+        the exact QAction objects the menu bar already built (per
+        menu_builder.py's own docstring: "actions['save'] is the QAction,
+        reusable on a toolbar"), so enabled state/shortcuts stay in sync
+        with the menu automatically rather than needing a second copy."""
+        toolbar = self.addToolBar("Main")
+        toolbar.setMovable(False)
+        toolbar.addAction(self.actions_["load_files"])
+        toolbar.addSeparator()
+        toolbar.addAction(self.actions_["save"])
+        toolbar.addAction(self.actions_["save_all"])
 
     # ------------------------------------------------------------------
     # Loading files
@@ -246,34 +264,66 @@ class MainWindow(QMainWindow):
 
     def _on_selection_changed(self) -> None:
         self._commit_current_edits()
-        rows = self.table.selectionModel().selectedRows()
-        if not rows:
-            self._current_row = -1
+        self._selected_rows = sorted(index.row() for index in self.table.selectionModel().selectedRows())
+
+        if not self._selected_rows:
             self.panel.set_enabled(False)
             return
-        self._current_row = rows[0].row()
-        book = self.books[self._current_row]
+
         self.panel.set_enabled(True)
-        page_count_text = f"{book.actual_page_count} page(s)"
-        if book.page_count_mismatch:
-            page_count_text += f" -- ComicInfo.xml says {book.metadata.page_count}, will be corrected on save"
-        self.panel.load_metadata(book.metadata, book.read_first_page_bytes(), page_count_text)
+        if len(self._selected_rows) == 1:
+            book = self.books[self._selected_rows[0]]
+            self.panel.set_bulk_mode(0)
+            page_count_text = f"{book.actual_page_count} page(s)"
+            if book.page_count_mismatch:
+                page_count_text += f" -- ComicInfo.xml says {book.metadata.page_count}, will be corrected on save"
+            self.panel.load_metadata(book.metadata, book.read_first_page_bytes(), page_count_text)
+        else:
+            self.panel.set_bulk_mode(len(self._selected_rows))
 
     def _commit_current_edits(self) -> None:
         """Writes the panel's current widget values back into whichever
         book was selected *before* the selection changes -- otherwise
         an in-progress edit is silently discarded the instant the user
-        clicks a different row."""
-        if self._current_row < 0 or self._current_row >= len(self.books):
+        clicks a different row. Only applies in single-selection mode;
+        a bulk edit in progress is deliberately NOT auto-committed just
+        because the selection changed -- see ComicInfoPanel's module
+        docstring on why that needs an explicit Apply instead."""
+        if len(self._selected_rows) != 1:
             return
-        book = self.books[self._current_row]
-        self.panel.apply_to_metadata(book.metadata)
+        row = self._selected_rows[0]
+        if row >= len(self.books):
+            return
+        self.panel.apply_to_metadata(self.books[row].metadata)
 
     def _on_fields_changed(self) -> None:
-        if self._current_row < 0:
+        if len(self._selected_rows) != 1:
+            return  # bulk mode: nothing applies until the explicit Apply button
+        row = self._selected_rows[0]
+        self.books[row].dirty = True
+        self._refresh_table_row(row, self.books[row])
+
+    def _apply_bulk_edit(self) -> None:
+        changed_fields = self.panel.bulk_changed_fields()
+        if not changed_fields:
+            QMessageBox.information(self, "Nothing to Apply", "No fields were filled in.")
             return
-        self.books[self._current_row].dirty = True
-        self._refresh_table_row(self._current_row, self.books[self._current_row])
+
+        target_books = [self.books[row] for row in self._selected_rows]
+        metadata_changes = {i: dict(changed_fields) for i in range(len(target_books))}
+        metadata_changes = self._resolve_overwrite_conflicts(target_books, metadata_changes)
+        if metadata_changes is None:
+            return
+
+        for i, fields in metadata_changes.items():
+            book = target_books[i]
+            for attr, value in fields.items():
+                setattr(book.metadata, attr, value)
+            book.dirty = True
+            self._refresh_table_row(self.books.index(book), book)
+
+        self.panel.set_bulk_mode(len(self._selected_rows))  # clears the fields, ready for another round
+        self._update_status()
 
     def _toggle_panel(self) -> None:
         self._panel_collapser.toggle()
@@ -284,19 +334,39 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
 
     def save_current(self) -> None:
+        """Saves every selected file -- one file, the usual case, saves
+        exactly like before; several selected at once saves all of
+        them, matching a normal multi-select "Save" convention."""
         self._commit_current_edits()
-        if self._current_row < 0:
+        if not self._selected_rows:
             return
-        self._save_book(self._current_row)
+        if len(self._selected_rows) == 1:
+            self._save_book(self._selected_rows[0])
+            return
+
+        errors: list[str] = []
+        for row in self._selected_rows:
+            book = self.books[row]
+            try:
+                book.save()
+            except CbzError as exc:
+                errors.append(f"{os.path.basename(book.path)}: {exc}")
+            self._refresh_table_row(row, book)
+        if errors:
+            from redactor_common.core.error_summary import summarize_errors
+            QMessageBox.warning(self, "Some Files Failed to Save", summarize_errors(errors))
+        self._update_status()
 
     def save_current_as(self) -> None:
         self._commit_current_edits()
-        if self._current_row < 0:
+        if len(self._selected_rows) != 1:
+            QMessageBox.information(self, "Save As", "Select exactly one file to Save As.")
             return
-        book = self.books[self._current_row]
+        row = self._selected_rows[0]
+        book = self.books[row]
         path, _ = QFileDialog.getSaveFileName(self, "Save As", book.path, "Comic Book ZIP (*.cbz)")
         if path:
-            self._save_book(self._current_row, output_path=path)
+            self._save_book(row, output_path=path)
 
     def _save_book(self, row: int, output_path: str | None = None) -> None:
         book = self.books[row]
@@ -360,13 +430,13 @@ class MainWindow(QMainWindow):
             self._load_paths(converted)
 
     def _target_books(self) -> list[CbzBook]:
-        """The selected book, or every loaded book if none is selected --
-        same fallback epubredactor's own lookup dialogs use, so "look up
-        this one file" and "look up everything I loaded" both work
-        without a separate multi-select step (the table is single-
-        selection here, so this is effectively "one file" vs "all")."""
-        if self._current_row >= 0:
-            return [self.books[self._current_row]]
+        """The selected book(s), or every loaded book if none is
+        selected -- same fallback epubredactor's own lookup dialogs
+        use, so "look up this one file", "look up these N I selected",
+        and "look up everything I loaded" all work without a separate
+        mode switch."""
+        if self._selected_rows:
+            return [self.books[row] for row in self._selected_rows]
         return list(self.books)
 
     def _run_lookup_dialog(self, dialog_class) -> None:
@@ -401,7 +471,7 @@ class MainWindow(QMainWindow):
             book.dirty = True
             row = self.books.index(book)
             self._refresh_table_row(row, book)
-            if row == self._current_row:
+            if self._selected_rows == [row]:
                 page_count_text = f"{book.actual_page_count} page(s)"
                 self.panel.load_metadata(book.metadata, book.read_first_page_bytes(), page_count_text)
         self._update_status()

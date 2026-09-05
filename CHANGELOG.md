@@ -1,5 +1,35 @@
 # Changelog
 
+## 2026-09-05#07 -- Toolbar, multi-select bulk editing, lookup query correction
+
+Four real usability gaps reported by the user in one go:
+
+- **Missing top toolbar**: added one (Load Files / Save / Save All
+  Changed) above the table, reusing the same QActions the menus use.
+- **Only one file selectable at a time**: the table is now multi-select
+  (ctrl/shift-click). Selecting 2+ files switches the metadata panel
+  into **bulk edit** mode -- every field starts blank, and only the
+  ones you actually fill in get applied to every selected file at once
+  via a new "Apply to N Selected Files" button (blank = unchanged, not
+  cleared). Save, and both lookup dialogs, now operate on the whole
+  selection instead of just one file.
+- **GCD lookups failing**: traced to `core/filename_guess.py` not
+  handling real-world scene-release filenames at all -- anything with
+  trailing metadata like `Batman 001 (2016) (Digital) (Empire).cbz`
+  extracted no number whatsoever (the pattern required the number to
+  be the literal last thing in the filename), and GCD's search requires
+  both series AND number to search at all. Fixed to strip trailing
+  bracketed/parenthesized groups before looking for the number.
+- **No way to correct a bad guess, and the Comic Vine cover preview
+  was tiny**: both fixed at the shared `redactor_common.gui.
+  lookup_dialog.LookupDialogBase` level (see that repo's own changelog,
+  pinned to tag `2026-09-05-04`) -- a large per-row cover preview
+  replaces the old in-table icon, and an editable Series/Number
+  correction form lets you fix a wrong guess and re-search just that
+  row via "Search This Item", without restarting the whole batch. This
+  is what actually makes GCD usable even when the filename guess still
+  isn't perfect after the parsing fix above.
+
 ## 2026-09-05#06 -- Side panel moved to the left; fixed a stuck collapse toggle
 
 - Moved the metadata side panel (cover thumbnail + ComicInfo.xml form)
