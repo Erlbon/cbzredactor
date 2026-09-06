@@ -133,6 +133,22 @@ class ComicInfoPanel(QWidget):
         outer.addWidget(self.bulk_info_label)
 
         self._line_edits: dict[str, QLineEdit] = {}
+        # The widget actually passed to QFormLayout.addRow() for each
+        # field (the QLineEdit itself, the quick-pick wrapper container
+        # for Genre/Language, or the classification combo/spin box) --
+        # what set_visible_fields() hides/shows. Deliberately a
+        # *different* dict from _line_edits: that one must keep holding
+        # every field's actual data widget regardless of visibility,
+        # since load_metadata()/apply_to_metadata()/bulk_changed_fields()
+        # read and write every field unconditionally -- a hidden column
+        # still round-trips its data, only the on-screen row disappears
+        # (per the user's explicit "should still exist, and be written
+        # to" requirement).
+        self._row_widgets: dict[str, QWidget] = {}
+        # Each field group's QGroupBox plus the attrs it contains, so a
+        # group whose every field is hidden can hide its own title too,
+        # instead of showing an empty "Identity / Sequence" box.
+        self._group_boxes: list[tuple[QGroupBox, list[str]]] = []
         scroll = self._build_fields_scroll_area()
         cover_box = self._build_cover_box()
 
@@ -203,10 +219,10 @@ class ComicInfoPanel(QWidget):
             edit = QLineEdit()
             edit.textChanged.connect(self._on_field_changed)
             self._line_edits[attr] = edit
-            if attr in _QUICK_PICK_ATTRS:
-                layout.addRow(label, self._wrap_with_quick_pick(attr, edit))
-            else:
-                layout.addRow(label, edit)
+            row_widget = self._wrap_with_quick_pick(attr, edit) if attr in _QUICK_PICK_ATTRS else edit
+            layout.addRow(label, row_widget)
+            self._row_widgets[attr] = row_widget
+        self._group_boxes.append((box, [attr for _label, attr in fields]))
         return box
 
     def _wrap_with_quick_pick(self, attr: str, edit: QLineEdit) -> QWidget:
@@ -279,6 +295,11 @@ class ComicInfoPanel(QWidget):
         text_edit.textChanged.connect(self._on_field_changed)
         self._line_edits[attr] = text_edit  # QPlainTextEdit exposes toPlainText()/setPlainText() below
         layout.addWidget(text_edit)
+        # No separate label/row here -- the whole box (title included) IS
+        # the row for a free-text field, so hiding/showing the box itself
+        # is set_visible_fields()'s mechanism for Summary/Notes/Review.
+        self._row_widgets[attr] = box
+        self._group_boxes.append((box, [attr]))
         return box
 
     def _build_classification_group(self) -> QGroupBox:
@@ -290,18 +311,21 @@ class ComicInfoPanel(QWidget):
         self.age_rating_combo.setEditable(True)  # preserves an unrecognized value already in the file
         self.age_rating_combo.currentTextChanged.connect(self._on_field_changed)
         layout.addRow("Age Rating", self.age_rating_combo)
+        self._row_widgets["age_rating"] = self.age_rating_combo
 
         self.manga_combo = QComboBox()
         self.manga_combo.addItems(MANGA_VALUES)
         self.manga_combo.setEditable(True)
         self.manga_combo.currentTextChanged.connect(self._on_field_changed)
         layout.addRow("Manga", self.manga_combo)
+        self._row_widgets["manga"] = self.manga_combo
 
         self.black_and_white_combo = QComboBox()
         self.black_and_white_combo.addItems(BLACK_AND_WHITE_VALUES)
         self.black_and_white_combo.setEditable(True)
         self.black_and_white_combo.currentTextChanged.connect(self._on_field_changed)
         layout.addRow("Black && White", self.black_and_white_combo)
+        self._row_widgets["black_and_white"] = self.black_and_white_combo
 
         self.community_rating_spin = QDoubleSpinBox()
         self.community_rating_spin.setRange(0.0, 5.0)
@@ -310,12 +334,51 @@ class ComicInfoPanel(QWidget):
         self.community_rating_spin.setSpecialValueText(" ")  # 0.0 reads as "unset" in the GUI
         self.community_rating_spin.valueChanged.connect(self._on_field_changed)
         layout.addRow("Community Rating", self.community_rating_spin)
+        self._row_widgets["community_rating"] = self.community_rating_spin
 
+        self._group_boxes.append((box, ["age_rating", "manga", "black_and_white", "community_rating"]))
         return box
 
     def _on_field_changed(self, *_args) -> None:
         if not self._loading:
             self.fieldsChanged.emit()
+
+    # ------------------------------------------------------------------
+    # Column <-> field visibility
+    # ------------------------------------------------------------------
+
+    def set_visible_fields(self, visible_attrs: set[str]) -> None:
+        """Shows/hides each field's row to match `visible_attrs` (the
+        set of ComicInfo attribute names whose table column is currently
+        shown) -- called by MainWindow whenever column visibility changes
+        (Settings > Add/Remove Columns..., or right-clicking a header),
+        so a column you've hidden from the table also stops cluttering
+        this panel, and vice versa.
+
+        Deliberately hides widgets rather than rebuilding rows from
+        scratch: nothing is ever destroyed, so (a) there's no risk of
+        losing an in-progress edit sitting in a widget mid-hide, and (b)
+        every field keeps working exactly as before for every other
+        code path -- load_metadata(), apply_to_metadata(),
+        bulk_changed_fields() all iterate _line_edits unconditionally,
+        completely unaware of visibility. A hidden field still exists
+        and still gets written to by a lookup, Parse Filename, Search/
+        Replace, or Case Conversion; only the on-screen row disappears.
+        """
+        for attr, row_widget in self._row_widgets.items():
+            visible = attr in visible_attrs
+            row_widget.setVisible(visible)
+            parent = row_widget.parentWidget()
+            form_layout = parent.layout() if parent else None
+            if isinstance(form_layout, QFormLayout):
+                label = form_layout.labelForField(row_widget)
+                if label:
+                    label.setVisible(visible)
+
+        # A group whose every field just got hidden shouldn't show an
+        # empty box with just a title -- hide the box itself too.
+        for box, attrs in self._group_boxes:
+            box.setVisible(any(attr in visible_attrs for attr in attrs))
 
     # ------------------------------------------------------------------
     # Load / read-back

@@ -126,14 +126,24 @@ _DEFAULT_VISIBLE_COLUMNS = frozenset({"filename", "title", "series", "number", "
 DEFAULT_HIDDEN_COLUMNS: frozenset[str] = frozenset(_ALL_COLUMN_KEYS) - _DEFAULT_VISIBLE_COLUMNS
 
 # Metadata fields offered as %placeholder% tokens in Rename/Export and
-# Parse Filename -- a curated subset of every ComicInfo field (the ones
-# that actually make sense in a filename), not the full form.
-FILENAME_PLACEHOLDERS: list[tuple[str, str]] = [
-    ("series", "Series"), ("number", "Number"), ("title", "Title"),
-    ("volume", "Volume"), ("year", "Year"), ("publisher", "Publisher"),
-    ("writer", "Writer"),
-]
-NUMERIC_FILENAME_FIELDS = {"number", "volume", "year"}
+# Parse Filename -- every field the side panel can edit, same as
+# COLUMN_SPECS just above, built from the same _FIELD_LABELS dict so
+# all three (columns, panel fields, filename placeholders) never drift
+# out of sync with each other. Used to be a curated 7-field subset
+# (Series/Number/Title/Volume/Year/Publisher/Writer only) until the
+# user pointed out a field with real metadata -- Genre, Story Arc,
+# whatever -- couldn't be represented in a filename pattern just
+# because it wasn't on that original short list.
+FILENAME_PLACEHOLDERS: list[tuple[str, str]] = list(_FIELD_LABELS.items())
+# Fields Parse Filename should extract/coerce as numbers (see
+# ParseFilenameDialog) rather than leaving as free-text strings. Note:
+# PageCount isn't here (or in _FIELD_LABELS at all) -- it's never
+# hand-edited, always recomputed from the archive's actual image count
+# at save time (see ComicInfoPanel.apply_to_metadata()'s docstring).
+NUMERIC_FILENAME_FIELDS = {
+    "number", "count", "volume", "alternate_number", "alternate_count",
+    "year", "month", "day", "community_rating",
+}
 DEFAULT_RENAME_PATTERN = "%series% %number% - %title%"
 
 LOAD_PROGRESS_THRESHOLD = 3
@@ -194,6 +204,7 @@ class MainWindow(QMainWindow):
         self.panel.set_enabled(False)
         self.panel.fieldsChanged.connect(self._on_fields_changed)
         self.panel.collapseToggleRequested.connect(self._toggle_panel)
+        self._sync_panel_visible_fields()
 
         self.zoom = TableZoomController(self.table, parent=self)
 
@@ -360,6 +371,19 @@ class MainWindow(QMainWindow):
         self.table.setColumnHidden(self._col_index[key], not visible)
         hidden = {k for k in self._column_keys if self.table.isColumnHidden(self._col_index[k])}
         app_settings.save_hidden_columns(sanitize_hidden_fields(hidden, PROTECTED_COLUMNS))
+        self._sync_panel_visible_fields()
+
+    def _sync_panel_visible_fields(self) -> None:
+        """Keeps the side panel's visible edit rows in lock-step with
+        which columns are currently shown in the table -- hiding a
+        column (header right-click, or Settings > Add/Remove
+        Columns...) also stops cluttering the panel with a field you
+        said you don't care about, and un-hiding a column brings its
+        row straight back. The field's data is untouched either way
+        (see ComicInfoPanel.set_visible_fields()'s own docstring) --
+        this only ever changes what's drawn on screen."""
+        hidden = {k for k in self._column_keys if self.table.isColumnHidden(self._col_index[k])}
+        self.panel.set_visible_fields(set(_FIELD_LABELS) - hidden)
 
     def _show_header_context_menu(self, pos) -> None:
         hidden = {k for k in self._column_keys if self.table.isColumnHidden(self._col_index[k])}
@@ -383,6 +407,7 @@ class MainWindow(QMainWindow):
         for key in self._column_keys:
             self.table.setColumnHidden(self._col_index[key], key in new_hidden)
         app_settings.save_hidden_columns(new_hidden)
+        self._sync_panel_visible_fields()
 
     def _show_table_context_menu(self, pos) -> None:
         # Selection-fix, and the generic Open Containing Folder/Copy

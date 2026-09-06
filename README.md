@@ -71,12 +71,16 @@ understands that this app now supports too).
   default (Filename/Title/Series/Number/Pages/Status) -- matching
   ComicRack's own "everything is an optional column" convention, just
   with a much smaller starting set so a fresh install isn't
-  overwhelming.
+  overwhelming. **Hiding a column also hides that field's edit row in
+  the side panel** (and un-hiding brings it straight back) -- the field
+  still exists and is still written to by a lookup, Parse Filename,
+  Search/Replace, or Case Conversion while hidden; only the on-screen
+  row disappears.
 - **Rename / Export Files...** (File menu, F2) renders a `%series%
   %number% - %title%`-style pattern (any ComicInfo field as a
-  placeholder) into a new filename for every selected file, previewed
-  before you commit -- rename in place or export renamed copies to a
-  folder, originals untouched either way.
+  placeholder, not just a curated subset) into a new filename for
+  every selected file, previewed before you commit -- rename in place
+  or export renamed copies to a folder, originals untouched either way.
 - **Parse Filename...** (Import menu, F3) is the reverse: extracts
   metadata FROM a filename using the same pattern syntax, auto-
   detecting which of your past patterns fits the current batch best.

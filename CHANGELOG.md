@@ -1,5 +1,46 @@
 # Changelog
 
+## 2026-09-06#03 -- Column visibility now drives the side panel too
+
+A "sanity check" question from the user surfaced three real gaps left
+over from the previous pass's "every field is a column" work:
+
+- **Hiding a column now hides that field's edit row in the side panel
+  too**, and un-hiding it brings the row straight back --
+  `ComicInfoPanel.set_visible_fields()` (new), wired from
+  `MainWindow._sync_panel_visible_fields()` on construction and every
+  time column visibility changes (header right-click, Settings >
+  Add/Remove Columns...). This is epub's own long-standing
+  `tag_panel.set_visible_fields()` pattern, ported here for the first
+  time -- it was never in `redactor_common`, and still isn't (see
+  below); cbzredactor's own version deliberately hides/shows widgets
+  rather than rebuilding rows from scratch like epub's does, since this
+  panel never needs epub's per-field bulk-edit checkboxes and the
+  simpler approach has zero risk of losing an in-progress edit mid-hide.
+- **No data loss from hiding a field**: a hidden field still exists in
+  the data model and is still written to by a lookup apply, Parse
+  Filename, Search/Replace, or Case Conversion -- only the on-screen
+  row disappears. `load_metadata()`/`apply_to_metadata()`/
+  `bulk_changed_fields()` were never filtered by visibility to begin
+  with; the new tests in `test_panel_column_visibility.py` pin this
+  down explicitly instead of leaving it merely implied.
+- **Every field with real metadata can now be used as a filename
+  %placeholder%** in Rename/Export and Parse Filename, not just the
+  old curated 7-field subset (Series/Number/Title/Volume/Year/
+  Publisher/Writer) -- `FILENAME_PLACEHOLDERS` is now built from the
+  same `_FIELD_LABELS` dict the columns and panel already share, so a
+  field like Genre or Story Arc can be exported into a filename.
+- Direct answer to "is the column/show edit field logic part of
+  redactor_common?": **no** -- confirmed by reading epub's actual
+  `tag_panel.set_visible_fields()`, which is epub-local and never
+  promoted. Not promoted from here either yet: cbzredactor's simpler
+  hide-don't-rebuild mechanic and epub's rebuild-and-reorder one solve
+  the same problem differently enough that generalizing both into one
+  shared implementation isn't a clean fit yet -- deferred until a third
+  Redactor app needs this and the actual common shape becomes clearer.
+
+4 new tests in `test_panel_column_visibility.py`.
+
 ## 2026-09-06#02 -- v2.1 draft fields, every field as a column, ComicRack/ComicTagger comparison
 
 Prompted by a real ComicRack column-chooser screenshot: most of those
