@@ -25,6 +25,7 @@ from core.comic_languages import DEFAULT_LANGUAGES
 
 _SETTINGS_FILENAME = "cbzredactor_settings.ini"
 _COMICVINE_API_KEY = "comicvine/api_key"
+_LAST_DIR_KEY = "files/last_directory"
 
 _PATTERN_HISTORY_KEY = "patterns/history"
 _MAX_PATTERN_HISTORY = 15
@@ -64,6 +65,23 @@ def save_comicvine_api_key(api_key: str) -> None:
     settings = _settings()
     settings.setValue(_COMICVINE_API_KEY, api_key.strip())
     settings.sync()
+
+
+def load_last_directory() -> str:
+    """Returns "" if nothing's been remembered yet, or the remembered
+    directory no longer exists (e.g. a removable drive that's since
+    been unplugged) -- callers should treat "" as "let Qt use its own
+    default". Same shape as epubredactor's gui/app_settings.py."""
+    path = _settings().value(_LAST_DIR_KEY, "", type=str)
+    return path if path and os.path.isdir(path) else ""
+
+
+def save_last_directory(path: str) -> None:
+    """Remember the directory containing `path` (a file or folder that
+    was just loaded) as the starting point for the next file dialog."""
+    directory = path if os.path.isdir(path) else os.path.dirname(path)
+    if directory and os.path.isdir(directory):
+        _settings().setValue(_LAST_DIR_KEY, directory)
 
 
 def load_resize_max_width() -> int:

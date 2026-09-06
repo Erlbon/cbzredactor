@@ -1,5 +1,14 @@
 # Changelog
 
+## 2026-09-06#07 -- Remember last directory for Load Files/Folder
+
+Both dialogs previously always opened wherever Qt/Windows defaulted to
+-- now they start from the last directory actually used, persisted
+across restarts (`gui/app_settings.py`'s `load_last_directory()`/
+`save_last_directory()`, same shape as the epub tool's equivalent).
+Reported alongside the same gap in mp3redactor, which got its own
+fix using its plain-configparser settings instead of QSettings.
+
 ## 2026-09-06#06 -- Lookup dialogs: side-by-side cover comparison
 
 "The scrapers need more usability... show the existing cover page of

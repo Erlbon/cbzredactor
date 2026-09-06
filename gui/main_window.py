@@ -454,16 +454,20 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
 
     def load_files_dialog(self) -> None:
+        start_dir = app_settings.load_last_directory()
         paths, _ = QFileDialog.getOpenFileNames(
-            self, "Load CBZ Files", "", "Comic Book Archives (*.cbz *.cbr);;All Files (*)"
+            self, "Load CBZ Files", start_dir, "Comic Book Archives (*.cbz *.cbr);;All Files (*)"
         )
         if paths:
+            app_settings.save_last_directory(paths[0])
             self._load_paths(paths)
 
     def load_folder_dialog(self) -> None:
-        folder = QFileDialog.getExistingDirectory(self, "Load Folder")
+        start_dir = app_settings.load_last_directory()
+        folder = QFileDialog.getExistingDirectory(self, "Load Folder", start_dir)
         if not folder:
             return
+        app_settings.save_last_directory(folder)
         paths = [
             os.path.join(folder, name)
             for name in sorted(os.listdir(folder))
