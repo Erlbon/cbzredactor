@@ -157,13 +157,16 @@ understands that this app now supports too).
   follows pagination and promotes an exact series-name match to the
   top automatically, but an unusual or very generic series name may
   still need reviewing the candidate list carefully.
-- **Both lookup dialogs show a large cover preview** (not a cramped
-  in-table icon) for whichever row is currently selected, alongside an
-  **editable Series/Number correction form** pre-filled with whatever
-  was actually searched (the filename guess, by default). If the guess
-  was wrong -- or GCD needs a number the filename didn't have -- correct
-  it and click "Search This Item" to re-run just that row, without
-  restarting the whole batch.
+- **Both lookup dialogs show the file's own "Current" cover side by
+  side with the "Found" one** (not a cramped in-table icon) for
+  whichever row is currently selected -- so you can actually see
+  whether the match is the same comic before trusting it, instead of
+  finding out after Apply. Below that, an **editable Series/Number
+  correction form** pre-filled with whatever was actually searched
+  (the filename guess, by default). If the guess was wrong -- or GCD
+  needs a number the filename didn't have -- correct it and click
+  "Search This Item" to re-run just that row, without restarting the
+  whole batch.
 - The filename guess used to seed a search strips common trailing
   scene-release annotations first -- `Batman 001 (2016) (Digital)
   (Empire).cbz` guesses series "Batman", number "1", not the whole

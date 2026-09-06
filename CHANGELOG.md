@@ -1,5 +1,26 @@
 # Changelog
 
+## 2026-09-06#06 -- Lookup dialogs: side-by-side cover comparison
+
+"The scrapers need more usability... show the existing cover page of
+the comic ... and the one from the scraper ... so that we can see that
+they are the same comic." Both `Import > Look Up via Comic Vine...` and
+`Import > Look Up via Grand Comics Database...` now show the selected
+row's file's own **Current** cover right next to the source's
+**Found** one, so a wrong match (different series, wrong issue) is
+obvious at a glance instead of only surfacing after Apply.
+
+Promoted to `redactor_common.gui.lookup_dialog.LookupDialogBase` as a
+new optional `get_local_cover(item) -> bytes | None` parameter (tag
+`2026-09-06-05`) -- backward compatible for any future consumer that
+doesn't supply one (that side just reads "No local cover"). Both
+cbzredactor dialogs pass `book.read_first_page_bytes()`. Cover preview
+size halved per slot (220x320 -> 170x250) to fit two side by side; the
+dialog's own default size grew (1020x600 -> 1150x640) to keep both
+comfortably readable.
+
+3 new tests in `test_lookup_dialog_covers.py`.
+
 ## 2026-09-06#05 -- Genre picker redesign, uniform selection theme, sortable columns, panel scroll fix
 
 Four separate real-use complaints, fixed together:

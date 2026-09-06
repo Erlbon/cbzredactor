@@ -4,9 +4,11 @@ gui/gcd_lookup_dialog.py
 Look Up via Grand Comics Database: for each target book, searches GCD
 using that book's own Series + Number (falling back to a filename
 guess, same as the Comic Vine dialog) and shows the match -- series,
-story title, credits, genre, characters, publisher, and a cover
-thumbnail for visual confirmation only (see core/gcd_lookup.py's
-module docstring for why it's never written into the archive).
+story title, credits, genre, characters, publisher, and its found
+cover next to the book's own existing cover for a side-by-side visual
+confirmation (see redactor_common.gui.lookup_dialog's `get_local_cover`;
+core/gcd_lookup.py's module docstring covers why a fetched cover is
+never written into the archive).
 
 Built on redactor_common's gui/lookup_dialog.py (LookupDialogBase) --
 this class supplies only what's GCD-specific: search_one()'s actual
@@ -42,13 +44,16 @@ class GcdLookupDialog(LookupDialogBase):
             info_text=(
                 f"Searching the Grand Comics Database for {len(books)} file(s) by Series + "
                 "Number (guessed from the filename when Series is blank; GCD needs both to "
-                "search, unlike Comic Vine). Untick anything you don't trust, then Apply. Cover "
-                "images are shown for confirmation only -- they are never written into the archive."
+                "search, unlike Comic Vine). Compare the file's own cover against the one "
+                "found for each row before trusting a match. Untick anything you don't trust, "
+                "then Apply. Cover images are shown for confirmation only -- they are never "
+                "written into the archive."
             ),
             search_label="Searching the Grand Comics Database…",
             item_label=lambda book: os.path.basename(book.path),
             search_one=self._search_one_book,
             query_fields=[("series", "Series"), ("number", "Number")],
+            get_local_cover=lambda book: book.read_first_page_bytes(),
         )
 
     def _search_one_book(self, book: CbzBook, query_override: dict) -> LookupResult:

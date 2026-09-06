@@ -4,8 +4,10 @@ gui/comicvine_lookup_dialog.py
 Look Up via Comic Vine: for each target book, searches Comic Vine using
 that book's own Series + Number (falling back to the archive's
 filename, parsed loosely, when Series is blank), shows the best match
--- series, issue number/title, credits, characters, publisher, and a
-cover thumbnail for visual confirmation -- and lets the user apply it.
+-- series, issue number/title, credits, characters, publisher, and its
+found cover next to the book's own existing cover for a side-by-side
+visual confirmation (see redactor_common.gui.lookup_dialog's
+`get_local_cover`) -- and lets the user apply it.
 
 Built on redactor_common's gui/lookup_dialog.py (LookupDialogBase) --
 this class supplies only what's Comic-Vine-specific: the API-key
@@ -50,14 +52,16 @@ class ComicVineLookupDialog(LookupDialogBase):
             window_title="Look Up via Comic Vine",
             info_text=(
                 f"Searching Comic Vine for {len(books)} file(s) by Series + Number "
-                "(guessed from the filename when Series is blank). Untick anything you "
-                "don't trust, then Apply. Cover images are shown for confirmation only -- "
-                "they are never written into the archive."
+                "(guessed from the filename when Series is blank). Compare the file's own "
+                "cover against the one found for each row before trusting a match. Untick "
+                "anything you don't trust, then Apply. Cover images are shown for "
+                "confirmation only -- they are never written into the archive."
             ),
             search_label="Searching Comic Vine…",
             item_label=lambda book: os.path.basename(book.path),
             search_one=self._search_one_book,
             query_fields=[("series", "Series"), ("number", "Number")],
+            get_local_cover=lambda book: book.read_first_page_bytes(),
         )
 
         change_key_btn = QPushButton("Change API Key…")
