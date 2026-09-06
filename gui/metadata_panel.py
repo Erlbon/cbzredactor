@@ -46,7 +46,6 @@ from PyQt6.QtWidgets import (
     QInputDialog,
     QLabel,
     QLineEdit,
-    QMenu,
     QPlainTextEdit,
     QScrollArea,
     QSplitter,
@@ -93,6 +92,33 @@ PUBLICATION_FIELDS = [
 # Fields that get a "+" quick-pick button next to their QLineEdit --
 # handled specially in _build_group(); see _show_quick_pick_menu().
 _QUICK_PICK_ATTRS = {"genre", "language_iso"}
+
+
+class _ScrollSafeComboBox(QComboBox):
+    """Ignores mouse-wheel scrolling unless this combo currently has
+    keyboard focus -- without this, scrolling the mouse wheel to scroll
+    the whole field list (see _build_fields_scroll_area()) silently
+    changes THIS widget's value instead of scrolling past it, the
+    moment the cursor happens to be hovering over it. A well-known Qt
+    gotcha for any QScrollArea containing a combo/spin box; click into
+    one first (giving it focus) to use the wheel to change its value on
+    purpose."""
+
+    def wheelEvent(self, event) -> None:  # noqa: N802 -- Qt override signature
+        if self.hasFocus():
+            super().wheelEvent(event)
+        else:
+            event.ignore()  # bubbles up to the QScrollArea, which scrolls instead
+
+
+class _ScrollSafeDoubleSpinBox(QDoubleSpinBox):
+    """Same fix as _ScrollSafeComboBox, for Community Rating's spin box."""
+
+    def wheelEvent(self, event) -> None:  # noqa: N802
+        if self.hasFocus():
+            super().wheelEvent(event)
+        else:
+            event.ignore()
 
 
 class ComicInfoPanel(QWidget):
@@ -226,11 +252,22 @@ class ComicInfoPanel(QWidget):
         return box
 
     def _wrap_with_quick_pick(self, attr: str, edit: QLineEdit) -> QWidget:
-        """A QLineEdit plus a small "+" button opening a menu of
-        quick-pick values (see _show_quick_pick_menu()) -- used for
-        Genre and Language (ISO), the two fields with a curated
-        default list plus user-manageable custom entries (Settings >
-        Add/Remove Genres.../Add/Remove Languages...)."""
+        """A QLineEdit plus a small "+" button opening a searchable
+        picker dialog (see _show_quick_pick_dialog()) -- used for Genre
+        and Language (ISO), the two fields with a curated default list
+        plus user-manageable custom entries (Settings > Add/Remove
+        Genres.../Add/Remove Languages...).
+
+        A plain QMenu was the original design here, but it doesn't
+        scale: once enough custom entries pile up (a real cbzredactor
+        complaint -- "the genre list gets too long to see the apply
+        button", after adding many custom genres) a flat menu can
+        overflow the screen with no search and only the OS's own tiny
+        scroll arrows to get through it. redactor_common.gui.
+        quick_pick_dialog.QuickPickDialog fixes this at the root: a
+        fixed-size dialog with a real internally-scrolling list and a
+        filter box, so it never overflows and OK/Cancel stay visible
+        no matter how long the list gets."""
         container = QWidget()
         row = QHBoxLayout(container)
         row.setContentsMargins(0, 0, 0, 0)
@@ -239,53 +276,60 @@ class ComicInfoPanel(QWidget):
         button = QToolButton()
         button.setText("+")
         button.setToolTip("Pick from list, or add a custom entry")
-        button.clicked.connect(lambda: self._show_quick_pick_menu(attr, edit, button))
+        button.clicked.connect(lambda: self._show_quick_pick_dialog(attr, edit))
         row.addWidget(button)
         return container
 
-    def _show_quick_pick_menu(self, attr: str, edit: QLineEdit, button: QToolButton) -> None:
+    def _show_quick_pick_dialog(self, attr: str, edit: QLineEdit) -> None:
+        from redactor_common.gui.quick_pick_dialog import QuickPickDialog
+
         from gui import app_settings  # local import: avoids a hard Qt/app_settings dependency at module load
 
-        menu = QMenu(button)
         if attr == "genre":
-            for genre in app_settings.load_genres():
-                action = menu.addAction(genre)
-                action.triggered.connect(lambda _checked=False, g=genre: edit.setText(add_genre(edit.text(), g)))
-            menu.addSeparator()
-            add_action = menu.addAction("Add Custom Genre…")
-            add_action.triggered.connect(lambda: self._prompt_add_custom_genre(edit))
+            dialog = QuickPickDialog(
+                "Pick Genre(s)",
+                load_entries_fn=lambda: [(g, g) for g in app_settings.load_genres()],
+                multi_select=True,  # Genre is a comma-separated field -- picking several at once makes sense
+                add_custom_fn=self._add_custom_genre,
+                parent=self,
+            )
+            if dialog.exec() == QuickPickDialog.DialogCode.Accepted:
+                for genre in dialog.selected_keys():
+                    edit.setText(add_genre(edit.text(), genre))
         elif attr == "language_iso":
-            for code, name in app_settings.load_languages():
-                action = menu.addAction(f"{name} ({code})")
-                action.triggered.connect(lambda _checked=False, c=code: edit.setText(c))
-            menu.addSeparator()
-            add_action = menu.addAction("Add Custom Language…")
-            add_action.triggered.connect(lambda: self._prompt_add_custom_language(edit))
-        menu.exec(button.mapToGlobal(button.rect().bottomLeft()))
+            dialog = QuickPickDialog(
+                "Pick Language",
+                load_entries_fn=lambda: [(c, f"{n} ({c})") for c, n in app_settings.load_languages()],
+                multi_select=False,  # replaces the field outright -- picking a second wouldn't mean anything
+                add_custom_fn=self._add_custom_language,
+                parent=self,
+            )
+            if dialog.exec() == QuickPickDialog.DialogCode.Accepted:
+                keys = dialog.selected_keys()
+                if keys:
+                    edit.setText(keys[0])
 
-    def _prompt_add_custom_genre(self, edit: QLineEdit) -> None:
+    def _add_custom_genre(self, dialog) -> None:
         from gui import app_settings
 
-        text, ok = QInputDialog.getText(self, "Add Custom Genre", "New genre name:")
+        text, ok = QInputDialog.getText(dialog, "Add Custom Genre", "New genre name:")
         text = text.strip()
         if ok and text:
             app_settings.add_custom_genre(text)
-            edit.setText(add_genre(edit.text(), text))
 
-    def _prompt_add_custom_language(self, edit: QLineEdit) -> None:
+    def _add_custom_language(self, dialog) -> None:
         from gui import app_settings
 
         code, ok = QInputDialog.getText(
-            self, "Add Custom Language", 'Language code (ISO 639-1, e.g. "pt" for Portuguese):'
+            dialog, "Add Custom Language", 'Language code (ISO 639-1, e.g. "pt" for Portuguese):'
         )
         code = code.strip()
         if not (ok and code):
             return
-        name, ok = QInputDialog.getText(self, "Add Custom Language", "Display name for this language:")
+        name, ok = QInputDialog.getText(dialog, "Add Custom Language", "Display name for this language:")
         name = name.strip()
         if ok and name:
             app_settings.add_custom_language(code, name)
-            edit.setText(code)
 
     def _build_text_group(self, title: str, attr: str) -> QGroupBox:
         box = QGroupBox(title)
@@ -306,28 +350,28 @@ class ComicInfoPanel(QWidget):
         box = QGroupBox("Classification")
         layout = QFormLayout(box)
 
-        self.age_rating_combo = QComboBox()
+        self.age_rating_combo = _ScrollSafeComboBox()
         self.age_rating_combo.addItems(AGE_RATING_VALUES)
         self.age_rating_combo.setEditable(True)  # preserves an unrecognized value already in the file
         self.age_rating_combo.currentTextChanged.connect(self._on_field_changed)
         layout.addRow("Age Rating", self.age_rating_combo)
         self._row_widgets["age_rating"] = self.age_rating_combo
 
-        self.manga_combo = QComboBox()
+        self.manga_combo = _ScrollSafeComboBox()
         self.manga_combo.addItems(MANGA_VALUES)
         self.manga_combo.setEditable(True)
         self.manga_combo.currentTextChanged.connect(self._on_field_changed)
         layout.addRow("Manga", self.manga_combo)
         self._row_widgets["manga"] = self.manga_combo
 
-        self.black_and_white_combo = QComboBox()
+        self.black_and_white_combo = _ScrollSafeComboBox()
         self.black_and_white_combo.addItems(BLACK_AND_WHITE_VALUES)
         self.black_and_white_combo.setEditable(True)
         self.black_and_white_combo.currentTextChanged.connect(self._on_field_changed)
         layout.addRow("Black && White", self.black_and_white_combo)
         self._row_widgets["black_and_white"] = self.black_and_white_combo
 
-        self.community_rating_spin = QDoubleSpinBox()
+        self.community_rating_spin = _ScrollSafeDoubleSpinBox()
         self.community_rating_spin.setRange(0.0, 5.0)
         self.community_rating_spin.setSingleStep(0.1)
         self.community_rating_spin.setDecimals(1)

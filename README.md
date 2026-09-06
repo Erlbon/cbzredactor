@@ -37,6 +37,11 @@ understands that this app now supports too).
 
 ## Features
 
+- Uses the same explicit light/dark theme as every other Redactor app
+  (`redactor_common.gui.theme.apply_theme()`) -- selection is clearly
+  visible in dark mode, unlike relying on the OS's native style, whose
+  own dark-mode approximation of a selected row's colors is often too
+  low-contrast to see at a glance.
 - Load one or many `.cbz` files (or a whole folder) and browse them in
   a table. Multi-select (ctrl/shift-click, same as Explorer) works for
   saving, looking up, or bulk-editing several files at once.
@@ -110,7 +115,22 @@ understands that this app now supports too).
   managed via Settings > Add/Remove Genres.../Add/Remove Languages...
   (built on the same hideable-defaults-plus-custom-list pattern
   epubredactor uses). Picking a genre adds it alongside whatever's
-  already typed; picking a language sets the ISO code.
+  already typed; picking a language sets the ISO code. The picker is a
+  small searchable dialog (filter box + scrolling list), not a plain
+  dropdown menu -- a flat menu stopped being usable once enough custom
+  genres piled up (it could overflow the screen with no way to search
+  it), a real complaint from actual use.
+- **Click a column header to sort** by it -- click again to reverse
+  direction. Text columns sort alphabetically (case-insensitive);
+  Number/Count/Volume/Year/Month/Day/Pages/Community Rating sort
+  numerically ("9" before "10", not after). Not persisted across
+  restarts (column order/widths/visibility are; sort order isn't).
+- The side panel's field list scrolls properly with the mouse wheel
+  now, even when the cursor is resting over the Age Rating/Manga/
+  Black & White/Community Rating controls -- those used to swallow the
+  wheel and silently change their own value instead of letting the
+  scroll continue past them, a classic side effect of putting a combo/
+  spin box inside a scrollable area.
 - `PageCount` is always recomputed from the archive's actual image
   count at save time -- never hand-edited -- with a mismatch against
   whatever was previously stored flagged in the file list beforehand.

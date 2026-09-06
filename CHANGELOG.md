@@ -1,5 +1,66 @@
 # Changelog
 
+## 2026-09-06#05 -- Genre picker redesign, uniform selection theme, sortable columns, panel scroll fix
+
+Four separate real-use complaints, fixed together:
+
+- **Genre/Language quick-pick redesign**: "the genre list gets too
+  long to see the apply button." The flat `QMenu` behind the "+"
+  button had no search and no real scroll affordance once enough
+  custom genres piled up (Settings > Add/Remove Genres...), so it
+  could overflow the screen entirely. Replaced with
+  `redactor_common.gui.quick_pick_dialog.QuickPickDialog` (new,
+  promoted): a fixed-size dialog with a filter box and a genuinely
+  scrolling list, so OK/Cancel stay visible no matter how long the
+  list gets. Genre stays multi-select (pick several, appended at
+  once); Language stays single-select (replaces the field).
+- **Uniform, dark-mode-safe selection** ("Selection is shit, can't see
+  what is selected in dark mode... want uniform behaviour across the
+  apps"): none of the four Redactor apps ever set an explicit style or
+  palette, so each just inherited whatever the native platform style's
+  own dark-mode approximation happened to render -- often low-contrast
+  for a selected row. New `redactor_common.gui.theme.apply_theme(app)`
+  switches to the Fusion style + an explicit palette (light or dark,
+  auto-detected from the OS), with a Highlight/HighlightedText pair
+  verified against the real WCAG contrast formula rather than
+  eyeballed. Wired into all four apps' `main.py` (one line each) since
+  "uniform" was the explicit ask, not just a cbzredactor fix. Found and
+  fixed a genuine landmine along the way: epub/mp3/video each still had
+  a stale, untracked `redactor_common/` leftover (pure `__pycache__`
+  droppings from before their migration to the pip dependency) sitting
+  in their project root, silently shadowing the real installed package
+  for any newly-added module whenever Python resolved imports with
+  that project's own directory on `sys.path` -- exactly how `main.py`
+  normally runs. Deleted in all three (zero `.py` sources, zero
+  git-tracked files -- safe to remove outright).
+- **Click a column header to sort by it** -- click again to reverse.
+  Deliberately does NOT use `QTableWidget.setSortingEnabled(True)`
+  (Qt's own item-based sort would silently break every "table row N is
+  `self.books[N]`" assumption throughout `gui/main_window.py` -- save,
+  remove, bulk edit, lookups, and more all index into `self.books` by
+  row). Instead sorts `self.books` itself and rebuilds the table from
+  it, the same pattern `_rebuild_table()` already uses for Refresh/
+  Clear/Remove -- so that invariant never breaks. Numeric-natured
+  columns (Number/Count/Volume/Year/Month/Day/Pages/Community Rating)
+  sort numerically, not lexicographically ("9" before "10"). A sort
+  stays applied across a subsequent Load/Refresh (new arrivals get
+  folded back into it, not just tacked onto the end).
+- **Field panel now actually scrolls with the mouse wheel**: the
+  `QScrollArea` itself was never broken (verified directly -- it always
+  computed a correct scroll range), but the Age Rating/Manga/Black &
+  White/Community Rating combo/spin boxes silently consumed the wheel
+  event to change their own value instead of letting it reach the
+  scroll area, the moment the cursor happened to be hovering over one
+  of them while scrolling -- a well-known Qt gotcha for any
+  `QScrollArea` containing a combo/spin box. Fixed with
+  `_ScrollSafeComboBox`/`_ScrollSafeDoubleSpinBox`, which ignore the
+  wheel unless they actually have focus.
+
+17 new tests across `test_main_window_sort.py`,
+`test_metadata_panel_scroll.py`, and
+`test_metadata_panel_quick_pick.py`; 7 more in `redactor_common`'s own
+`tests/test_theme.py` (the WCAG contrast checks).
+
 ## 2026-09-06#04 -- Resize Images..., with double-page-spread detection
 
 New feature, not a fix: shrinking an extremely large CBZ's page images

@@ -185,6 +185,13 @@ class MainWindow(QMainWindow):
         self.books: list[CbzBook] = []
         self._selected_rows: list[int] = []
         self.undo_manager: UndoManager[CbzBook] = UndoManager()
+        # Click-to-sort state (see _on_header_clicked) -- not persisted
+        # across restarts, same as every other app in the family not
+        # remembering a sort order (only column order/widths/visibility
+        # are). Reset (not restored) any time the list is rebuilt from
+        # a different source (Load/Refresh/Clear).
+        self._sort_key: str | None = None
+        self._sort_ascending: bool = True
 
         self._column_keys = merge_column_order(app_settings.load_column_order(), _ALL_COLUMN_KEYS)
         self._col_index = {key: i for i, key in enumerate(self._column_keys)}
@@ -334,6 +341,23 @@ class MainWindow(QMainWindow):
         header = self.table.horizontalHeader()
         header.setSectionsMovable(True)  # drag headers to reorder columns
         header.sectionMoved.connect(self._on_columns_reordered)
+        # Deliberately NOT QTableWidget.setSortingEnabled(True): that
+        # would have Qt do its own item-based re-sort, physically moving
+        # QTableWidgetItems between rows -- which would silently break
+        # every "row N is self.books[N]" assumption elsewhere in this
+        # file (save, remove, apply-bulk-edit, lookups, and more all
+        # index into self.books by table row). Instead, a header click
+        # sorts self.books itself and rebuilds the table from it (see
+        # _on_header_clicked), so that invariant never breaks -- the
+        # exact same "rebuild from self.books" pattern _rebuild_table()
+        # already uses for Refresh/Clear/Remove. setSortIndicatorShown()
+        # is deliberately NOT turned on here -- Qt defaults its section/
+        # order to column 0 ascending the moment it's shown, which would
+        # display a sort arrow implying the list is already sorted by
+        # Filename when it's actually still in plain load order.
+        # _on_header_clicked() turns it on the first time a real sort
+        # happens instead.
+        header.sectionClicked.connect(self._on_header_clicked)
 
         # A genuinely first run (the user has never touched column
         # visibility at all) gets DEFAULT_HIDDEN_COLUMNS -- otherwise
@@ -472,6 +496,18 @@ class MainWindow(QMainWindow):
         if errors:
             from redactor_common.core.error_summary import summarize_errors
             QMessageBox.warning(self, "Some Files Failed to Load", summarize_errors(errors))
+
+        # Newly loaded files were just appended to the end of the table
+        # above -- if a column sort is currently active, keep it applied
+        # rather than letting new arrivals silently break it (this also
+        # covers Refresh List and Convert CBR/Resize Images' "load the
+        # result back in" calls, all of which route through here).
+        if self._sort_key:
+            self.books.sort(
+                key=lambda book: self._sort_key_for(book, self._sort_key), reverse=not self._sort_ascending
+            )
+            self._rebuild_table()
+
         self._update_status()
 
     def _add_table_row(self, book: CbzBook) -> None:
@@ -623,6 +659,69 @@ class MainWindow(QMainWindow):
         self.table.setRowCount(0)
         for book in self.books:
             self._add_table_row(book)
+
+    # ------------------------------------------------------------------
+    # Sorting -- click a column header
+    # ------------------------------------------------------------------
+
+    def _on_header_clicked(self, logical_index: int) -> None:
+        """Clicking the same header again reverses direction; clicking a
+        different one starts a fresh ascending sort on it, same
+        convention as a spreadsheet or Explorer's Details view.
+
+        Sorts self.books itself (then rebuilds the table from it, same
+        as _rebuild_table()'s other callers) rather than reordering the
+        table's own QTableWidgetItems in place -- see
+        _setup_column_persistence()'s comment on why that matters."""
+        if logical_index not in self._col_index.values():
+            return
+        key = self._column_keys[logical_index]
+
+        self._commit_current_edits()
+        if key == self._sort_key:
+            self._sort_ascending = not self._sort_ascending
+        else:
+            self._sort_key = key
+            self._sort_ascending = True
+
+        self.books.sort(key=lambda book: self._sort_key_for(book, key), reverse=not self._sort_ascending)
+        self._rebuild_table()
+
+        order = Qt.SortOrder.AscendingOrder if self._sort_ascending else Qt.SortOrder.DescendingOrder
+        header = self.table.horizontalHeader()
+        header.setSortIndicator(logical_index, order)
+        header.setSortIndicatorShown(True)
+
+        # Rebuilding moved every row -- there's no single sensible row
+        # left "selected" (the files themselves are still all there,
+        # just in a new order), so clear rather than leave a stale
+        # highlight sitting on whatever file happens to now occupy that
+        # row number.
+        self.table.clearSelection()
+        self._selected_rows = []
+        self.panel.set_enabled(False)
+
+    def _sort_key_for(self, book: CbzBook, key: str) -> tuple[int, float] | str:
+        """(0, value) for a field that parses as a number on THIS row
+        (sorts numerically -- "2" before "10", not after) or (1, 0.0)
+        for one that doesn't (sorts after every numeric value, in
+        whichever direction); a plain casefolded string otherwise, for
+        ordinary alphabetical (case-insensitive) sorting."""
+        if key == "filename":
+            raw = os.path.basename(book.path)
+        elif key == "pages":
+            raw = str(book.actual_page_count)
+        elif key == "status":
+            raw = book.load_error or ("Modified" if book.dirty else "OK")
+        else:
+            raw = getattr(book.metadata, key, "")
+
+        if key in NUMERIC_FILENAME_FIELDS or key == "pages":
+            try:
+                return (0, float(raw))
+            except (TypeError, ValueError):
+                return (1, 0.0)
+        return raw.strip().casefold()
 
     def _count_dirty(self) -> int:
         return sum(1 for book in self.books if book.dirty)
