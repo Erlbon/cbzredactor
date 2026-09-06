@@ -38,6 +38,11 @@ _HIDDEN_DEFAULT_GENRES_KEY = "genres/hidden_defaults"
 _CUSTOM_LANGUAGES_KEY = "languages/custom"
 _HIDDEN_DEFAULT_LANGUAGES_KEY = "languages/hidden_defaults"
 
+_RESIZE_MAX_WIDTH_KEY = "resize/max_width"
+_RESIZE_JPEG_QUALITY_KEY = "resize/jpeg_quality"
+_DEFAULT_RESIZE_MAX_WIDTH = 1600
+_DEFAULT_RESIZE_JPEG_QUALITY = 90
+
 
 def _settings_ini_path() -> str:
     return os.path.join(base_dir(), _SETTINGS_FILENAME)
@@ -59,6 +64,22 @@ def save_comicvine_api_key(api_key: str) -> None:
     settings = _settings()
     settings.setValue(_COMICVINE_API_KEY, api_key.strip())
     settings.sync()
+
+
+def load_resize_max_width() -> int:
+    return int(_settings().value(_RESIZE_MAX_WIDTH_KEY, _DEFAULT_RESIZE_MAX_WIDTH))
+
+
+def save_resize_max_width(max_width: int) -> None:
+    _settings().setValue(_RESIZE_MAX_WIDTH_KEY, int(max_width))
+
+
+def load_resize_jpeg_quality() -> int:
+    return int(_settings().value(_RESIZE_JPEG_QUALITY_KEY, _DEFAULT_RESIZE_JPEG_QUALITY))
+
+
+def save_resize_jpeg_quality(quality: int) -> None:
+    _settings().setValue(_RESIZE_JPEG_QUALITY_KEY, int(quality))
 
 
 # ------------------------------------------------------------------

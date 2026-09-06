@@ -1,5 +1,48 @@
 # Changelog
 
+## 2026-09-06#04 -- Resize Images..., with double-page-spread detection
+
+New feature, not a fix: shrinking an extremely large CBZ's page images
+down to a target max width, requested with the explicit constraint
+that it be "smart enough" not to crush a double-page spread down to
+single-page detail.
+
+- **Operations > Resize Images...** -- target max width + JPEG quality,
+  resize in place or export copies to a folder (originals untouched).
+  Uses [Pillow](https://python-pillow.org/) (new dependency), not an
+  external ImageMagick install -- a deliberate choice: this project
+  already has one "you need an external tool on PATH" pain point (CBR
+  conversion's unrar requirement, still on the backlog to fix by
+  bundling a portable binary) and a pure-Python library avoids adding
+  a second one, bundling straight into the existing PyInstaller build.
+- **Double-page spread detection**: a page wider than it is tall
+  (landscape or square) is treated as a spread -- true for a two-page
+  spread scanned/exported as one image, false for virtually any real
+  single comic/manga page. A detected spread gets **double** the
+  target width rather than being squeezed to the single-page target,
+  so each half keeps the same effective per-page resolution a normal
+  page would.
+- Only ever shrinks, never upscales -- a page already at or under its
+  (possibly-doubled) target is returned completely byte-for-byte
+  unchanged, not just "same dimensions after a pointless re-save".
+- No preview-before-commit table (unlike Rename/Export, Parse
+  Filename, etc.): accurately estimating file-size savings means
+  decoding/re-encoding every page once already, which is exactly the
+  expensive extra pass this feature exists to help avoid paying twice
+  on the huge files it's meant for. Instead: an upfront warning in the
+  dialog, and a real (not estimated) pages-resized/skipped/failed +
+  total-size-before/after report once it's actually run.
+- No Undo: unlike every other Operations entry, this rewrites pixel
+  bytes to disk -- there's no in-memory original left to restore from,
+  unlike a metadata edit. Deliberately not wired into undo_manager.
+- New `core/image_resize.py` (pure per-page logic, Pillow-based) and
+  `CbzBook.resize_images()` (core/cbz_file.py) -- the one deliberate
+  exception to this project's "images are always copied byte-for-byte"
+  guarantee, and only ever runs when explicitly asked for, never as a
+  side effect of Save.
+
+17 new tests across `test_image_resize.py` and `test_cbz_resize.py`.
+
 ## 2026-09-06#03 -- Column visibility now drives the side panel too
 
 A "sanity check" question from the user surfaced three real gaps left

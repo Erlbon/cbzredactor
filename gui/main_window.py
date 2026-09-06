@@ -60,6 +60,7 @@ from core.version import APP_NAME, APP_REPO_URL, APP_VERSION, RELEASE_LABEL
 from gui import app_settings
 from gui.comicvine_lookup_dialog import ComicVineLookupDialog
 from gui.gcd_lookup_dialog import GcdLookupDialog
+from gui.resize_dialog import ResizeImagesDialog
 from gui.metadata_panel import (
     CREDIT_FIELDS,
     IDENTITY_FIELDS,
@@ -148,6 +149,10 @@ DEFAULT_RENAME_PATTERN = "%series% %number% - %title%"
 
 LOAD_PROGRESS_THRESHOLD = 3
 SAVE_PROGRESS_THRESHOLD = 3
+# 1, not 3 like the others -- resizing actually decodes/re-encodes
+# every oversized page, so even a single large file is worth a
+# cancellable progress dialog, unlike a routine metadata save.
+RESIZE_PROGRESS_THRESHOLD = 1
 # Slim strip, not zero -- keeps the panel's own toggle button reachable
 # (same convention as epubredactor's TAG_PANEL_COLLAPSED_WIDTH). Not
 # 32 (redactor_common's own doc-comment default): ComicInfoPanel's
@@ -262,6 +267,8 @@ class MainWindow(QMainWindow):
                 MenuAction("apply_bulk_edit", "&Apply to 0 Selected File(s)", self._apply_bulk_edit),
                 MenuAction("search_replace", "&Search/Replace...", self.open_search_replace_dialog),
                 MenuAction("case_conversion", "&Case Conversion...", self.open_case_conversion_dialog),
+                Separator(),
+                MenuAction("resize_images", "Resi&ze Images...", self.open_resize_images_dialog),
                 Separator(),
                 MenuAction("save_all", "Save &All Changed", self.save_all_changed, shortcut="Ctrl+Shift+A"),
                 Separator(),
@@ -945,6 +952,85 @@ class MainWindow(QMainWindow):
             setattr(book.metadata, field_key, new_value)
             book.dirty = True
             self._refresh_table_row(self.books.index(book), book)
+        self._update_status()
+
+    def open_resize_images_dialog(self) -> None:
+        """Shrinks oversized page images down to a target max width
+        (double-page spreads get double that -- see core/image_resize.py).
+        Not routed through undo_manager/_push_undo like every other
+        Operations entry: those all restore in-memory ComicInfoMetadata,
+        but this rewrites actual pixel bytes to disk, which there's
+        nothing in memory left to restore from (see CbzBook.
+        resize_images()'s own docstring)."""
+        self._commit_current_edits()
+        target_books = self._target_books()
+        if not target_books:
+            QMessageBox.information(self, "No Files", "Load some files first (or select the ones to resize).")
+            return
+
+        dialog = ResizeImagesDialog(
+            len(target_books),
+            app_settings.load_resize_max_width(),
+            app_settings.load_resize_jpeg_quality(),
+            parent=self,
+        )
+        if dialog.exec() != dialog.DialogCode.Accepted:
+            return
+
+        max_width = dialog.max_width()
+        jpeg_quality = dialog.jpeg_quality()
+        app_settings.save_resize_max_width(max_width)
+        app_settings.save_resize_jpeg_quality(jpeg_quality)
+        export_mode = dialog.is_export_mode()
+
+        errors: list[str] = []
+        exported_paths: list[str] = []
+        totals = {"resized": 0, "skipped": 0, "failed": 0, "original_bytes": 0, "new_bytes": 0}
+
+        def _step(book: CbzBook, _index: int) -> None:
+            output_path = dialog.output_path_for(book.path)
+            try:
+                summary = book.resize_images(max_width, jpeg_quality, output_path)
+            except CbzError as exc:
+                errors.append(f"{os.path.basename(book.path)}: {exc}")
+                return
+
+            totals["resized"] += summary.pages_resized
+            totals["skipped"] += summary.pages_skipped
+            totals["failed"] += summary.pages_failed
+            totals["original_bytes"] += summary.original_bytes
+            totals["new_bytes"] += summary.new_bytes
+
+            if output_path:
+                exported_paths.append(output_path)
+            else:
+                row = self.books.index(book)
+                self._refresh_table_row(row, book)
+                if self._selected_rows == [row]:
+                    page_count_text = f"{book.actual_page_count} page(s)"
+                    self.panel.load_metadata(book.metadata, book.read_first_page_bytes(), page_count_text)
+
+        run_with_progress(
+            self, target_books, _step, "Resizing images...", threshold=RESIZE_PROGRESS_THRESHOLD
+        )
+
+        if errors:
+            from redactor_common.core.error_summary import summarize_errors
+            QMessageBox.warning(self, "Some Files Failed to Resize", summarize_errors(errors))
+
+        processed = totals["resized"] + totals["skipped"] + totals["failed"]
+        if processed:
+            saved_mb = (totals["original_bytes"] - totals["new_bytes"]) / (1024 * 1024)
+            QMessageBox.information(
+                self, "Resize Complete",
+                f"{totals['resized']} page(s) resized, {totals['skipped']} already small enough, "
+                f"{totals['failed']} couldn't be read.\n\n"
+                f"Total size: {totals['original_bytes'] / (1024 * 1024):.1f} MB → "
+                f"{totals['new_bytes'] / (1024 * 1024):.1f} MB ({saved_mb:+.1f} MB).",
+            )
+
+        if export_mode and exported_paths:
+            self._load_paths(exported_paths)
         self._update_status()
 
     # ------------------------------------------------------------------

@@ -116,7 +116,8 @@ understands that this app now supports too).
   whatever was previously stored flagged in the file list beforehand.
 - Saving rewrites only `ComicInfo.xml`; every page image is copied
   byte-for-byte into a fresh archive, so pixel data is never
-  re-encoded or reordered.
+  re-encoded or reordered -- **except** via the explicit Resize
+  Images... action described below, the one deliberate exception.
 - `Import > Convert CBR to CBZ` for RAR-based archives (see below).
 - `Import > Look Up via Comic Vine...` searches [Comic Vine](https://comicvine.gamespot.com/api/)
   by Series + Number (guessed from the filename when Series is blank)
@@ -148,6 +149,25 @@ understands that this app now supports too).
   (Empire).cbz` guesses series "Batman", number "1", not the whole
   bracketed mess. Still just a best-effort guess for a blank Series
   field; use the correction form above when it's wrong.
+- **Resize Images...** (Operations menu) shrinks oversized page images
+  down to a target maximum width -- for a library with extremely large
+  scans, without needing an external tool like ImageMagick (uses
+  [Pillow](https://python-pillow.org/) instead, which bundles straight
+  into the standalone .exe). Smart about **double-page spreads**: a
+  page detected as a spread (landscape or square -- wider than it is
+  tall, unlike virtually every real single comic/manga page) gets
+  **double** the target width, so each half keeps the same effective
+  per-page resolution a normal single page would, instead of being
+  crushed down to half the detail. Only ever shrinks, never upscales --
+  a page already under its (possibly-doubled) target is left completely
+  byte-for-byte untouched. Choose to resize files in place or export
+  resized copies to a folder (originals untouched); a JPEG quality
+  slider controls re-save quality for pages actually saved as JPEG
+  (PNG pages stay lossless). This is the one operation with **no
+  Undo** -- unlike a metadata edit, there's no in-memory original to
+  restore once pixels are actually re-encoded and written to disk, so
+  it only ever runs when you explicitly ask for it, never as a side
+  effect of Save.
 - **Both lookups protect existing data the same way**: on Apply, if
   any looked-up field would overwrite a value a file already has (a
   hand-typed one, or from a prior lookup), you're asked once whether

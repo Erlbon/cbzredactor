@@ -11,5 +11,5 @@ from __future__ import annotations
 
 APP_NAME = "The ƆBZ Redactor"  # "Ɔ" = Ɔ, LATIN CAPITAL LETTER OPEN O ("reversed C") -- same reversed-letter mark epubredactor uses ("Ǝ" = Ǝ)
 RELEASE_LABEL = "v0.1 Initial Scaffold"
-APP_VERSION = "2026-09-06#03"
+APP_VERSION = "2026-09-06#04"
 APP_REPO_URL = "https://github.com/Erlbon/cbzredactor"

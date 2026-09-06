@@ -2,6 +2,12 @@ PyQt6>=6.6
 lxml>=5.0
 pyinstaller>=6.3
 
+# Page-image resizing (Operations > Resize Images...). A pure-Python
+# wheel -- bundles straight into the PyInstaller build with no extra
+# install step, unlike CBR conversion's external-unrar-tool requirement
+# below.
+Pillow>=10.0
+
 # Optional: only needed for Import > Convert CBR to CBZ. Also needs a
 # real unrar/unar/bsdtar-compatible binary on PATH -- rarfile itself
 # just shells out to one. See core/cbr_convert.py and README.md's "CBR

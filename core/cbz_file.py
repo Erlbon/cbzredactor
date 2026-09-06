@@ -13,6 +13,13 @@ sorts first).
 CBR (RAR-based) archives are out of scope here entirely -- see
 core/cbr_convert.py, which converts a .cbr to a real .cbz *before* this
 module ever sees it, rather than this module learning to read RAR.
+
+save() is the only method that runs implicitly (whenever the user hits
+Save); it keeps the "images copied byte-for-byte" guarantee. The one
+deliberate exception is resize_images() (see core/image_resize.py),
+which re-encodes page pixel data -- it only ever runs when the user
+explicitly asks for it via Operations > Resize Images..., never as a
+side effect of a normal save.
 """
 
 from __future__ import annotations
@@ -25,6 +32,7 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 from core.comicinfo import ComicInfoError, ComicInfoMetadata, parse_comicinfo_xml, serialize_comicinfo_xml
+from core.image_resize import resize_page
 
 # Recognized page image types. Readers in the wild are lenient about
 # this too (a CBZ is "mostly JPGs" by convention, not by enforced
@@ -37,6 +45,22 @@ COMICINFO_NAME = "ComicInfo.xml"
 
 class CbzError(Exception):
     """Raised for a problem reading or writing a CBZ file."""
+
+
+@dataclass
+class ResizeSummary:
+    """What CbzBook.resize_images() actually did -- shown to the user
+    afterward (Operations > Resize Images...) since there's no preview-
+    before-commit step for this operation (see that dialog's own
+    docstring for why: scanning every page's dimensions up front is
+    exactly the expensive extra pass this feature exists to avoid
+    paying twice on the "extremely large files" it's meant for)."""
+
+    pages_resized: int = 0
+    pages_skipped: int = 0  # already at or under the target width
+    pages_failed: int = 0  # Pillow couldn't decode this page; left untouched
+    original_bytes: int = 0
+    new_bytes: int = 0
 
 
 def _is_image(name: str) -> bool:
@@ -181,3 +205,73 @@ class CbzBook:
             self.path = target
             self.comicinfo_name = write_name
             self.dirty = False
+
+    # ------------------------------------------------------------------
+    # Resizing (Operations > Resize Images...)
+    # ------------------------------------------------------------------
+
+    def resize_images(
+        self, max_width: int, jpeg_quality: int = 90, output_path: Optional[str] = None
+    ) -> ResizeSummary:
+        """Rewrites every page image down to `max_width` (see
+        core/image_resize.py for the double-page-spread doubling rule),
+        leaving ComicInfo.xml and every other non-image entry byte-for-
+        byte untouched. Same temp-file-then-rename safety as save():
+        overwrites self.path in place when output_path is None,
+        otherwise writes a new file and leaves the source alone.
+
+        Unlike save() and everything else in this module, this DOES
+        re-encode pixel data -- the one deliberate exception to "images
+        are always copied byte-for-byte" elsewhere in this project.
+        It's also the one operation with no Undo: there's no in-memory
+        original to restore once pixels have actually been re-encoded
+        and written to disk, unlike a metadata edit. It only ever runs
+        when the user explicitly asks for it via the Resize Images...
+        dialog, never as a side effect of Save.
+        """
+        if self.load_error:
+            raise CbzError(f"Cannot resize, file failed to load: {self.load_error}")
+
+        summary = ResizeSummary()
+        target = output_path or self.path
+        tmp_path = target + ".tmp_resize"
+
+        try:
+            with zipfile.ZipFile(self.path, "r") as src:
+                names = src.namelist()
+                infos = {info.filename: info for info in src.infolist()}
+
+                with zipfile.ZipFile(tmp_path, "w") as dst:
+                    for name in names:
+                        original = src.read(name)
+                        data_to_write = original
+
+                        if _is_image(name):
+                            result = resize_page(original, max_width, jpeg_quality)
+                            data_to_write = result.data
+                            if result.error:
+                                summary.pages_failed += 1
+                            elif result.resized:
+                                summary.pages_resized += 1
+                            else:
+                                summary.pages_skipped += 1
+
+                        summary.original_bytes += len(original)
+                        summary.new_bytes += len(data_to_write)
+
+                        info = infos[name]
+                        new_info = zipfile.ZipInfo(name, date_time=info.date_time)
+                        new_info.compress_type = info.compress_type
+                        new_info.external_attr = info.external_attr
+                        dst.writestr(new_info, data_to_write)
+        except (zipfile.BadZipFile, KeyError, OSError, zlib.error) as exc:
+            raise CbzError(f"Could not resize CBZ file: {exc}") from exc
+
+        shutil.move(tmp_path, target)
+        if output_path is None or output_path == self.path:
+            self.path = target
+            # page_names/comicinfo_name/metadata are all unchanged --
+            # resizing only ever shrinks existing pages' pixels, it
+            # never adds, removes, or renames an archive entry.
+
+        return summary
