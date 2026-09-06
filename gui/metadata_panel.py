@@ -214,7 +214,7 @@ class ComicInfoPanel(QWidget):
         scroll.setWidget(form_container)
         return scroll
 
-    def _build_cover_box(self) -> QGroupBox:
+    def _build_cover_box(self) -> QScrollArea:
         self.cover_box = QGroupBox("Cover (First Page)")
         box = self.cover_box
         layout = QVBoxLayout(box)
@@ -236,7 +236,31 @@ class ComicInfoPanel(QWidget):
         self.page_count_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(self.page_count_label)
 
-        return box
+        # Wrapped in a QScrollArea for exactly one reason, unrelated to
+        # actually scrolling: a bare QGroupBox's minimumSizeHint is
+        # inflated by its own TITLE text width (confirmed directly --
+        # "Cover (First Page)" alone forces a ~254px floor, regardless
+        # of setMinimumWidth() calls, which don't affect
+        # minimumSizeHint() at all). Since this box sits directly in
+        # the panel's own splitter (not inside a scroll area the way
+        # the field groups already are, via _build_fields_scroll_area()
+        # -- a QScrollArea's OWN minimumSizeHint stays small regardless
+        # of its content's), that title-driven floor was blocking the
+        # whole side panel from ever reaching PANEL_COLLAPSED_WIDTH:
+        # collapsing looked like it worked (the field list visibly
+        # shrank) while the cover silently held the panel open, and
+        # since the resulting width was still bigger than
+        # collapsed_width, is_collapsed() reported False -- so the next
+        # click tried to collapse again instead of restoring, and the
+        # button looked stuck. This wrapper is purely a minimum-size
+        # trick; the cover still renders at full size normally, a
+        # scrollbar only appears if the panel is dragged narrower than
+        # the cover's own natural width.
+        self._cover_scroll = QScrollArea()
+        self._cover_scroll.setWidgetResizable(True)
+        self._cover_scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        self._cover_scroll.setWidget(box)
+        return self._cover_scroll
 
     def _build_group(self, title: str, fields: list) -> QGroupBox:
         box = QGroupBox(title)
@@ -445,7 +469,10 @@ class ComicInfoPanel(QWidget):
         applied, to every selected file, via the toolbar/Operations
         menu's "Apply to N Selected Files" action."""
         self.bulk_mode = count > 1
-        self.cover_box.setVisible(not self.bulk_mode)
+        # Hides the wrapping QScrollArea, not just the inner cover_box
+        # -- hiding only the QGroupBox would leave an empty scroll
+        # viewport occupying space instead of actually disappearing.
+        self._cover_scroll.setVisible(not self.bulk_mode)
         self.bulk_info_label.setVisible(self.bulk_mode)
         if self.bulk_mode:
             self.bulk_info_label.setText(

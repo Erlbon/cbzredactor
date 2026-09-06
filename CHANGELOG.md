@@ -1,5 +1,34 @@
 # Changelog
 
+## 2026-09-06#08 -- Fixed: side panel collapse button getting stuck
+
+"button to collapse left field does not include cover. Pushing the
+button afterwards does nothing. leftbar is stuck."
+
+Root cause: the cover box sat directly in the panel's own splitter as
+a plain `QGroupBox`, not wrapped in a `QScrollArea` the way the field
+groups already are. A `QGroupBox`'s `minimumSizeHint()` is inflated by
+its own title text width -- "Cover (First Page)" alone forced roughly
+a 254px floor, and neither `setMinimumWidth()` nor `setMinimumSize()`
+can override that (confirmed directly; `minimumSizeHint()` is a
+separate, un-overridable computation `QSplitter.setSizes()` clamps
+against). So collapsing looked like it worked -- the field list
+visibly shrank via its own scroll area's much smaller floor -- while
+the cover silently held the whole panel open at ~262px, nowhere near
+the 70px target. Since the resulting width was still bigger than
+`collapsed_width`, `is_collapsed()` incorrectly reported `False` right
+after "collapsing", so the next click tried to collapse again instead
+of restoring -- the stuck button.
+
+Fixed by wrapping the cover box in a `QScrollArea` too (a
+`QScrollArea`'s own `minimumSizeHint()` stays small regardless of its
+content's) -- purely a minimum-size trick, the cover still renders at
+full size normally, only shrinking with a scrollbar if the panel is
+dragged narrower than the cover's own natural width.
+
+4 new tests in `test_main_window_panel_collapse.py`, verified to
+actually fail against the old code before the fix.
+
 ## 2026-09-06#07 -- Remember last directory for Load Files/Folder
 
 Both dialogs previously always opened wherever Qt/Windows defaulted to
