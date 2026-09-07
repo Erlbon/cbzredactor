@@ -134,6 +134,10 @@ understands that this app now supports too).
 - `PageCount` is always recomputed from the archive's actual image
   count at save time -- never hand-edited -- with a mismatch against
   whatever was previously stored flagged in the file list beforehand.
+- A file's whole row is tinted (amber = unsaved change or page-count
+  mismatch, red = failed to load) so a problem or a pending edit is
+  visible at a glance without reading the Status column text --
+  matching the other three Redactor apps' own row-tinting.
 - Saving rewrites only `ComicInfo.xml`; every page image is copied
   byte-for-byte into a fresh archive, so pixel data is never
   re-encoded or reordered -- **except** via the explicit Resize

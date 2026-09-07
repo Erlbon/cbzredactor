@@ -92,6 +92,35 @@ def test_save_preserves_page_bytes_exactly(tmp_path):
     assert saved_page_bytes == original_page_bytes
 
 
+def test_save_explains_a_path_too_long_error_clearly(tmp_path, monkeypatch):
+    """save()'s final shutil.move(tmp_path, target) used to be OUTSIDE
+    the try/except entirely -- any failure there (a real possibility,
+    since tmp_path is 10 chars longer than target -- see
+    redactor_common.core.save_errors' own docstring) would propagate
+    raw and uncaught rather than setting book.save_error at all. Also
+    confirms the message itself is the friendly, actionable one, not a
+    bare WinError string."""
+    import shutil
+
+    class _FakeWinError(OSError):
+        winerror = 206  # ERROR_FILENAME_EXCED_RANGE
+
+    def _fake_move(*_args, **_kwargs):
+        raise _FakeWinError("[WinError 206] The filename or extension is too long")
+
+    monkeypatch.setattr(shutil, "move", _fake_move)
+    cbz_path = _make_cbz(tmp_path / "book.cbz")
+    book = CbzBook(str(cbz_path))
+    book.metadata.title = "Changed"
+
+    with pytest.raises(CbzError) as excinfo:
+        book.save()
+
+    assert "260-character limit" in str(excinfo.value)
+    assert "260-character limit" in book.save_error
+    assert "shorten the folder path" in book.save_error
+
+
 def test_save_as_leaves_original_untouched(tmp_path):
     cbz_path = _make_cbz(tmp_path / "book.cbz")
     other_path = tmp_path / "copy.cbz"

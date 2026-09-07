@@ -31,6 +31,8 @@ import zlib
 from dataclasses import dataclass, field
 from typing import Optional
 
+from redactor_common.core.save_errors import describe_save_error
+
 from core.comicinfo import ComicInfoError, ComicInfoMetadata, parse_comicinfo_xml, serialize_comicinfo_xml
 from core.image_resize import resize_page
 
@@ -191,11 +193,17 @@ class CbzBook:
                         new_info.external_attr = info.external_attr
                         dst.writestr(new_info, src.read(name))
                     dst.writestr(write_name, new_xml_bytes)
+            shutil.move(tmp_path, target)
         except (zipfile.BadZipFile, KeyError, OSError, zlib.error) as exc:
-            self.save_error = str(exc)
-            raise CbzError(f"Could not save CBZ file: {exc}") from exc
+            # describe_save_error() recognizes Windows' path-too-long
+            # limit specifically -- worth knowing here since tmp_path
+            # (target + ".tmp_write") is 10 characters longer than the
+            # real target, so this can fail even when the final,
+            # shorter path would have just barely fit.
+            message = describe_save_error(exc)
+            self.save_error = message
+            raise CbzError(f"Could not save CBZ file: {message}") from exc
 
-        shutil.move(tmp_path, target)
         self.save_error = ""
         # Only treat this as "saved" (clear dirty, adopt new path) when
         # this book's own file was actually overwritten -- saving to a
@@ -264,10 +272,10 @@ class CbzBook:
                         new_info.compress_type = info.compress_type
                         new_info.external_attr = info.external_attr
                         dst.writestr(new_info, data_to_write)
+            shutil.move(tmp_path, target)
         except (zipfile.BadZipFile, KeyError, OSError, zlib.error) as exc:
-            raise CbzError(f"Could not resize CBZ file: {exc}") from exc
+            raise CbzError(f"Could not resize CBZ file: {describe_save_error(exc)}") from exc
 
-        shutil.move(tmp_path, target)
         if output_path is None or output_path == self.path:
             self.path = target
             # page_names/comicinfo_name/metadata are all unchanged --

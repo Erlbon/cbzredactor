@@ -11,6 +11,7 @@ import traceback
 from PyQt6.QtGui import QIcon
 from PyQt6.QtWidgets import QApplication, QMessageBox
 
+from redactor_common.gui.qmessagebox_style import apply_message_box_style
 from redactor_common.gui.theme import apply_theme
 
 from core import crash_log
@@ -58,7 +59,7 @@ def main() -> int:
     app = QApplication(sys.argv)
     app.setApplicationName(APP_NAME)
     apply_theme(app)  # Fusion + a WCAG-contrast-verified light/dark palette -- see redactor_common/gui/theme.py
-    app.setStyleSheet("QMessageBox QLabel { max-width: 480px; }")
+    apply_message_box_style(app)  # long unwrappable lines (a path, an API error) stay under 480px wide
     icon_path = resource_path("assets", "icon.ico")
     if os.path.exists(icon_path):
         app.setWindowIcon(QIcon(icon_path))

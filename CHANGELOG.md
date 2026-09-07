@@ -1,5 +1,39 @@
 # Changelog
 
+## 2026-09-07#01 -- redactor_common adoption fixes: row tinting, path-too-long handling
+
+A cross-repo review of `redactor_common` adoption across all four
+Redactor apps found this project was the only one without row color-
+tinting or path-too-long protection, and still had an inline duplicate
+of the shared QMessageBox fix. Fixed:
+
+- **Row color-tinting** -- a file's whole row now tints amber (unsaved
+  change, or a page-count mismatch that'll be corrected on save) or
+  red (failed to load), via `redactor_common.gui.colors`, matching
+  epub/mp3/video. Previously the Status column was plain text only.
+  Also adopted `TABLE_SELECTION_STYLESHEET` for its current-cell focus
+  outline (safe now -- see the `redactor_common` fix below).
+- **Path-too-long protection** -- `CbzBook.save()`/`resize_images()`'s
+  failure messages now route through `redactor_common.core.
+  save_errors.describe_save_error()`, explaining Windows' 260-
+  character path limit clearly instead of a raw exception string.
+  Also fixed a related gap while in this code: the final `shutil.move()`
+  rename step used to sit OUTSIDE the try/except entirely, so a
+  failure there (a real possibility -- the temp file's `.tmp_write`/
+  `.tmp_resize` suffix is longer than the final path) would propagate
+  raw and uncaught instead of setting `save_error` at all.
+- Inlined QMessageBox max-width stylesheet -> the shared
+  `redactor_common.gui.qmessagebox_style.apply_message_box_style()`.
+- Bumped the `redactor_common` pin to `2026-09-07-01`, which also
+  fixes a real bug at the source: `colors.py`'s
+  `TABLE_SELECTION_STYLESHEET` used to hardcode a selected row's own
+  background/text color, silently overriding `apply_theme()`'s
+  WCAG-verified, light/dark-aware selection colors -- moot for this
+  app specifically (it never imported `colors.py` before now), but
+  the fix is what makes adopting the stylesheet here safe today.
+
+6 new tests across `test_row_status_color.py` and `test_cbz_file.py`.
+
 ## 2026-09-06#08 -- Fixed: side panel collapse button getting stuck
 
 "button to collapse left field does not include cover. Pushing the

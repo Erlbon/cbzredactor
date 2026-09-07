@@ -42,6 +42,7 @@ from redactor_common.gui.about_dialog import AboutDialog, ChangelogDialog, Credi
 from redactor_common.gui.action_factory import make_action
 from redactor_common.gui.case_conversion_dialog import CaseConversionDialog
 from redactor_common.gui.collapsible_splitter import SplitterPaneCollapser
+from redactor_common.gui.colors import DIRTY_COLOR, ERROR_COLOR, HIGHLIGHT_TEXT_COLOR, TABLE_SELECTION_STYLESHEET
 from redactor_common.gui.column_menu import show_column_header_context_menu
 from redactor_common.gui.column_settings_dialog import ColumnSettingsDialog
 from redactor_common.gui.context_menu import show_table_context_menu
@@ -205,6 +206,7 @@ class MainWindow(QMainWindow):
         self.table.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.table.itemSelectionChanged.connect(self._on_selection_changed)
+        self.table.setStyleSheet(TABLE_SELECTION_STYLESHEET)  # current-cell focus outline
         self._setup_column_persistence()
 
         self.table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
@@ -534,6 +536,36 @@ class MainWindow(QMainWindow):
         for attr in _FIELD_LABELS:
             value = getattr(book.metadata, attr, "")
             self.table.setItem(row, self._col_index[attr], QTableWidgetItem(value))
+
+        self._apply_row_status_color(row, book)
+
+    def _apply_row_status_color(self, row: int, book: CbzBook) -> None:
+        """Tints every cell in the row so a problem file (failed to
+        load) or an unsaved change (dirty, or a page-count mismatch
+        that'll be corrected on save) is visible at a glance across the
+        whole row -- matching epub/mp3/video's own row-tinting via
+        redactor_common.gui.colors, which this app never had at all
+        until now (its Status column was plain text only)."""
+        if book.load_error:
+            color = ERROR_COLOR
+        elif book.dirty or book.page_count_mismatch:
+            color = DIRTY_COLOR
+        else:
+            color = None
+
+        for col in range(self.table.columnCount()):
+            item = self.table.item(row, col)
+            if item is None:
+                continue
+            if color is not None:
+                item.setBackground(color)
+                item.setForeground(HIGHLIGHT_TEXT_COLOR)
+            else:
+                # Clear any override entirely (pass None, not an empty
+                # QBrush -- QBrush()'s default color is black, which
+                # would silently force black text regardless of theme).
+                item.setData(Qt.ItemDataRole.BackgroundRole, None)
+                item.setData(Qt.ItemDataRole.ForegroundRole, None)
 
     # ------------------------------------------------------------------
     # Selection / editing
