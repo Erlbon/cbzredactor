@@ -284,3 +284,10 @@ pytest
 ## Releasing a new version
 
 Run `python bump_version.py`, add a `CHANGELOG.md` entry, commit, and push.
+
+## License
+
+Licensed under the [GNU General Public License v3.0 or later](LICENSE).
+The GUI is built on PyQt6, which Riverbank Computing licenses under GPL
+v3 (or a paid commercial license) -- this project ships under
+GPL-compatible terms to match.
