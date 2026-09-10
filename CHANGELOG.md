@@ -1,5 +1,14 @@
 # Changelog
 
+## 2026-09-10#04 -- smaller download
+
+No functional changes. The built .exe is now noticeably smaller
+(~67.2MB -> ~54.7MB, about 19%) because UPX compression -- already
+configured in the PyInstaller spec (`upx=True`) but never actually
+installed in the build environment, so it had silently done nothing on
+every release so far -- is now genuinely wired into `build_exe.bat`.
+Same fix applied across the whole Redactor family.
+
 ## 2026-09-10#03 -- Look Up via Bedetheque
 
 New lookup source for francophone comics: `Import > Look Up via
