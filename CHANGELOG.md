@@ -1,5 +1,35 @@
 # Changelog
 
+## 2026-09-10#03 -- Look Up via Bedetheque
+
+New lookup source for francophone comics: `Import > Look Up via
+Bedetheque...` searches [Bedetheque](https://www.bedetheque.com/), the
+reference database for French-language "bande dessinée," by Series +
+Number (like GCD, unlike Comic Vine's free-text search) -- best for
+BD titles Comic Vine and GCD tend to have thin or no coverage of.
+
+Analyzed three community scraper projects first (givka/bedetheque-scraper,
+vsoeiro/bedetheque, maforget/Bedetheque-Scrapper-2), then verified
+everything directly against the live site rather than trusting them --
+two are years old, one archived, and the site's been redesigned since:
+all three documented an individual-issue URL scheme that no longer
+exists. What's still accurate, cross-validated by all three and
+confirmed live, is the underlying "Label : Value" field structure a
+real issue page uses.
+
+Bedetheque sits behind Cloudflare -- a plain HTTP request gets 403 on
+every page. Uses the optional `cloudscraper` package (mimics a real
+browser's TLS fingerprint and solves the JS challenge programmatically)
+rather than bundling a real headless browser -- lighter dependency, no
+browser binary to ship in the PyInstaller build. You'll get a clear
+"install cloudscraper" message if it's missing, not a crash. Same
+review-then-Apply flow as the other two lookups, including the
+side-by-side Current/Found cover comparison and the editable Series/
+Number correction form.
+
+11 new tests in `test_bedetheque_lookup.py`, using response shapes
+captured directly from the live site.
+
 ## 2026-09-10#02 -- Per-file, per-field review before any overwrite
 
 Replaced the old all-or-nothing "Overwrite All / Keep Existing /

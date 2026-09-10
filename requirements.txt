@@ -14,6 +14,15 @@ Pillow>=10.0
 # support" section.
 rarfile>=4.1
 
+# Optional: only needed for Import > Look Up via Bedetheque. The site
+# sits behind Cloudflare (a plain HTTP request gets 403 on every page)
+# -- cloudscraper mimics a real browser's TLS fingerprint and solves
+# Cloudflare's JS challenge programmatically, avoiding the far heavier
+# alternative (bundling a real headless browser). See
+# core/bedetheque_lookup.py's module docstring for the tradeoff this
+# was chosen over (Playwright), accepted deliberately.
+cloudscraper>=1.2
+
 # Shared UI/core code with the epub, mp3, and video Redactor tools -- a
 # real pip dependency (github.com/Erlbon/redactor_common), not a
 # vendored copy. Pinned to a tag, not @main -- see that repo's README

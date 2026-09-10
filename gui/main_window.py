@@ -60,6 +60,7 @@ from core.cbr_convert import CbrConversionError, convert_cbr_to_cbz
 from core.cbz_file import CbzBook, CbzError
 from core.version import APP_NAME, APP_REPO_URL, APP_VERSION, RELEASE_LABEL
 from gui import app_settings
+from gui.bedetheque_lookup_dialog import BedethequeLookupDialog
 from gui.comicvine_lookup_dialog import ComicVineLookupDialog
 from gui.gcd_lookup_dialog import GcdLookupDialog
 from gui.overwrite_review_dialog import OverwriteReviewDialog, build_overwrite_review_rows
@@ -270,6 +271,7 @@ class MainWindow(QMainWindow):
                 Separator(),
                 MenuAction("comicvine_lookup", "Look Up via Comic &Vine...", self.open_comicvine_lookup_dialog),
                 MenuAction("gcd_lookup", "Look Up via &Grand Comics Database...", self.open_gcd_lookup_dialog),
+                MenuAction("bedetheque_lookup", "Look Up via &Bedetheque...", self.open_bedetheque_lookup_dialog),
             ],
             "Operations": [
                 # Shared with the toolbar (see _build_toolbar) -- one
@@ -1345,6 +1347,25 @@ class MainWindow(QMainWindow):
 
     def open_gcd_lookup_dialog(self) -> None:
         self._run_lookup_dialog(GcdLookupDialog, "Grand Comics Database lookup")
+
+    def open_bedetheque_lookup_dialog(self) -> None:
+        """Checked here, before ever constructing BedethequeLookupDialog
+        (which needs cloudscraper to get past Bedetheque's Cloudflare
+        protection -- see core/bedetheque_lookup.py) -- one clear
+        message and a clean return, rather than letting the dialog's
+        own constructor raise ImportError up into the generic crash
+        handler."""
+        try:
+            import cloudscraper  # noqa: F401 -- import-only check; actual use is in core/bedetheque_lookup.py
+        except ImportError:
+            QMessageBox.critical(
+                self,
+                "Missing Dependency",
+                'Looking up via Bedetheque needs the "cloudscraper" package, which isn\'t '
+                "installed.\n\nInstall it with:\n\npip install cloudscraper",
+            )
+            return
+        self._run_lookup_dialog(BedethequeLookupDialog, "Bedetheque lookup")
 
     def change_comicvine_api_key(self) -> None:
         current = app_settings.load_comicvine_api_key()
