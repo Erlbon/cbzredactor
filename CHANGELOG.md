@@ -1,5 +1,19 @@
 # Changelog
 
+## 2026-09-10#05 -- Auto-Numbering
+
+- **New "Operations > Auto-Numbering..."** -- assigns a sequential
+  number to a chosen field across the selected files, in table order
+  (start value, increment, zero-padding, and a separator for non-
+  numeric fields, e.g. "01 - Pilot"). Number/Count/Volume/Alternate
+  Number/Alternate Count/Story Arc Number get numeric (direct-write)
+  treatment -- everything else is prefixed onto its existing value
+  instead. Built on `redactor_common.gui.auto_numbering_dialog`,
+  promoted from video (the only sibling project that had a generic
+  version of this -- epub's "Number Series" is narrower). Same
+  explicit-selection-required convention as Case Conversion/Search-
+  Replace here. Bumped `redactor_common` to `2026-09-10-03`.
+
 ## 2026-09-10#04 -- smaller download
 
 No functional changes. The built .exe is now noticeably smaller

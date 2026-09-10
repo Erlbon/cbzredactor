@@ -41,6 +41,7 @@ from redactor_common.core.undo import UndoManager
 from redactor_common.gui.about_dialog import AboutDialog, ChangelogDialog, CreditsDialog
 from redactor_common.gui.action_factory import make_action
 from redactor_common.gui.case_conversion_dialog import CaseConversionDialog
+from redactor_common.gui.auto_numbering_dialog import AutoNumberingDialog
 from redactor_common.gui.collapsible_splitter import SplitterPaneCollapser
 from redactor_common.gui.colors import DIRTY_COLOR, ERROR_COLOR, HIGHLIGHT_TEXT_COLOR, TABLE_SELECTION_STYLESHEET
 from redactor_common.gui.column_menu import show_column_header_context_menu
@@ -102,6 +103,17 @@ _FIELD_LABELS.update(
 
 def _field_label(attr: str) -> str:
     return _FIELD_LABELS.get(attr, attr.replace("_", " ").title())
+
+
+# Fields genuinely numeric per the ComicInfo schema itself -- get
+# Auto-Numbering's direct-write treatment. Everything else in
+# _FIELD_LABELS is still offered, just prefixed onto its existing
+# value instead (same conservative default video's own NUMERIC_FIELDS
+# used: not every field that CAN hold a number should be overwritten
+# by one).
+_AUTO_NUMBER_NUMERIC_FIELDS: frozenset[str] = frozenset(
+    {"number", "count", "volume", "alternate_number", "alternate_count", "story_arc_number"}
+)
 
 
 # Table columns, field-key based -- see redactor_common.core.table_settings's
@@ -281,6 +293,7 @@ class MainWindow(QMainWindow):
                 MenuAction("apply_bulk_edit", "&Apply to 0 Selected File(s)", self._apply_bulk_edit),
                 MenuAction("search_replace", "&Search/Replace...", self.open_search_replace_dialog),
                 MenuAction("case_conversion", "&Case Conversion...", self.open_case_conversion_dialog),
+                MenuAction("auto_numbering", "Auto-&Numbering...", self.open_auto_numbering_dialog),
                 Separator(),
                 MenuAction("resize_images", "Resi&ze Images...", self.open_resize_images_dialog),
                 Separator(),
@@ -1134,6 +1147,38 @@ class MainWindow(QMainWindow):
             return
 
         self._push_undo("Case Conversion", target_books)
+        for index, new_value in changes.items():
+            book = target_books[index]
+            setattr(book.metadata, field_key, new_value)
+            book.dirty = True
+            self._refresh_table_row(self.books.index(book), book)
+        self._update_status()
+
+    def open_auto_numbering_dialog(self) -> None:
+        self._commit_current_edits()
+        target_books = self._target_books()
+        if not target_books:
+            QMessageBox.information(self, "No Files", "Load some files first (or select the ones to number).")
+            return
+
+        def get_value(book: CbzBook, field_key: str) -> str:
+            return getattr(book.metadata, field_key, "")
+
+        fields = [(key, label, key in _AUTO_NUMBER_NUMERIC_FIELDS) for key, label in _FIELD_LABELS.items()]
+        dialog = AutoNumberingDialog(
+            target_books, fields, get_value,
+            lambda book: os.path.basename(book.path),
+            item_noun="file", parent=self,
+        )
+        if dialog.exec() != dialog.DialogCode.Accepted:
+            return
+
+        field_key = dialog.result_field_key()
+        changes = dialog.accepted_changes()  # index into target_books -> new value (one field)
+        if not changes:
+            return
+
+        self._push_undo("Auto-Numbering", target_books)
         for index, new_value in changes.items():
             book = target_books[index]
             setattr(book.metadata, field_key, new_value)
