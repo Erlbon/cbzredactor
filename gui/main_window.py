@@ -42,6 +42,7 @@ from redactor_common.gui.about_dialog import AboutDialog, ChangelogDialog, Credi
 from redactor_common.gui.action_factory import make_action
 from redactor_common.gui.case_conversion_dialog import CaseConversionDialog
 from redactor_common.gui.auto_numbering_dialog import AutoNumberingDialog
+from redactor_common.gui.quick_series_number import prompt_and_generate_series_numbers
 from redactor_common.gui.collapsible_splitter import SplitterPaneCollapser
 from redactor_common.gui.colors import DIRTY_COLOR, ERROR_COLOR, HIGHLIGHT_TEXT_COLOR, TABLE_SELECTION_STYLESHEET
 from redactor_common.gui.column_menu import show_column_header_context_menu
@@ -467,21 +468,31 @@ class MainWindow(QMainWindow):
             # Deliberately checks self._selected_rows directly, not the
             # `_books` param (get_selected_items=self._target_books,
             # which falls back to "every loaded book" when nothing's
-            # selected) -- renaming several files to the same name
-            # doesn't make sense, so this is only offered when exactly
-            # one book is genuinely selected, not "there happens to be
-            # only one book loaded total". Distinct from "Rename /
-            # Export Files..." (File menu): that's the pattern-based
-            # batch tool; this is the quick, direct fix for one typo at
-            # a time -- also reachable by double-clicking the Filename
-            # cell (see _on_cell_double_clicked()).
+            # selected) -- both actions below only make sense against a
+            # genuine selection, not "there happens to be only N books
+            # loaded total".
+            items: list = []
+            # Renaming several files to the same name doesn't make
+            # sense, so this is only offered for exactly one selected
+            # book. Distinct from "Rename / Export Files..." (File
+            # menu): that's the pattern-based batch tool; this is the
+            # quick, direct fix for one typo at a time -- also
+            # reachable by double-clicking the Filename cell (see
+            # _on_cell_double_clicked()).
             if len(self._selected_rows) == 1:
                 book = self.books[self._selected_rows[0]]
                 if not book.load_error:
-                    return [Separator(), MenuAction(
+                    items.append(MenuAction(
                         "rename_file", "Rename File...", lambda: self.rename_single_file(book)
-                    )]
-            return []
+                    ))
+            if self._selected_rows:
+                selected_books = [self.books[r] for r in self._selected_rows]
+                items.append(MenuAction(
+                    "number_issues", "Number Issues...", lambda: self._quick_number_issues(selected_books)
+                ))
+            if items:
+                items.insert(0, Separator())
+            return items
 
         show_table_context_menu(
             self, self.table, pos,
@@ -1182,6 +1193,26 @@ class MainWindow(QMainWindow):
         for index, new_value in changes.items():
             book = target_books[index]
             setattr(book.metadata, field_key, new_value)
+            book.dirty = True
+            self._refresh_table_row(self.books.index(book), book)
+        self._update_status()
+
+    def _quick_number_issues(self, books: list[CbzBook]) -> None:
+        """The table right-click's quick version of Auto-Numbering:
+        just prompts for a starting issue Number (no field picker, no
+        step, no preview) and numbers the given books +1 per row from
+        there, in their current table order. Decimal-capable (a
+        special issue at "3.5" is a real, common case for a comic
+        Number field). For anything beyond the plain "start here, count
+        up by one" case on Number specifically -- a different field, a
+        different step, or a look at what's changing before it does --
+        use Operations -> Auto-Numbering... instead."""
+        values = prompt_and_generate_series_numbers(self, len(books), field_label="Starting Number")
+        if values is None:
+            return
+        self._push_undo("Number Issues", books)
+        for book, new_value in zip(books, values):
+            book.metadata.number = new_value
             book.dirty = True
             self._refresh_table_row(self.books.index(book), book)
         self._update_status()

@@ -1,5 +1,16 @@
 # Changelog
 
+## 2026-09-10#06 -- Quick "Number Issues" on right-click
+
+- **New "Number Issues..." in the table's right-click menu** -- the
+  quick, one-prompt version of Auto-Numbering: just asks for a
+  starting issue Number and numbers the selected files +1 per row, no
+  field picker or preview (Operations > Auto-Numbering... is still
+  there for that). Decimal-capable, so a special issue at "3.5" works
+  directly. Built on `redactor_common.gui.quick_series_number`,
+  promoted from epub's own quick right-click Number Series. Bumped
+  `redactor_common` to `2026-09-10-04`.
+
 ## 2026-09-10#05 -- Auto-Numbering
 
 - **New "Operations > Auto-Numbering..."** -- assigns a sequential
