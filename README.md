@@ -91,6 +91,10 @@ understands that this app now supports too).
   detecting which of your past patterns fits the current batch best.
   Routed through the same overwrite-conflict protection as a lookup
   (see below) -- it won't silently clobber a field you've already set.
+- **Quick single-file rename**: double-click a Filename cell, or
+  right-click a single selected file > Rename File..., to fix a typo
+  directly without the pattern-based tool above --
+  `redactor_common.gui.rename_single_file.rename_single_file()`.
   Both dialogs share one pattern history.
 - Edit the full ComicInfo.xml v2.0 field set, plus four fields from the
   v2.1 **draft** schema already understood by ComicTagger and readers

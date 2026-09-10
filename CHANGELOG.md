@@ -1,5 +1,34 @@
 # Changelog
 
+## 2026-09-10#01 -- quick single-file rename
+
+Double-click a Filename cell (or right-click a single selected file >
+Rename File...) to fix a typo in one filename directly, without going
+through the pattern-based "Rename / Export Files..." batch tool.
+epubredactor already had this (its own local copy); mp3redactor added
+it too and promoted the reusable part to `redactor_common`
+(`gui/rename_single_file.py`, tag `2026-09-10-01`, bumped here) --
+cbzredactor consumes that shared function rather than writing another
+local copy.
+
+- Renames on disk immediately (extension kept automatically, current
+  name pre-filled), refuses illegal characters/reserved Windows names/
+  an already-existing filename with a clear message rather than a raw
+  exception or a silent overwrite. A physical file operation -- not
+  pushed onto the undo stack, same as Save/the batch rename tool.
+- Right-click menu only offers it when exactly one book is genuinely
+  selected (checked via `self._selected_rows`, not `_target_books()`'s
+  own "select one, some, or fall back to everything loaded" fallback
+  used elsewhere in this menu) and never for a book that failed to load.
+
+Verified end-to-end against a real `.cbz` file on disk (not mocked): a
+real double-click dispatch, a real rename, correct no-op on every
+other column, and correct context-menu gating for a real single
+selection vs. no selection. Full suite: 139 passed. No new permanent
+test file -- this project's GUI layer has no automated test coverage;
+the underlying `rename_file_on_disk()`/`validate_filename_stem()` logic
+is already covered by `redactor_common`'s own test suite.
+
 ## 2026-09-07#01 -- redactor_common adoption fixes: row tinting, path-too-long handling
 
 A cross-repo review of `redactor_common` adoption across all four

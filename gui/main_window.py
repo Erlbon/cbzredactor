@@ -51,6 +51,7 @@ from redactor_common.gui.menu_builder import MenuAction, Separator, build_menu_b
 from redactor_common.gui.parse_filename_dialog import ParseFilenameDialog
 from redactor_common.gui.progress import run_with_progress
 from redactor_common.gui.rename_pattern_dialog import RenamePatternDialog
+from redactor_common.gui.rename_single_file import rename_single_file as prompt_rename_single_file
 from redactor_common.gui.search_replace_dialog import FILENAME_FIELD_KEY, SearchReplaceDialog
 from redactor_common.gui.zoom_toolbar import TableZoomController
 from redactor_common.core.version import REDACTOR_COMMON_REPO_URL, REDACTOR_COMMON_VERSION
@@ -206,6 +207,7 @@ class MainWindow(QMainWindow):
         self.table.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.table.itemSelectionChanged.connect(self._on_selection_changed)
+        self.table.cellDoubleClicked.connect(self._on_cell_double_clicked)
         self.table.setStyleSheet(TABLE_SELECTION_STYLESHEET)  # current-cell focus outline
         self._setup_column_persistence()
 
@@ -445,10 +447,31 @@ class MainWindow(QMainWindow):
     def _show_table_context_menu(self, pos) -> None:
         # Selection-fix, and the generic Open Containing Folder/Copy
         # Path actions, are handled by the shared helper.
+        def extra_items(_books: list[CbzBook]) -> list:
+            # Deliberately checks self._selected_rows directly, not the
+            # `_books` param (get_selected_items=self._target_books,
+            # which falls back to "every loaded book" when nothing's
+            # selected) -- renaming several files to the same name
+            # doesn't make sense, so this is only offered when exactly
+            # one book is genuinely selected, not "there happens to be
+            # only one book loaded total". Distinct from "Rename /
+            # Export Files..." (File menu): that's the pattern-based
+            # batch tool; this is the quick, direct fix for one typo at
+            # a time -- also reachable by double-clicking the Filename
+            # cell (see _on_cell_double_clicked()).
+            if len(self._selected_rows) == 1:
+                book = self.books[self._selected_rows[0]]
+                if not book.load_error:
+                    return [Separator(), MenuAction(
+                        "rename_file", "Rename File...", lambda: self.rename_single_file(book)
+                    )]
+            return []
+
         show_table_context_menu(
             self, self.table, pos,
             get_selected_items=self._target_books,
             get_path=lambda book: book.path,
+            extra_items=extra_items,
         )
 
     # ------------------------------------------------------------------
@@ -1005,6 +1028,32 @@ class MainWindow(QMainWindow):
                 page_count_text = f"{book.actual_page_count} page(s)"
                 self.panel.load_metadata(book.metadata, book.read_first_page_bytes(), page_count_text)
         self._update_status()
+
+    def _on_cell_double_clicked(self, row: int, col: int) -> None:
+        if col != self._col_index["filename"]:
+            return
+        if not (0 <= row < len(self.books)):
+            return
+        book = self.books[row]
+        if not book.load_error:
+            self.rename_single_file(book)
+
+    def rename_single_file(self, book: CbzBook) -> None:
+        """Quick, direct rename of a single file on disk -- for fixing a
+        typo or small mistake in the filename without going through the
+        pattern-based Rename/Export tool (open_rename_dialog()). Acts on
+        disk immediately, not staged until Save -- same as that tool's
+        own "rename in place" mode -- and, like that, isn't pushed onto
+        the undo stack, which only ever covers in-memory metadata edits,
+        never physical file operations. Triggered by double-clicking a
+        Filename cell, or via the table's right-click menu.
+
+        The prompt/validate/rename/error-report flow itself lives in
+        redactor_common.gui.rename_single_file (imported above as
+        prompt_rename_single_file to avoid shadowing this method's own
+        name)."""
+        if prompt_rename_single_file(self, book.path, lambda p: setattr(book, "path", p)):
+            self._refresh_table_row(self.books.index(book), book)
 
     def open_search_replace_dialog(self) -> None:
         self._commit_current_edits()
