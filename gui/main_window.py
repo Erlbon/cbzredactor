@@ -62,6 +62,7 @@ from core.version import APP_NAME, APP_REPO_URL, APP_VERSION, RELEASE_LABEL
 from gui import app_settings
 from gui.comicvine_lookup_dialog import ComicVineLookupDialog
 from gui.gcd_lookup_dialog import GcdLookupDialog
+from gui.overwrite_review_dialog import OverwriteReviewDialog, build_overwrite_review_rows
 from gui.resize_dialog import ResizeImagesDialog
 from gui.metadata_panel import (
     CREDIT_FIELDS,
@@ -1299,58 +1300,44 @@ class MainWindow(QMainWindow):
         self, target_books: list[CbzBook], metadata_changes: dict[int, dict[str, str]]
     ) -> dict[int, dict[str, str]] | None:
         """Checks whether applying `metadata_changes` would overwrite
-        any field that already has a non-blank, different value, and
-        if so asks once how to proceed -- applies uniformly no matter
-        which path produced the changes (a lookup, bulk edit, or Parse
-        Filename all funnel through this same method).
+        any field that already has a non-blank, different value, and if
+        so opens a per-file, per-field review before anything is
+        written -- applies uniformly no matter which path produced the
+        changes (a lookup, bulk edit, or Parse Filename all funnel
+        through this same method). This is the standard confirmation
+        step for every metadata-writing path that could clobber
+        existing data, not an opt-in extra: "we can be sure what is the
+        real data" means seeing the actual old/new comparison, not
+        trusting one batch-wide Overwrite-All/Keep-Existing choice.
 
-        Returns the changes to actually apply (all of them, or only
-        the ones that don't clobber existing data), or None if the
+        A totally clean batch (nothing would be overwritten anywhere)
+        skips the dialog entirely -- there's nothing to review. The
+        moment ANYTHING in the batch conflicts, every field the whole
+        batch would touch is shown (not just the conflicting ones), so
+        a file with several changed fields is reviewed as a whole, with
+        a safe fill (blank -> value) ticked by default and a genuine
+        overwrite (differing non-blank -> value) requiring a deliberate
+        per-field opt-in -- see gui/overwrite_review_dialog.py.
+
+        Returns the changes to actually apply (every field whose
+        checkbox is still ticked when Apply is clicked), or None if the
         user cancelled outright."""
-        conflicts: list[tuple[str, str]] = []  # (filename, field label) pairs, for the prompt text
-        for index, fields in metadata_changes.items():
-            book = target_books[index]
-            for attr, new_value in fields.items():
-                current_value = (getattr(book.metadata, attr, "") or "").strip()
-                if current_value and current_value != new_value:
-                    conflicts.append((os.path.basename(book.path), _field_label(attr)))
-
-        if not conflicts:
-            return metadata_changes
-
-        preview = "; ".join(f"{name} ({label})" for name, label in conflicts[:5])
-        if len(conflicts) > 5:
-            preview += f", and {len(conflicts) - 5} more"
-
-        box = QMessageBox(self)
-        box.setIcon(QMessageBox.Icon.Warning)
-        box.setWindowTitle("Existing Metadata Found")
-        box.setText(
-            f"{len(conflicts)} field(s) already have a value that this would "
-            f"overwrite:\n\n{preview}\n\nHow do you want to proceed?"
+        has_conflict = any(
+            (getattr(target_books[index].metadata, attr, "") or "").strip() not in ("", new_value)
+            for index, fields in metadata_changes.items()
+            for attr, new_value in fields.items()
         )
-        overwrite_btn = box.addButton("Overwrite All", QMessageBox.ButtonRole.AcceptRole)
-        keep_btn = box.addButton("Keep Existing (fill blanks only)", QMessageBox.ButtonRole.ActionRole)
-        box.addButton(QMessageBox.StandardButton.Cancel)
-        box.setDefaultButton(keep_btn)
-        box.exec()
-        clicked = box.clickedButton()
-
-        if clicked is overwrite_btn:
+        if not has_conflict:
             return metadata_changes
-        if clicked is not keep_btn:
-            return None  # Cancel (or the dialog was closed)
+
+        rows = build_overwrite_review_rows(target_books, metadata_changes, _field_label)
+        dialog = OverwriteReviewDialog(rows, parent=self)
+        if dialog.exec() != dialog.DialogCode.Accepted:
+            return None
 
         filtered: dict[int, dict[str, str]] = {}
-        for index, fields in metadata_changes.items():
-            book = target_books[index]
-            kept = {
-                attr: value
-                for attr, value in fields.items()
-                if not (getattr(book.metadata, attr, "") or "").strip()
-            }
-            if kept:
-                filtered[index] = kept
+        for (index, attr), value in dialog.accepted_changes().items():
+            filtered.setdefault(index, {})[attr] = value
         return filtered
 
     def open_comicvine_lookup_dialog(self) -> None:

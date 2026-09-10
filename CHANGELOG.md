@@ -1,5 +1,39 @@
 # Changelog
 
+## 2026-09-10#02 -- Per-file, per-field review before any overwrite
+
+Replaced the old all-or-nothing "Overwrite All / Keep Existing /
+Cancel" choice (shown whenever a lookup or Parse Filename would
+overwrite an existing value) with a real per-file, per-field review:
+"we need per field. There could be instances where we want some
+fields, but not all." This is now the standard confirmation step for
+every metadata-writing path that could clobber existing data -- not an
+opt-in extra.
+
+- New **Review Changes** dialog (`gui/overwrite_review_dialog.py`):
+  every field a change would touch, for every affected file, shown
+  side by side with its current value, each with its own Apply
+  checkbox -- grouped by file so a file with several changed fields is
+  reviewed as a whole. A field that's currently blank starts ticked
+  (nothing to lose); a field that would actually replace a different,
+  non-blank value starts unticked, requiring a deliberate per-field
+  opt-in. You can accept some fields from an import and reject others
+  on the very same file.
+- A batch with nothing to overwrite still skips the dialog entirely --
+  there's nothing to review when nothing would be clobbered, same as
+  before.
+- Built on `redactor_common.gui.preview_table.PreviewTableController`
+  (the same "before/after + Apply checkbox" shape Search/Replace and
+  Case Conversion already use), extended there with an optional
+  grouping column and a per-row default-checked state specifically for
+  this. Bumps the `redactor_common` pin to `2026-09-10-02`.
+
+12 new tests across `test_overwrite_review_dialog.py` and a rewritten
+`test_main_window_overwrite.py` (the old QMessageBox-button-clicking
+tests no longer apply -- replaced with tests that exercise the real
+dialog's default-checked logic and per-field selection, not a mocked
+stand-in for it).
+
 ## 2026-09-10#01 -- quick single-file rename
 
 Double-click a Filename cell (or right-click a single selected file >

@@ -199,12 +199,17 @@ understands that this app now supports too).
   restore once pixels are actually re-encoded and written to disk, so
   it only ever runs when you explicitly ask for it, never as a side
   effect of Save.
-- **Both lookups protect existing data the same way**: on Apply, if
-  any looked-up field would overwrite a value a file already has (a
-  hand-typed one, or from a prior lookup), you're asked once whether
-  to overwrite everything, keep the existing values and only fill in
-  blanks, or cancel -- rather than either silently clobbering it or
-  silently refusing to update it.
+- **Every metadata-writing path that could overwrite existing data
+  (both lookups, and Parse Filename) shows a per-file, per-field
+  review before anything is written** -- every field the change would
+  touch, side by side with what's there now, with its own Apply
+  checkbox. A field that's currently blank starts ticked (nothing to
+  lose); a field that would actually replace a different, non-blank
+  value starts unticked, so accepting it takes a deliberate per-field
+  choice rather than one all-or-nothing decision for the whole file.
+  You can accept some fields from an import and reject others on the
+  very same file. A batch with nothing to overwrite skips the review
+  entirely -- there's nothing to confirm.
 
 ### Deferred (not in this version)
 
@@ -254,12 +259,14 @@ for the OS it runs on).
 
 ## Development
 
-Tests are plain pytest, no Qt required for the `core/` modules. Most
-of the GUI layer isn't unit-tested (same convention as the sibling
-tools) -- the one exception is the lookup-overwrite-conflict logic in
-`gui/main_window.py`, tested via a real (offscreen) QApplication since
-a regression there would affect data safety across every lookup
-source at once:
+Tests are plain pytest, no Qt required for the `core/` modules. The
+GUI layer isn't exhaustively unit-tested (same convention as the
+sibling tools), but real (offscreen) `QApplication`-based tests cover
+the spots where a regression would be easy to miss visually and costly
+if it shipped anyway -- the overwrite-review logic in
+`gui/main_window.py`/`gui/overwrite_review_dialog.py` (data safety
+across every metadata-writing path at once), column/panel-visibility
+sync, the side-panel collapse toggle, column sorting, and more:
 
 ```bash
 pip install pytest
