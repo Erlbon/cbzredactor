@@ -55,6 +55,7 @@ from redactor_common.gui.progress import run_with_progress
 from redactor_common.gui.rename_pattern_dialog import RenamePatternDialog
 from redactor_common.gui.rename_single_file import rename_single_file as prompt_rename_single_file
 from redactor_common.gui.search_replace_dialog import FILENAME_FIELD_KEY, SearchReplaceDialog
+from redactor_common.gui import standard_shortcuts as shortcuts
 from redactor_common.gui.zoom_toolbar import TableZoomController
 from redactor_common.core.version import REDACTOR_COMMON_REPO_URL, REDACTOR_COMMON_VERSION
 
@@ -263,23 +264,43 @@ class MainWindow(QMainWindow):
     def _build_menu(self) -> None:
         specs = {
             "File": [
-                MenuAction("load_files", "&Load Files...", self.load_files_dialog, shortcut="Ctrl+O"),
-                MenuAction("load_folder", "Load &Folder...", self.load_folder_dialog, shortcut="Ctrl+Shift+O"),
+                MenuAction("load_files", "&Load Files...", self.load_files_dialog, shortcut=shortcuts.LOAD_FILES),
+                MenuAction(
+                    "load_folder", "Load &Folder...", self.load_folder_dialog, shortcut=shortcuts.LOAD_FOLDER
+                ),
                 Separator(),
-                MenuAction("save", "&Save", self.save_current, shortcut="Ctrl+S"),
-                MenuAction("save_as", "Save &As...", self.save_current_as, shortcut="Ctrl+Shift+S"),
+                MenuAction("save", "&Save", self.save_current, shortcut=shortcuts.SAVE),
+                MenuAction("save_as", "Save &As...", self.save_current_as, shortcut=shortcuts.SAVE_AS),
                 Separator(),
-                MenuAction("rename_files", "&Rename / Export Files...", self.open_rename_dialog, shortcut="F2"),
+                # Quick, direct rename of the one selected file -- matches
+                # Explorer's F2 exactly. Distinct from "rename_files"
+                # below (the pattern-based batch tool, moved off F2 to
+                # make room for this): see rename_selected_file().
+                MenuAction(
+                    "rename_file", "&Rename File...", self.rename_selected_file,
+                    shortcut=shortcuts.RENAME_SINGLE_FILE,
+                ),
+                MenuAction(
+                    "rename_files", "Rename / &Export Files...", self.open_rename_dialog,
+                    shortcut=shortcuts.RENAME_EXPORT_BY_PATTERN,
+                ),
                 Separator(),
-                MenuAction("remove_files", "Remo&ve Files", self.remove_selected, shortcut="Delete"),
+                MenuAction("remove_files", "Remo&ve Files", self.remove_selected, shortcut=shortcuts.REMOVE_FROM_LIST),
                 Separator(),
-                MenuAction("refresh_list", "Re&fresh List", self.refresh_list, shortcuts=["F5", "Ctrl+R"]),
+                MenuAction("refresh_list", "Re&fresh List", self.refresh_list, shortcuts=shortcuts.REFRESH_LIST),
                 MenuAction("clear_list", "&Clear List", self.clear_list),
                 Separator(),
-                MenuAction("exit", "E&xit", self.close, shortcut="Ctrl+Q"),
+                # No explicit shortcut -- Alt+F4 already closes this (or
+                # any) plain QMainWindow at the OS level, verified
+                # directly (launch, send Alt+F4, confirm the process
+                # exits), independent of anything bound here.
+                MenuAction("exit", "E&xit", self.close),
             ],
             "Import": [
-                MenuAction("parse_filename", "&Parse Filename...", self.open_parse_filename_dialog, shortcut="F3"),
+                MenuAction(
+                    "parse_filename", "&Parse Filename...", self.open_parse_filename_dialog,
+                    shortcut=shortcuts.PARSE_FILENAME_TO_METADATA,
+                ),
                 MenuAction("convert_cbr", "Convert &CBR to CBZ...", self.convert_cbr_dialog),
                 Separator(),
                 MenuAction("comicvine_lookup", "Look Up via Comic &Vine...", self.open_comicvine_lookup_dialog),
@@ -292,15 +313,19 @@ class MainWindow(QMainWindow):
                 # file(s)" text and enabled state never drift out of
                 # sync between the two places it appears.
                 MenuAction("apply_bulk_edit", "&Apply to 0 Selected File(s)", self._apply_bulk_edit),
-                MenuAction("search_replace", "&Search/Replace...", self.open_search_replace_dialog),
+                MenuAction(
+                    "search_replace", "&Search/Replace...", self.open_search_replace_dialog,
+                    shortcut=shortcuts.SEARCH_REPLACE,
+                ),
                 MenuAction("case_conversion", "&Case Conversion...", self.open_case_conversion_dialog),
                 MenuAction("auto_numbering", "Auto-&Numbering...", self.open_auto_numbering_dialog),
                 Separator(),
                 MenuAction("resize_images", "Resi&ze Images...", self.open_resize_images_dialog),
                 Separator(),
-                MenuAction("save_all", "Save &All Changed", self.save_all_changed, shortcut="Ctrl+Shift+A"),
+                MenuAction("save_all", "Save &All Changed", self.save_all_changed, shortcut=shortcuts.SAVE_ALL),
                 Separator(),
-                MenuAction("undo", "&Undo", self.undo_last_action, shortcut="Ctrl+Z"),
+                MenuAction("undo", "&Undo", self.undo_last_action, shortcut=shortcuts.UNDO),
+                MenuAction("redo", "&Redo", self.redo_last_action, shortcut=shortcuts.REDO),
             ],
             "Settings": [
                 MenuAction("comicvine_api_key", "Comic Vine API &Key...", self.change_comicvine_api_key),
@@ -310,7 +335,7 @@ class MainWindow(QMainWindow):
                 MenuAction("language_settings", "Add/Remove &Languages...", self.open_language_settings_dialog),
             ],
             "Help": [
-                MenuAction("about", f"&About {APP_NAME}", self.open_about_dialog),
+                MenuAction("about", f"&About {APP_NAME}", self.open_about_dialog, shortcut=shortcuts.HELP),
                 MenuAction("changelog", "View &Changelog", self.open_changelog_dialog),
                 MenuAction("credits", "View C&redits", self.open_credits_dialog),
             ],
@@ -318,6 +343,7 @@ class MainWindow(QMainWindow):
         self.actions_ = build_menu_bar(self, specs)
         self.actions_["apply_bulk_edit"].setEnabled(False)
         self.actions_["undo"].setEnabled(False)
+        self.actions_["redo"].setEnabled(False)
 
     def _build_toolbar(self) -> None:
         """Quick-access buttons for the most common actions -- reuses
@@ -339,6 +365,7 @@ class MainWindow(QMainWindow):
         toolbar.addAction(self.actions_["apply_bulk_edit"])
         toolbar.addSeparator()
         toolbar.addAction(self.actions_["undo"])
+        toolbar.addAction(self.actions_["redo"])
         toolbar.addSeparator()
 
         spacer = QWidget()
@@ -472,19 +499,15 @@ class MainWindow(QMainWindow):
             # genuine selection, not "there happens to be only N books
             # loaded total".
             items: list = []
-            # Renaming several files to the same name doesn't make
-            # sense, so this is only offered for exactly one selected
-            # book. Distinct from "Rename / Export Files..." (File
-            # menu): that's the pattern-based batch tool; this is the
-            # quick, direct fix for one typo at a time -- also
-            # reachable by double-clicking the Filename cell (see
-            # _on_cell_double_clicked()).
-            if len(self._selected_rows) == 1:
-                book = self.books[self._selected_rows[0]]
-                if not book.load_error:
-                    items.append(MenuAction(
-                        "rename_file", "Rename File...", lambda: self.rename_single_file(book)
-                    ))
+            # Reuses the actual File-menu QAction (F2) rather than
+            # building a fresh one -- same object, so this shows the
+            # real shortcut hint and can never drift out of sync with
+            # it. Its own enabled guard (exactly one book selected, no
+            # load error) is rename_selected_file()'s job, not this
+            # menu's -- see there for why this is distinct from
+            # "Rename / Export Files..." (the pattern-based batch tool).
+            if len(self._selected_rows) == 1 and not self.books[self._selected_rows[0]].load_error:
+                items.append(self.actions_["rename_file"])
             if self._selected_rows:
                 selected_books = [self.books[r] for r in self._selected_rows]
                 items.append(MenuAction(
@@ -719,6 +742,7 @@ class MainWindow(QMainWindow):
         state."""
         self.undo_manager.push(label, books, self._snapshot_book)
         self._update_undo_action()
+        self._update_redo_action()  # push() clears any pending redo
 
     def _update_undo_action(self) -> None:
         can_undo = self.undo_manager.can_undo()
@@ -726,8 +750,16 @@ class MainWindow(QMainWindow):
         label = self.undo_manager.peek_label()
         self.actions_["undo"].setText(f"&Undo {label}" if label else "&Undo")
 
-    def undo_last_action(self) -> None:
-        affected = self.undo_manager.undo(self._restore_book)
+    def _update_redo_action(self) -> None:
+        can_redo = self.undo_manager.can_redo()
+        self.actions_["redo"].setEnabled(can_redo)
+        label = self.undo_manager.peek_redo_label()
+        self.actions_["redo"].setText(f"&Redo {label}" if label else "&Redo")
+
+    def _apply_undo_affected(self, affected: list[CbzBook]) -> None:
+        """Shared tail of undo_last_action()/redo_last_action() -- both
+        restore a list of books the same way, they just pull from
+        opposite stacks."""
         for book in affected:
             row = self.books.index(book)
             self._refresh_table_row(row, book)
@@ -735,7 +767,19 @@ class MainWindow(QMainWindow):
                 page_count_text = f"{book.actual_page_count} page(s)"
                 self.panel.load_metadata(book.metadata, book.read_first_page_bytes(), page_count_text)
         self._update_undo_action()
+        self._update_redo_action()
         self._update_status()
+
+    def undo_last_action(self) -> None:
+        # snapshot_fn passed too (not just restore_fn) so the state
+        # being overwritten is captured onto the redo stack first --
+        # see redactor_common.core.undo's own docstring.
+        affected = self.undo_manager.undo(self._restore_book, self._snapshot_book)
+        self._apply_undo_affected(affected)
+
+    def redo_last_action(self) -> None:
+        affected = self.undo_manager.redo(self._restore_book, self._snapshot_book)
+        self._apply_undo_affected(affected)
 
     # ------------------------------------------------------------------
     # List management: remove / clear / refresh
@@ -838,6 +882,7 @@ class MainWindow(QMainWindow):
         self._selected_rows = []
         self.undo_manager.clear()  # its entries would reference book objects just discarded
         self._update_undo_action()
+        self._update_redo_action()
         self._rebuild_table()
         self.panel.set_enabled(False)
         self._update_status()
@@ -851,6 +896,7 @@ class MainWindow(QMainWindow):
         self._selected_rows = []
         self.undo_manager.clear()
         self._update_undo_action()
+        self._update_redo_action()
         self._rebuild_table()
         self.panel.set_enabled(False)
         self._update_status()
@@ -891,6 +937,7 @@ class MainWindow(QMainWindow):
         self._selected_rows = []
         self.undo_manager.clear()
         self._update_undo_action()
+        self._update_redo_action()
         self.table.setRowCount(0)
         self.panel.set_enabled(False)
         self._load_paths(all_paths)
@@ -1081,6 +1128,17 @@ class MainWindow(QMainWindow):
         name)."""
         if prompt_rename_single_file(self, book.path, lambda p: setattr(book, "path", p)):
             self._refresh_table_row(self.books.index(book), book)
+
+    def rename_selected_file(self) -> None:
+        """F2 entry point (Explorer convention: select one item, press
+        F2, rename it directly) -- same guard the right-click "Rename
+        File..." item uses (exactly one row selected, no load error),
+        since F2 and that menu item are the same action reached two
+        ways."""
+        if len(self._selected_rows) == 1:
+            book = self.books[self._selected_rows[0]]
+            if not book.load_error:
+                self.rename_single_file(book)
 
     def open_search_replace_dialog(self) -> None:
         self._commit_current_edits()

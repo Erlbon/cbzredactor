@@ -10,3 +10,7 @@ dist/
 # Local settings (holds the user's own Comic Vine API key) -- never
 # committed, same reasoning as any other per-machine credentials file.
 cbzredactor_settings.ini
+
+# Written next to the exe on an unhandled exception -- per-machine
+# diagnostic output, not something to ship in the repo.
+cbzredactor_crash.log

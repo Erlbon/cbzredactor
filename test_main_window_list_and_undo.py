@@ -131,3 +131,79 @@ def test_undo_stack_cleared_by_remove_selected(window):
     # track which entries are still valid.
     assert window.undo_manager.can_undo() is False
     assert window.actions_["undo"].isEnabled() is False
+
+
+def test_redo_restores_the_undone_change(window):
+    book = _fake_book(series="Original")
+    window.books = [book]
+    window._rebuild_table()
+
+    window._push_undo("Test edit", [book])
+    book.metadata.series = "Changed"
+    book.dirty = True
+
+    window.undo_last_action()
+    assert book.metadata.series == "Original"
+    assert window.actions_["redo"].isEnabled() is True
+
+    window.redo_last_action()
+    assert book.metadata.series == "Changed"
+    assert book.dirty is True
+    assert window.actions_["redo"].isEnabled() is False
+    assert window.actions_["undo"].isEnabled() is True  # redoing re-populates undo
+
+
+def test_new_edit_after_undo_clears_redo(window):
+    book = _fake_book(series="Original")
+    window.books = [book]
+    window._rebuild_table()
+    window._push_undo("First edit", [book])
+    book.metadata.series = "Changed once"
+
+    window.undo_last_action()
+    assert window.actions_["redo"].isEnabled() is True
+
+    # A genuinely new edit invalidates the old redo future, same as
+    # every other app's undo/redo.
+    window._push_undo("Second edit", [book])
+    assert window.actions_["redo"].isEnabled() is False
+
+
+def test_rename_selected_file_acts_on_the_one_selected_book(window, monkeypatch):
+    book_a, book_b = _fake_book(title="A"), _fake_book(title="B")
+    window.books = [book_a, book_b]
+    window._rebuild_table()
+    window._selected_rows = [1]
+    called_with = []
+    monkeypatch.setattr(window, "rename_single_file", lambda book: called_with.append(book))
+
+    window.rename_selected_file()
+
+    assert called_with == [book_b]
+
+
+def test_rename_selected_file_noop_when_not_exactly_one_selected(window, monkeypatch):
+    book_a, book_b = _fake_book(title="A"), _fake_book(title="B")
+    window.books = [book_a, book_b]
+    window._rebuild_table()
+    monkeypatch.setattr(
+        window, "rename_single_file", lambda book: pytest.fail("should not rename with an ambiguous selection")
+    )
+
+    window._selected_rows = []
+    window.rename_selected_file()
+    window._selected_rows = [0, 1]
+    window.rename_selected_file()
+
+
+def test_rename_selected_file_noop_on_load_error(window, monkeypatch):
+    book = _fake_book(title="Broken")
+    book.load_error = "zip file is corrupt"
+    window.books = [book]
+    window._rebuild_table()
+    window._selected_rows = [0]
+    monkeypatch.setattr(
+        window, "rename_single_file", lambda book: pytest.fail("should not offer to rename a load-error row")
+    )
+
+    window.rename_selected_file()
