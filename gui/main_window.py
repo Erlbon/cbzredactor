@@ -1007,7 +1007,10 @@ class MainWindow(QMainWindow):
                 errors.append(f"{os.path.basename(book.path)}: {exc}")
             self._refresh_table_row(row, book)
 
-        run_with_progress(self, changed_rows, _step, "Saving files...", threshold=SAVE_PROGRESS_THRESHOLD)
+        run_with_progress(
+            self, changed_rows, _step, "Saving files...", threshold=SAVE_PROGRESS_THRESHOLD,
+            label_for=lambda row: f"Saving: {os.path.basename(self.books[row].path)}",
+        )
 
         if errors:
             from redactor_common.core.error_summary import summarize_errors
