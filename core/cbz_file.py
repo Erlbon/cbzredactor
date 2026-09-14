@@ -10,9 +10,10 @@ simpler structure (no manifest to keep in sync, no cover-image
 indirection -- the "cover" shown in the sidebar is just whichever page
 sorts first).
 
-CBR (RAR-based) archives are out of scope here entirely -- see
-core/cbr_convert.py, which converts a .cbr to a real .cbz *before* this
-module ever sees it, rather than this module learning to read RAR.
+CBR/CBT/CB7 (RAR/tar/7-Zip-based) archives are out of scope here
+entirely -- see core/foreign_archive_convert.py, which converts one to
+a real .cbz *before* this module ever sees it, rather than this module
+learning to read RAR/tar/7z.
 
 save() is the only method that runs implicitly (whenever the user hits
 Save); it keeps the "images copied byte-for-byte" guarantee. The one

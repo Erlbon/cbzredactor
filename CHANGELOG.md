@@ -1,5 +1,32 @@
 # Changelog
 
+## 2026-09-14#01 -- CBT and CB7 support, plus a conversion prompt
+
+Import > Convert to CBZ (renamed from "Convert CBR to CBZ") now also
+handles **CBT** (tar-based comic archives, via Python's stdlib
+`tarfile` -- no extra dependency) and **CB7** (7-Zip-based, via the
+new optional `py7zr` dependency -- unlike CBR's `rarfile`, no separate
+binary to install). All three are still strictly read-only and
+converted to a real `.cbz` before anything touches them, same as CBR
+always was; see README's "Foreign archive formats" section.
+
+**Loading a CBR/CBT/CB7 now prompts once per batch** ("N file(s) need
+to be converted to CBZ -- convert now?") instead of converting
+silently the way CBR alone used to -- with an opt-in checkbox to also
+delete the original file(s) after a successful conversion (off by
+default; a failed conversion never deletes anything).
+
+Also fixes a real bug caught by the new tests: converting an archive
+whose entries predate 1980 (tar in particular often defaults to the
+epoch, 1970, when no timestamp was set) used to crash outright --
+`zipfile` can't represent a pre-1980 date, and the old code derived
+each written entry's timestamp from the extracted file's own mtime on
+disk. Now stamps the current time instead, which nothing reads back
+out of a comic archive's page images anyway.
+
+`core/cbr_convert.py` is gone, replaced by `core/
+foreign_archive_convert.py` (one shared module for all three formats).
+
 ## 2026-09-13#03 -- Save now shows which file it's on
 
 Saving files...'s existing progress dialog now shows the current

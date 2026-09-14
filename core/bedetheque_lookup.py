@@ -178,7 +178,8 @@ def make_bedetheque_fetch(session=None):
     client, not a browser -- import is lazy so this module (and its
     parsing logic) can be imported and tested without cloudscraper
     installed, same reasoning as this project's other optional-
-    dependency modules (core/cbr_convert.py's rarfile import)."""
+    dependency modules (core/foreign_archive_convert.py's rarfile/
+    py7zr imports)."""
     if session is None:
         import cloudscraper
 

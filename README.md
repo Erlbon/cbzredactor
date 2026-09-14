@@ -233,20 +233,37 @@ understands that this app now supports too).
   `core/<source>_lookup.py` + `gui/<source>_lookup_dialog.py` shape as
   `comicvine_lookup.py`/`gcd_lookup.py`.
 
-## CBR support
+## Foreign archive formats (CBR, CBT, CB7)
 
-RAR5's compression is a proprietary format Python can't decode without
-shelling out to a real `unrar`/`unar`/`bsdtar`-compatible binary. This
-tool never edits a `.cbr` in place -- `Import > Convert CBR to CBZ`
-converts it to a real `.cbz` first (via the optional `rarfile` package),
-and every edit from then on happens on that CBZ.
+CBZ (a plain ZIP) is the only format this tool ever writes to. CBR
+(RAR), CBT (tar), and CB7 (7-Zip) are all read-only, converted to a
+real `.cbz` first, and every edit from then on happens on that CBZ --
+none of them is ever edited in place, and there are no plans to change
+that (RAR5/7z compression is proprietary and can't be safely
+round-tripped the way ZIP can; tar *could* technically be rewritten,
+but every comic reader and ComicInfo.xml tool expects a ZIP-based
+container regardless, so there's no reason to special-case it as
+writable).
 
-**You need an unrar-compatible tool on PATH** for conversion to work --
-e.g. [7-Zip](https://www.7-zip.org/) or [WinRAR](https://www.win-rar.com/).
-Bundling a portable Windows binary automatically (the same approach the
-[keyfinder-cli-windows](https://github.com/Erlbon/keyfinder-cli-windows)
-repo takes for FFmpeg) is a likely follow-up once this is needed
-without a manual install step -- not done yet.
+Loading a `.cbr`/`.cbt`/`.cb7` via **Load Files**/**Load Folder**, or
+picking one via **Import > Convert to CBZ...**, asks once per batch
+whether to convert -- with an opt-in checkbox to also delete the
+original file(s) after a successful conversion (unchecked by default;
+a failed conversion never deletes anything, converted or not).
+
+Per format:
+
+- **CBR** needs the optional `rarfile` package, which itself shells
+  out to a real `unrar`/`unar`/`bsdtar`-compatible binary -- **you need
+  one of those on PATH**, e.g. [7-Zip](https://www.7-zip.org/) or
+  [WinRAR](https://www.win-rar.com/). Bundling a portable Windows
+  binary automatically (the same approach the
+  [keyfinder-cli-windows](https://github.com/Erlbon/keyfinder-cli-windows)
+  repo takes for FFmpeg) is a likely follow-up once this is needed
+  without a manual install step -- not done yet.
+- **CBT** needs nothing extra -- Python's stdlib `tarfile` handles it.
+- **CB7** needs the optional `py7zr` package -- unlike CBR, this is a
+  normal pip-installable dependency with no separate binary to install.
 
 ## Running from source
 

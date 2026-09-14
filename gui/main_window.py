@@ -22,6 +22,7 @@ import sys
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
     QAbstractItemView,
+    QCheckBox,
     QFileDialog,
     QHeaderView,
     QInputDialog,
@@ -59,7 +60,11 @@ from redactor_common.gui import standard_shortcuts as shortcuts
 from redactor_common.gui.zoom_toolbar import TableZoomController
 from redactor_common.core.version import REDACTOR_COMMON_REPO_URL, REDACTOR_COMMON_VERSION
 
-from core.cbr_convert import CbrConversionError, convert_cbr_to_cbz
+from core.foreign_archive_convert import (
+    FOREIGN_ARCHIVE_EXTENSIONS,
+    ForeignArchiveConversionError,
+    convert_to_cbz,
+)
 from core.cbz_file import CbzBook, CbzError
 from core.version import APP_NAME, APP_REPO_URL, APP_VERSION, RELEASE_LABEL
 from gui import app_settings
@@ -301,7 +306,7 @@ class MainWindow(QMainWindow):
                     "parse_filename", "&Parse Filename...", self.open_parse_filename_dialog,
                     shortcut=shortcuts.PARSE_FILENAME_TO_METADATA,
                 ),
-                MenuAction("convert_cbr", "Convert &CBR to CBZ...", self.convert_cbr_dialog),
+                MenuAction("convert_foreign", "Convert to CB&Z...", self.convert_foreign_archives_dialog),
                 Separator(),
                 MenuAction("comicvine_lookup", "Look Up via Comic &Vine...", self.open_comicvine_lookup_dialog),
                 MenuAction("gcd_lookup", "Look Up via &Grand Comics Database...", self.open_gcd_lookup_dialog),
@@ -531,7 +536,8 @@ class MainWindow(QMainWindow):
     def load_files_dialog(self) -> None:
         start_dir = app_settings.load_last_directory()
         paths, _ = QFileDialog.getOpenFileNames(
-            self, "Load CBZ Files", start_dir, "Comic Book Archives (*.cbz *.cbr);;All Files (*)"
+            self, "Load CBZ Files", start_dir,
+            "Comic Book Archives (*.cbz *.cbr *.cbt *.cb7);;All Files (*)",
         )
         if paths:
             app_settings.save_last_directory(paths[0])
@@ -546,24 +552,69 @@ class MainWindow(QMainWindow):
         paths = [
             os.path.join(folder, name)
             for name in sorted(os.listdir(folder))
-            if name.lower().endswith((".cbz", ".cbr"))
+            if name.lower().endswith((".cbz",) + FOREIGN_ARCHIVE_EXTENSIONS)
         ]
         if not paths:
-            QMessageBox.information(self, "No Files Found", "No .cbz or .cbr files were found in that folder.")
+            QMessageBox.information(
+                self, "No Files Found", "No .cbz, .cbr, .cbt, or .cb7 files were found in that folder."
+            )
             return
         self._load_paths(paths)
 
+    def _prompt_convert_foreign_archives(self, paths: list[str]) -> tuple[bool, bool]:
+        """If `paths` contains any CBR/CBT/CB7 files, asks once for the
+        whole batch whether to convert them to CBZ before loading (this
+        app never edits those formats directly -- see
+        core/foreign_archive_convert.py), and whether to also delete
+        each original after a successful conversion. Returns
+        (should_convert, should_delete); should_convert is always True
+        (and should_delete always False) when there's nothing foreign
+        in this batch, since there's nothing to ask about."""
+        foreign = [p for p in paths if p.lower().endswith(FOREIGN_ARCHIVE_EXTENSIONS)]
+        if not foreign:
+            return True, False
+
+        shown = "\n".join(f"  {os.path.basename(p)}" for p in foreign[:10])
+        if len(foreign) > 10:
+            shown += f"\n  ...and {len(foreign) - 10} more"
+
+        box = QMessageBox(self)
+        box.setWindowTitle("Convert to CBZ?")
+        box.setIcon(QMessageBox.Icon.Question)
+        box.setText(
+            f"{len(foreign)} file(s) need to be converted to CBZ before "
+            f"they can be loaded -- this app never edits CBR/CBT/CB7 "
+            f"files directly:\n\n{shown}\n\nConvert now?"
+        )
+        delete_checkbox = QCheckBox("Also delete the original files after a successful conversion")
+        box.setCheckBox(delete_checkbox)
+        box.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+        box.setDefaultButton(QMessageBox.StandardButton.Yes)
+        result = box.exec()
+        return result == QMessageBox.StandardButton.Yes, delete_checkbox.isChecked()
+
     def _load_paths(self, paths: list[str]) -> None:
         errors: list[str] = []
+        should_convert, should_delete = self._prompt_convert_foreign_archives(paths)
 
         def _step(path: str, _index: int) -> None:
             resolved_path = path
-            if path.lower().endswith(".cbr"):
+            if path.lower().endswith(FOREIGN_ARCHIVE_EXTENSIONS):
+                if not should_convert:
+                    return  # declined for this whole batch -- skip, don't load
                 try:
-                    resolved_path = convert_cbr_to_cbz(path)
-                except CbrConversionError as exc:
+                    resolved_path = convert_to_cbz(path)
+                except ForeignArchiveConversionError as exc:
                     errors.append(f"{os.path.basename(path)}: {exc}")
                     return
+                if should_delete:
+                    try:
+                        os.remove(path)
+                    except OSError as exc:
+                        errors.append(
+                            f"{os.path.basename(path)}: converted to CBZ successfully, "
+                            f"but couldn't delete the original: {exc}"
+                        )
             book = CbzBook(resolved_path)
             if book.load_error:
                 errors.append(f"{os.path.basename(resolved_path)}: {book.load_error}")
@@ -579,8 +630,8 @@ class MainWindow(QMainWindow):
         # Newly loaded files were just appended to the end of the table
         # above -- if a column sort is currently active, keep it applied
         # rather than letting new arrivals silently break it (this also
-        # covers Refresh List and Convert CBR/Resize Images' "load the
-        # result back in" calls, all of which route through here).
+        # covers Refresh List and Convert to CBZ/Resize Images' "load
+        # the result back in" calls, all of which route through here).
         if self._sort_key:
             self.books.sort(
                 key=lambda book: self._sort_key_for(book, self._sort_key), reverse=not self._sort_ascending
@@ -1361,20 +1412,36 @@ class MainWindow(QMainWindow):
     # Import
     # ------------------------------------------------------------------
 
-    def convert_cbr_dialog(self) -> None:
-        paths, _ = QFileDialog.getOpenFileNames(self, "Convert CBR to CBZ", "", "CBR Files (*.cbr)")
+    def convert_foreign_archives_dialog(self) -> None:
+        paths, _ = QFileDialog.getOpenFileNames(
+            self, "Convert to CBZ", "", "Foreign Comic Archives (*.cbr *.cbt *.cb7)"
+        )
         if not paths:
             return
+        should_convert, should_delete = self._prompt_convert_foreign_archives(paths)
+        if not should_convert:
+            return
+
         errors: list[str] = []
         converted: list[str] = []
 
         def _step(path: str, _index: int) -> None:
             try:
-                converted.append(convert_cbr_to_cbz(path))
-            except CbrConversionError as exc:
+                new_path = convert_to_cbz(path)
+            except ForeignArchiveConversionError as exc:
                 errors.append(f"{os.path.basename(path)}: {exc}")
+                return
+            converted.append(new_path)
+            if should_delete:
+                try:
+                    os.remove(path)
+                except OSError as exc:
+                    errors.append(
+                        f"{os.path.basename(path)}: converted to CBZ successfully, "
+                        f"but couldn't delete the original: {exc}"
+                    )
 
-        run_with_progress(self, paths, _step, "Converting CBR files...", threshold=LOAD_PROGRESS_THRESHOLD)
+        run_with_progress(self, paths, _step, "Converting to CBZ...", threshold=LOAD_PROGRESS_THRESHOLD)
 
         if errors:
             from redactor_common.core.error_summary import summarize_errors

@@ -8,11 +8,19 @@ pyinstaller>=6.3
 # below.
 Pillow>=10.0
 
-# Optional: only needed for Import > Convert CBR to CBZ. Also needs a
-# real unrar/unar/bsdtar-compatible binary on PATH -- rarfile itself
-# just shells out to one. See core/cbr_convert.py and README.md's "CBR
-# support" section.
+# Optional: only needed for Import > Convert to CBZ on a .cbr file.
+# Also needs a real unrar/unar/bsdtar-compatible binary on PATH --
+# rarfile itself just shells out to one. See
+# core/foreign_archive_convert.py and README.md's "Foreign archive
+# formats" section. CBT (tar) needs nothing extra (Python's stdlib
+# tarfile); CB7 (7-Zip) needs py7zr below -- unlike this one, no
+# separate binary required.
 rarfile>=4.1
+
+# Optional: only needed for Import > Convert to CBZ on a .cb7 file. A
+# normal pip-installable dependency -- no separate 7z binary needed,
+# unlike rarfile above.
+py7zr>=1.0
 
 # Optional: only needed for Import > Look Up via Bedetheque. The site
 # sits behind Cloudflare (a plain HTTP request gets 403 on every page)
