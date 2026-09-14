@@ -7,24 +7,33 @@ across every metadata-writing path at once.
 
 2026-09-10: replaced the old all-or-nothing "Overwrite All / Keep
 Existing / Cancel" QMessageBox with a per-file, per-field review
-(gui/overwrite_review_dialog.OverwriteReviewDialog) -- "There could be
-instances where we want some fields, but not all." OverwriteReviewDialog's
-own exec() is faked via monkeypatching (never actually shown), same
-reasoning as the old QMessageBox fakes -- but its accepted_changes()
-is exercised for REAL wherever a test doesn't care about a specific
-selection, so the actual default-checked business logic (a safe fill
-starts ticked, a real overwrite starts unticked) is what's under test,
-not a mocked stand-in for it."""
+(OverwriteReviewDialog) -- "There could be instances where we want
+some fields, but not all." OverwriteReviewDialog's own exec() is faked
+via monkeypatching (never actually shown), same reasoning as the old
+QMessageBox fakes -- but its accepted_changes() is exercised for REAL
+wherever a test doesn't care about a specific selection, so the actual
+default-checked business logic (a safe fill starts ticked, a real
+overwrite starts unticked) is what's under test, not a mocked
+stand-in for it.
+
+2026-09-14: OverwriteReviewDialog and MainWindow._resolve_overwrite_
+conflicts()'s own logic both moved into
+redactor_common.gui.overwrite_review_dialog (this project's version
+promoted there wholesale, unchanged) -- _resolve_overwrite_conflicts()
+is now a thin wrapper calling the shared resolve_overwrite_conflicts().
+Monkeypatching OverwriteReviewDialog.exec still works unchanged: it's
+the same class object either way, just imported from its new home."""
 
 import sys
 
 import pytest
 from PyQt6.QtWidgets import QApplication, QDialog
 
+from redactor_common.gui.overwrite_review_dialog import OverwriteReviewDialog
+
 from core.cbz_file import CbzBook
 from core.comicinfo import ComicInfoMetadata
 from gui.main_window import MainWindow
-from gui.overwrite_review_dialog import OverwriteReviewDialog
 
 # A QApplication is required to construct any QWidget (including
 # MainWindow and the review dialog) -- created once per test session.

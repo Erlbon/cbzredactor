@@ -1,5 +1,17 @@
 # Changelog
 
+## 2026-09-14#02 -- overwrite-review dialog promoted to redactor_common
+
+No functional change here -- `gui/overwrite_review_dialog.py`
+(`OverwriteReviewDialog` + `build_overwrite_review_rows()`) and
+`MainWindow._resolve_overwrite_conflicts()`'s own logic moved into
+`redactor_common.gui.overwrite_review_dialog` (new
+`resolve_overwrite_conflicts()`), since that code had zero
+project-specific dependencies to begin with and epubredactor wants the
+same per-file, per-field review for its own metadata-lookup dialogs.
+`_resolve_overwrite_conflicts()` is now a thin wrapper calling the
+shared function. Bumped `redactor_common` to `2026-09-14-01`.
+
 ## 2026-09-14#01 -- CBT and CB7 support, plus a conversion prompt
 
 Import > Convert to CBZ (renamed from "Convert CBR to CBZ") now also

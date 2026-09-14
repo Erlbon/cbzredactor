@@ -51,6 +51,7 @@ from redactor_common.gui.column_settings_dialog import ColumnSettingsDialog
 from redactor_common.gui.context_menu import show_table_context_menu
 from redactor_common.gui.manage_list_dialog import ManageListDialog
 from redactor_common.gui.menu_builder import MenuAction, Separator, build_menu_bar
+from redactor_common.gui.overwrite_review_dialog import resolve_overwrite_conflicts
 from redactor_common.gui.parse_filename_dialog import ParseFilenameDialog
 from redactor_common.gui.progress import run_with_progress
 from redactor_common.gui.rename_pattern_dialog import RenamePatternDialog
@@ -71,7 +72,6 @@ from gui import app_settings
 from gui.bedetheque_lookup_dialog import BedethequeLookupDialog
 from gui.comicvine_lookup_dialog import ComicVineLookupDialog
 from gui.gcd_lookup_dialog import GcdLookupDialog
-from gui.overwrite_review_dialog import OverwriteReviewDialog, build_overwrite_review_rows
 from gui.resize_dialog import ResizeImagesDialog
 from gui.metadata_panel import (
     CREDIT_FIELDS,
@@ -1505,46 +1505,25 @@ class MainWindow(QMainWindow):
     def _resolve_overwrite_conflicts(
         self, target_books: list[CbzBook], metadata_changes: dict[int, dict[str, str]]
     ) -> dict[int, dict[str, str]] | None:
-        """Checks whether applying `metadata_changes` would overwrite
-        any field that already has a non-blank, different value, and if
-        so opens a per-file, per-field review before anything is
-        written -- applies uniformly no matter which path produced the
-        changes (a lookup, bulk edit, or Parse Filename all funnel
-        through this same method). This is the standard confirmation
-        step for every metadata-writing path that could clobber
-        existing data, not an opt-in extra: "we can be sure what is the
-        real data" means seeing the actual old/new comparison, not
-        trusting one batch-wide Overwrite-All/Keep-Existing choice.
-
-        A totally clean batch (nothing would be overwritten anywhere)
-        skips the dialog entirely -- there's nothing to review. The
-        moment ANYTHING in the batch conflicts, every field the whole
-        batch would touch is shown (not just the conflicting ones), so
-        a file with several changed fields is reviewed as a whole, with
-        a safe fill (blank -> value) ticked by default and a genuine
-        overwrite (differing non-blank -> value) requiring a deliberate
-        per-field opt-in -- see gui/overwrite_review_dialog.py.
+        """Thin wrapper around the shared redactor_common.gui.
+        overwrite_review_dialog.resolve_overwrite_conflicts() -- applies
+        uniformly no matter which path produced the changes (a lookup,
+        bulk edit, or Parse Filename all funnel through this same
+        method). This is the standard confirmation step for every
+        metadata-writing path that could clobber existing data, not an
+        opt-in extra: "we can be sure what is the real data" means
+        seeing the actual old/new comparison, not trusting one
+        batch-wide Overwrite-All/Keep-Existing choice. See that
+        function's own docstring for the skip-when-clean / per-field
+        ticked-vs-unticked behavior; kept as a thin per-project wrapper
+        (rather than calling the shared function directly at each of
+        this file's three call sites) so `_field_label` doesn't need
+        threading through each one separately.
 
         Returns the changes to actually apply (every field whose
         checkbox is still ticked when Apply is clicked), or None if the
         user cancelled outright."""
-        has_conflict = any(
-            (getattr(target_books[index].metadata, attr, "") or "").strip() not in ("", new_value)
-            for index, fields in metadata_changes.items()
-            for attr, new_value in fields.items()
-        )
-        if not has_conflict:
-            return metadata_changes
-
-        rows = build_overwrite_review_rows(target_books, metadata_changes, _field_label)
-        dialog = OverwriteReviewDialog(rows, parent=self)
-        if dialog.exec() != dialog.DialogCode.Accepted:
-            return None
-
-        filtered: dict[int, dict[str, str]] = {}
-        for (index, attr), value in dialog.accepted_changes().items():
-            filtered.setdefault(index, {})[attr] = value
-        return filtered
+        return resolve_overwrite_conflicts(self, target_books, metadata_changes, _field_label)
 
     def open_comicvine_lookup_dialog(self) -> None:
         self._run_lookup_dialog(ComicVineLookupDialog, "Comic Vine lookup")

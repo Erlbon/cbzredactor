@@ -288,9 +288,9 @@ Tests are plain pytest, no Qt required for the `core/` modules. The
 GUI layer isn't exhaustively unit-tested (same convention as the
 sibling tools), but real (offscreen) `QApplication`-based tests cover
 the spots where a regression would be easy to miss visually and costly
-if it shipped anyway -- the overwrite-review logic in
-`gui/main_window.py`/`gui/overwrite_review_dialog.py` (data safety
-across every metadata-writing path at once), column/panel-visibility
+if it shipped anyway -- the overwrite-review logic in `gui/main_window.py`/`redactor_common.
+gui.overwrite_review_dialog` (data safety across every metadata-writing
+path at once), column/panel-visibility
 sync, the side-panel collapse toggle, column sorting, and more:
 
 ```bash

@@ -1,17 +1,21 @@
-"""Tests for gui/overwrite_review_dialog.build_overwrite_review_rows()
--- the pure logic behind the per-file, per-field review dialog:
-turning a {book_index: {attr: value}} change set into PreviewRow
-entries, with the "safe fill starts ticked, real overwrite starts
-unticked" default split. Doesn't need a QApplication -- PreviewRow is
-a plain dataclass and this function does no Qt work itself."""
+"""Tests for redactor_common.gui.overwrite_review_dialog.
+build_overwrite_review_rows() -- the pure logic behind the per-file,
+per-field review dialog: turning a {book_index: {attr: value}} change
+set into PreviewRow entries, with the "safe fill starts ticked, real
+overwrite starts unticked" default split. Doesn't need a QApplication
+-- PreviewRow is a plain dataclass and this function does no Qt work
+itself. This function moved into redactor_common 2026-09-14 (promoted
+from this project's own local copy, which had it first) -- these tests
+moved with it, unchanged, to confirm the promoted version still does
+exactly what this project's own version did."""
 
 import os
 
+from redactor_common.gui.overwrite_review_dialog import build_overwrite_review_rows
 from redactor_common.gui.preview_table import PreviewRow
 
 from core.cbz_file import CbzBook
 from core.comicinfo import ComicInfoMetadata
-from gui.overwrite_review_dialog import build_overwrite_review_rows
 
 
 def _fake_book(path="/x/fake.cbz", **metadata_kwargs) -> CbzBook:
