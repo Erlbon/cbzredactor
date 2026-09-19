@@ -1,7 +1,7 @@
 """Tests for core/filename_guess.py -- pure string logic, no CbzBook
 or Qt involved."""
 
-from core.filename_guess import guess_series_and_number
+from core.filename_guess import guess_series_and_number, guess_year
 
 
 def test_existing_series_wins_outright():
@@ -70,3 +70,27 @@ def test_volume_prefix_treated_as_number():
 def test_bracket_groups_stripped_even_with_no_number_found():
     series, number = guess_series_and_number("/x/Batman Beyond (2022) (Complete).cbz", "", "")
     assert (series, number) == ("Batman Beyond", "")
+
+
+# guess_year() -- a soft ranking hint for online lookups (see
+# core/comicvine_lookup.py), not written into ComicInfo.xml.
+
+def test_guess_year_existing_value_wins_outright():
+    assert guess_year("/x/Watchmen 001 (1986).cbz", "1999") == "1999"
+
+
+def test_guess_year_reads_trailing_bracket_annotation():
+    assert guess_year("/x/Watchmen 001 (1986).cbz", "") == "1986"
+
+
+def test_guess_year_picks_leftmost_plausible_group():
+    # "(2016)" is the year; "(Digital)"/"(Empire)" aren't 4-digit at all.
+    assert guess_year("/x/Batman 001 (2016) (Digital) (Empire).cbz", "") == "2016"
+
+
+def test_guess_year_ignores_implausible_numbers():
+    assert guess_year("/x/Saga (9999) (Complete).cbz", "") == ""
+
+
+def test_guess_year_returns_empty_when_no_annotation_present():
+    assert guess_year("/x/Just A Title.cbz", "") == ""

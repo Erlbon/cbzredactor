@@ -258,8 +258,101 @@ def parse_search_response(raw: bytes) -> list[ComicVineCandidate]:
     return _candidates_from_data(data)
 
 
+_WORD_RE = re.compile(r"[^\W\d_]+|\d+")
+
+
+def _split_words(name: str) -> list[str]:
+    return _WORD_RE.findall((name or "").lower())
+
+
+def _numbers_equivalent(a: str, b: str) -> bool:
+    a, b = (a or "").strip(), (b or "").strip()
+    if not a or not b:
+        return False
+    if a.lower() == b.lower():
+        return True
+    try:
+        return float(a) == float(b)
+    except ValueError:
+        return False
+
+
+def _score_candidate(candidate: ComicVineCandidate, series: str, number: str, year_hint: str) -> float:
+    """Ranks one search result against what was actually searched for.
+    Comic Vine's /search/ endpoint matches loosely against issue/volume
+    text -- its own result order is closer to text relevance than to
+    "which of these is actually the release the user meant" -- so this
+    re-scores every candidate the same way before anything is shown or
+    auto-applied, roughly following the ComicRack "Comic Vine Scraper"
+    plugin's own MatchScore approach (word-overlap series-name match,
+    an issue-number sanity check, a year sanity check)."""
+    score = 0.0
+
+    # 1. word-overlap between the queried series name and the
+    #    candidate's own volume name -- a matched word is worth more
+    #    than a mismatched one costs, so a superset/subset title still
+    #    scores reasonably (e.g. "Batman" query vs "Batman Beyond").
+    query_words = _split_words(series)
+    candidate_words = _split_words(candidate.volume_name)
+    remaining = list(candidate_words)
+    for word in query_words:
+        if word in remaining:
+            score += 5
+            remaining.remove(word)
+        else:
+            score -= 1
+    score -= len(remaining)
+
+    # 2. issue number: Comic Vine's free-text search returns issues
+    #    from many different volumes for a common series name, most of
+    #    them the wrong issue number entirely -- a match here matters
+    #    more than the name score above.
+    if number:
+        score += 40 if _numbers_equivalent(candidate.issue_number, number) else -40
+
+    # 3. year sanity, only when a hint is available (an existing
+    #    ComicInfo.xml Year or a filename annotation -- see
+    #    core/filename_guess.py's guess_year()): a candidate issue
+    #    published far from the expected year is probably a reprint,
+    #    a different-country edition, or an unrelated same-named
+    #    series, not the release actually being scraped.
+    if year_hint:
+        year_match = re.match(r"^(\d{4})", candidate.cover_date or "")
+        if year_match:
+            try:
+                diff = abs(int(year_match.group(1)) - int(year_hint))
+            except ValueError:
+                diff = None
+            if diff is not None:
+                if diff == 0:
+                    score += 15
+                elif diff == 1:
+                    score += 5
+                else:
+                    score -= 10 * diff
+
+    return score
+
+
+def _rank_candidates(
+    candidates: list[ComicVineCandidate], series: str, number: str, year_hint: str
+) -> list[ComicVineCandidate]:
+    """Stable sort, best match first -- ties keep Comic Vine's own
+    relevance order, since that's still a reasonable tiebreaker."""
+    return sorted(
+        candidates,
+        key=lambda c: _score_candidate(c, series, number, year_hint),
+        reverse=True,
+    )
+
+
 def search_comicvine(
-    api_key: str, series: str, number: str = "", fetch=None, max_results: int = 8
+    api_key: str,
+    series: str,
+    number: str = "",
+    fetch=None,
+    max_results: int = 8,
+    year_hint: str = "",
 ) -> list[ComicVineCandidate]:
     """Searches for issues matching `series` (+ `number`, if given).
     Raises ComicVineLookupError on a missing series/API key, network
@@ -267,9 +360,12 @@ def search_comicvine(
     (not an error) when the search succeeds but finds nothing.
 
     Note: Comic Vine's /search/ endpoint matches loosely against issue/
-    volume text, not a strict issue-number filter -- for a common
-    series name, review the candidate list rather than assuming the
-    first result is always the right issue.
+    volume text, not a strict issue-number filter -- the returned list
+    is re-ranked (see _rank_candidates()) so the best-scored candidate
+    comes first, but for a common series name, still review the list
+    rather than assuming that's always the right issue. `year_hint`
+    (optional) sharpens ranking further when a plausible publication
+    year is known -- see core/filename_guess.py's guess_year().
     """
     if not (api_key or "").strip():
         raise ComicVineLookupError(
@@ -278,7 +374,8 @@ def search_comicvine(
     fetch = fetch or _default_fetch
     url = build_search_url(api_key, series, number, max_results)
     data = fetch_json(url, fetch, error_cls=ComicVineLookupError, source_name="Comic Vine")
-    return _candidates_from_data(data)
+    candidates = _candidates_from_data(data)
+    return _rank_candidates(candidates, series, number, year_hint)
 
 
 def _credits_by_role(person_credits: list) -> dict[str, list[str]]:

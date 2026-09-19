@@ -27,6 +27,7 @@ independent of either.
 
 from __future__ import annotations
 
+import datetime
 import os
 import re
 
@@ -64,3 +65,32 @@ def guess_series_and_number(path: str, existing_series: str = "", existing_numbe
     if match:
         return match.group(1).strip(" -_."), match.group(2)
     return core.strip(" -_."), ""
+
+
+# A 4-digit year inside one of the same trailing bracket/paren groups
+# _strip_trailing_annotations() discards above, e.g. the "(2016)" in
+# "Batman 001 (2016) (Digital) (Empire).cbz" -- that annotation carries
+# real signal (see guess_year()) that guess_series_and_number() throws
+# away entirely today.
+_YEAR_ANNOTATION_RE = re.compile(r"[\(\[](\d{4})[\)\]]")
+
+
+def guess_year(path: str, existing_year: str = "") -> str:
+    """Returns a best-guess 4-digit publication year as a soft ranking
+    hint for online lookups (see core/comicvine_lookup.py's scoring) --
+    never written into ComicInfo.xml automatically, since a filename
+    annotation is far less reliable than an actual lookup result.
+    `existing_year` (typically a book's already-set ComicInfo.xml
+    field) wins outright when set; otherwise the filename's own
+    trailing bracket groups are checked for a plausible year, leftmost
+    (closest to the issue number) first."""
+    if existing_year.strip():
+        return existing_year.strip()
+
+    stem = os.path.splitext(os.path.basename(path))[0]
+    max_year = datetime.datetime.now().year + 1
+    for match in _YEAR_ANNOTATION_RE.finditer(stem):
+        year = int(match.group(1))
+        if 1900 <= year <= max_year:
+            return match.group(1)
+    return ""

@@ -1,5 +1,22 @@
 # Changelog
 
+## 2026-09-19#01 -- Comic Vine matching quality and "Other Matches Found"
+
+The Comic Vine lookup no longer just applies whatever result Comic
+Vine's own loose text search happened to rank first. `core/
+comicvine_lookup.py` now re-scores every candidate itself (word-overlap
+series-name match, an issue-number sanity check, and a year sanity
+check against ComicInfo.xml's own Year or a filename annotation like
+"(2016)" -- see the new `core/filename_guess.py:guess_year()`),
+roughly following the approach the ComicRack "Comic Vine Scraper"
+plugin's own MatchScore uses. The best-scored candidate is still what's
+auto-applied, but the next few runners-up are now shown as a pickable
+"Other Matches Found" list in the lookup dialog's detail panel (built
+on `redactor_common`'s new `resolve_alternative` support, bumped to
+`2026-09-19-01`) -- so when the top pick is still wrong, picking the
+right one is a click away instead of requiring the Series/Number text
+to be corrected and re-searched.
+
 ## 2026-09-14#02 -- overwrite-review dialog promoted to redactor_common
 
 No functional change here -- `gui/overwrite_review_dialog.py`

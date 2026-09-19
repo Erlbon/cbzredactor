@@ -9,6 +9,17 @@ found cover next to the book's own existing cover for a side-by-side
 visual confirmation (see redactor_common.gui.lookup_dialog's
 `get_local_cover`) -- and lets the user apply it.
 
+Comic Vine's /search/ endpoint matches loosely against issue/volume
+text, so the "best" result is rarely a sure thing -- core/
+comicvine_lookup.py re-ranks candidates itself (word-overlap series
+match, issue-number sanity check, a year hint from ComicInfo.xml or
+the filename) before this module ever sees them, but ranking alone
+still can't always pick the one true release. The next few
+lower-ranked candidates are surfaced as a pickable "Other Matches
+Found" list in the detail panel (see redactor_common.gui.lookup_dialog's
+`resolve_alternative`), so a wrong top pick is a click away instead of
+requiring the Series/Number text to be re-typed and re-searched.
+
 Built on redactor_common's gui/lookup_dialog.py (LookupDialogBase) --
 this class supplies only what's Comic-Vine-specific: the API-key
 prompt/storage and search_one()'s actual API calls. Everything else
@@ -26,18 +37,25 @@ import os
 
 from PyQt6.QtWidgets import QInputDialog, QLineEdit, QPushButton
 
-from redactor_common.gui.lookup_dialog import LookupDialogBase, LookupResult
+from redactor_common.gui.lookup_dialog import LookupAlternative, LookupDialogBase, LookupResult
 
 from core.cbz_file import CbzBook
 from core.comicvine_lookup import (
+    ComicVineCandidate,
     ComicVineLookupError,
     download_cover_image,
     fetch_issue_details,
     fetch_publisher,
     search_comicvine,
 )
-from core.filename_guess import guess_series_and_number
+from core.filename_guess import guess_series_and_number, guess_year
 from gui import app_settings
+
+# How many lower-ranked candidates (beyond the top pick already shown
+# as the row's default "Found" result) are offered as alternatives.
+# Comic Vine's own search `limit` is bumped a bit past this so there's
+# real headroom left to rank -- see _search_one_book().
+MAX_ALTERNATIVES = 5
 
 
 class ComicVineLookupDialog(LookupDialogBase):
@@ -62,6 +80,7 @@ class ComicVineLookupDialog(LookupDialogBase):
             search_one=self._search_one_book,
             query_fields=[("series", "Series"), ("number", "Number")],
             get_local_cover=lambda book: book.read_first_page_bytes(),
+            resolve_alternative=self._resolve_alternative,
         )
 
         change_key_btn = QPushButton("Change API Key…")
@@ -106,8 +125,18 @@ class ComicVineLookupDialog(LookupDialogBase):
                 used_query=used_query,
             )
 
+        year_hint = guess_year(book.path, book.metadata.year)
         try:
-            candidates = search_comicvine(self._api_key, series, number)
+            # A few more than MAX_ALTERNATIVES+1 are fetched so ranking
+            # has real candidates to work with beyond just whatever
+            # Comic Vine's own relevance order put first.
+            candidates = search_comicvine(
+                self._api_key,
+                series,
+                number,
+                year_hint=year_hint,
+                max_results=MAX_ALTERNATIVES + 5,
+            )
         except ComicVineLookupError as exc:
             return LookupResult(error=str(exc), used_query=used_query)
         if not candidates:
@@ -115,17 +144,44 @@ class ComicVineLookupDialog(LookupDialogBase):
 
         best = candidates[0]
         try:
-            details = fetch_issue_details(self._api_key, best.detail_url)
-            details.publisher = fetch_publisher(self._api_key, best.volume_detail_url)
-            fields = details.as_dict()
+            fields, cover_bytes = self._resolve_candidate(best)
         except ComicVineLookupError as exc:
             return LookupResult(error=str(exc), used_query=used_query)
 
+        alternatives = [
+            LookupAlternative(label=candidate.display_label(), data=candidate)
+            for candidate in candidates[1 : MAX_ALTERNATIVES + 1]
+        ]
+
+        return LookupResult(
+            fields=fields,
+            cover_bytes=cover_bytes,
+            used_query=used_query,
+            alternatives=alternatives,
+        )
+
+    def _resolve_candidate(self, candidate: ComicVineCandidate) -> tuple[dict, bytes | None]:
+        """Fetches full credits + publisher + cover for one candidate --
+        the same per-candidate work whether it's a row's initial top
+        pick (above) or an alternative the user picks afterwards (via
+        _resolve_alternative(), the callback LookupDialogBase invokes
+        for the "Other Matches Found" list)."""
+        details = fetch_issue_details(self._api_key, candidate.detail_url)
+        details.publisher = fetch_publisher(self._api_key, candidate.volume_detail_url)
+        fields = details.as_dict()
+
         cover_bytes = None
-        if best.image_url:
+        if candidate.image_url:
             try:
-                cover_bytes = download_cover_image(best)
+                cover_bytes = download_cover_image(candidate)
             except ComicVineLookupError:
                 pass  # cover is a nice-to-have preview only; never worth failing the row over
 
-        return LookupResult(fields=fields, cover_bytes=cover_bytes, used_query=used_query)
+        return fields, cover_bytes
+
+    def _resolve_alternative(self, book: CbzBook, candidate: ComicVineCandidate) -> LookupResult:
+        try:
+            fields, cover_bytes = self._resolve_candidate(candidate)
+        except ComicVineLookupError as exc:
+            return LookupResult(error=str(exc))
+        return LookupResult(fields=fields, cover_bytes=cover_bytes)

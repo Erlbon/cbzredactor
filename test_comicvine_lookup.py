@@ -136,6 +136,68 @@ def test_invalid_api_key_raises_clear_error():
         search_comicvine("BADKEY", "Amazing Test Comics", fetch=_fetch_returning(INVALID_KEY_RESPONSE))
 
 
+# Ranking -- Comic Vine's own /search/ order is closer to text
+# relevance than to "which of these is actually the right release", so
+# search_comicvine() re-ranks the raw results itself (see
+# core/comicvine_lookup.py's _score_candidate()/_rank_candidates()).
+
+RANKING_RESPONSE = {
+    "error": "OK",
+    "status_code": 1,
+    "results": [
+        {
+            # Ranks first by raw text relevance (a substring hit on the
+            # query), but it's issue #1 of an unrelated same-named
+            # series from the wrong year -- the wrong release.
+            "id": 1,
+            "issue_number": "1",
+            "cover_date": "1962-01-01",
+            "volume": {"id": 100, "name": "Amazing Spider-Man Annual", "api_detail_url": "https://x/volume/100/"},
+            "api_detail_url": "https://x/issue/1/",
+        },
+        {
+            # The actual release: right series words, right issue
+            # number, right year -- ranks first only once scored.
+            "id": 2,
+            "issue_number": "12",
+            "cover_date": "2016-03-01",
+            "volume": {"id": 200, "name": "Amazing Spider-Man", "api_detail_url": "https://x/volume/200/"},
+            "api_detail_url": "https://x/issue/2/",
+        },
+        {
+            # Right series, right year, but the wrong issue number.
+            "id": 3,
+            "issue_number": "13",
+            "cover_date": "2016-04-01",
+            "volume": {"id": 200, "name": "Amazing Spider-Man", "api_detail_url": "https://x/volume/200/"},
+            "api_detail_url": "https://x/issue/3/",
+        },
+    ],
+}
+
+
+def test_ranking_prefers_matching_issue_number_and_year_over_raw_order():
+    candidates = search_comicvine(
+        "KEY123",
+        "Amazing Spider-Man",
+        "12",
+        year_hint="2016",
+        fetch=_fetch_returning(RANKING_RESPONSE),
+    )
+    assert [c.issue_id for c in candidates] == ["2", "3", "1"]
+
+
+def test_ranking_without_a_number_or_year_hint_still_favors_name_match():
+    # No number/year signal available -- word-overlap alone should
+    # still keep the exact-name "Amazing Spider-Man" candidates ahead
+    # of the "Amazing Spider-Man Annual" one (an extra, unmatched word).
+    candidates = search_comicvine(
+        "KEY123", "Amazing Spider-Man", fetch=_fetch_returning(RANKING_RESPONSE)
+    )
+    assert candidates[0].issue_id in ("2", "3")
+    assert candidates[-1].issue_id == "1"
+
+
 def test_fetch_issue_details_parses_credits_by_role():
     details = fetch_issue_details(
         "KEY123",
