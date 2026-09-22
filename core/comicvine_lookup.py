@@ -445,21 +445,75 @@ def fetch_issue_details(api_key: str, detail_url: str, fetch=None) -> ComicVineI
     )
 
 
-def fetch_publisher(api_key: str, volume_detail_url: str, fetch=None) -> str:
-    """Best-effort separate lookup for a volume's publisher name (see
-    module docstring for why this needs its own request). Returns ""
-    on any failure rather than raising -- a missing publisher name
-    should never block applying everything else that was found."""
+def fetch_volume_info(api_key: str, volume_detail_url: str, fetch=None) -> tuple[str, str]:
+    """Best-effort separate lookup for a volume's publisher name and
+    its own start_year ("the year the series began", as opposed to one
+    issue's own cover_date year -- see filter_candidates_by_series())
+    -- both live on the volume resource, not the lightweight
+    issue-search result (see module docstring), so this needs its own
+    request. Returns ("", "") on any failure rather than raising -- a
+    missing publisher/year should never block applying everything else
+    that was found."""
     if not volume_detail_url:
-        return ""
+        return "", ""
     fetch = fetch or _default_fetch
     try:
-        url = f"{volume_detail_url}?{urlencode({'api_key': api_key, 'format': 'json', 'field_list': 'publisher'}, quote_via=quote)}"
+        url = f"{volume_detail_url}?{urlencode({'api_key': api_key, 'format': 'json', 'field_list': 'publisher,start_year'}, quote_via=quote)}"
         data = _get_json(url, fetch)
-        publisher = (data.get("results") or {}).get("publisher") or {}
-        return publisher.get("name", "") or ""
+        results = data.get("results") or {}
+        publisher = (results.get("publisher") or {}).get("name", "") or ""
+        start_year = str(results.get("start_year") or "").strip()
+        return publisher, start_year
     except ComicVineLookupError:
-        return ""
+        return "", ""
+
+
+def fetch_publisher(api_key: str, volume_detail_url: str, fetch=None) -> str:
+    """Thin wrapper over fetch_volume_info() for callers that only need
+    the publisher name (e.g. applying a chosen candidate's fields)."""
+    publisher, _ = fetch_volume_info(api_key, volume_detail_url, fetch)
+    return publisher
+
+
+def filter_candidates_by_series(
+    candidates: list[ComicVineCandidate],
+    publisher: str,
+    series_year: str,
+    api_key: str,
+    fetch=None,
+) -> list[ComicVineCandidate]:
+    """Narrows a ranked candidate list down to a specific publisher
+    and/or a specific series-start-year -- e.g. disambiguating which
+    "Batman" volume among several same-named reboots/imprints is
+    meant. Neither is in the lightweight issue-search result Comic
+    Vine returns (see module docstring); each candidate's own volume
+    needs a separate request to check (see fetch_volume_info()), so
+    this is only worth calling when the user actually typed a
+    Publisher/Series Year to narrow an ambiguous match -- never during
+    the default bulk search over many books.
+
+    A no-op (returns `candidates` unchanged) if neither filter is
+    given. Falls back to the original, unfiltered list if the filter
+    matches nothing -- a publisher-name variant (an imprint vs. its
+    parent) or a slightly-off remembered year shouldn't silently hide
+    every candidate; the alternatives list is still there to pick from
+    by hand."""
+    publisher_words = _split_words(publisher)
+    series_year = (series_year or "").strip()
+    if not publisher_words and not series_year:
+        return candidates
+    fetch = fetch or _default_fetch
+    matches = []
+    for candidate in candidates:
+        cand_publisher, cand_start_year = fetch_volume_info(
+            api_key, candidate.volume_detail_url, fetch=fetch
+        )
+        if publisher_words and not all(word in _split_words(cand_publisher) for word in publisher_words):
+            continue
+        if series_year and cand_start_year != series_year:
+            continue
+        matches.append(candidate)
+    return matches or candidates
 
 
 def download_cover_image(candidate: ComicVineCandidate, fetch=None) -> bytes:

@@ -1,5 +1,19 @@
 # Changelog
 
+## 2026-09-22#02 -- Comic Vine: narrow an ambiguous match by Publisher / Series Year
+
+A common series name (e.g. "Batman") can match several different
+Comic Vine volumes -- reboots, imprints, unrelated same-named series
+-- that Series + Number alone can't tell apart. The Look Up via Comic
+Vine dialog's query-correction panel now has two more fields,
+**Publisher** and **Series Year** (the volume's own start year, not
+the specific issue's cover date), both purely opt-in and blank by
+default. Fill either in for a row and click Search This Item to keep
+only candidates from that publisher and/or that volume's start year
+(falls back to the full candidate list if nothing matches, rather than
+going empty on a typo) -- see `core/comicvine_lookup.py`'s new
+`filter_candidates_by_series()`/`fetch_volume_info()`.
+
 ## 2026-09-22#01 -- Rename/Export: month always padded, number padding width is selectable
 
 Rename/Export by Metadata Pattern had two padding gaps. `%month%` now

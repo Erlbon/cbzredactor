@@ -20,6 +20,13 @@ Found" list in the detail panel (see redactor_common.gui.lookup_dialog's
 `resolve_alternative`), so a wrong top pick is a click away instead of
 requiring the Series/Number text to be re-typed and re-searched.
 
+When a series name has been published as several different volumes
+(reboots, imprints, a same-named unrelated series), Series/Number
+alone can't disambiguate them -- Publisher and Series Year (the
+volume's own start year, not one issue's own cover date) are offered
+as two more, purely opt-in, query fields for exactly that case (see
+core/comicvine_lookup.py's `filter_candidates_by_series()`).
+
 Built on redactor_common's gui/lookup_dialog.py (LookupDialogBase) --
 this class supplies only what's Comic-Vine-specific: the API-key
 prompt/storage and search_one()'s actual API calls. Everything else
@@ -46,6 +53,7 @@ from core.comicvine_lookup import (
     download_cover_image,
     fetch_issue_details,
     fetch_publisher,
+    filter_candidates_by_series,
     search_comicvine,
 )
 from core.filename_guess import guess_series_and_number, guess_year
@@ -73,12 +81,20 @@ class ComicVineLookupDialog(LookupDialogBase):
                 "(guessed from the filename when Series is blank). Compare the file's own "
                 "cover against the one found for each row before trusting a match. Untick "
                 "anything you don't trust, then Apply. Cover images are shown for "
-                "confirmation only -- they are never written into the archive."
+                "confirmation only -- they are never written into the archive. If a common "
+                "series name matches several different volumes, select a row and fill in "
+                "Publisher and/or Series Year (the volume's own start year, not this issue's "
+                "cover date) to narrow it down, then Search This Item."
             ),
             search_label="Searching Comic Vine…",
             item_label=lambda book: os.path.basename(book.path),
             search_one=self._search_one_book,
-            query_fields=[("series", "Series"), ("number", "Number")],
+            query_fields=[
+                ("series", "Series"),
+                ("number", "Number"),
+                ("publisher", "Publisher"),
+                ("series_year", "Series Year"),
+            ],
             get_local_cover=lambda book: book.read_first_page_bytes(),
             resolve_alternative=self._resolve_alternative,
         )
@@ -117,7 +133,15 @@ class ComicVineLookupDialog(LookupDialogBase):
         )
         series = query_override.get("series") or guessed_series
         number = query_override.get("number") or guessed_number
-        used_query = {"series": series, "number": number}
+        # Publisher/Series Year have no filename/ComicInfo guess of
+        # their own -- unlike Series/Number they start blank on every
+        # row, purely opt-in for narrowing down an ambiguous match
+        # (see filter_candidates_by_series()).
+        publisher = query_override.get("publisher", "")
+        series_year = query_override.get("series_year", "")
+        used_query = {
+            "series": series, "number": number, "publisher": publisher, "series_year": series_year,
+        }
 
         if not self._api_key:
             return LookupResult(
@@ -137,6 +161,10 @@ class ComicVineLookupDialog(LookupDialogBase):
                 year_hint=year_hint,
                 max_results=MAX_ALTERNATIVES + 5,
             )
+            if publisher or series_year:
+                candidates = filter_candidates_by_series(
+                    candidates, publisher, series_year, self._api_key
+                )
         except ComicVineLookupError as exc:
             return LookupResult(error=str(exc), used_query=used_query)
         if not candidates:

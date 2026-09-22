@@ -106,3 +106,61 @@ def test_picking_an_alternative_keeps_the_alternatives_list_intact(dialog):
 
     # still browsable afterwards -- picking one doesn't consume the list
     assert dialog.alt_list.count() == 2
+
+
+# Publisher / Series Year -- narrowing an ambiguous match down to a
+# specific volume (see core/comicvine_lookup.py's
+# filter_candidates_by_series()).
+
+def test_publisher_and_series_year_are_correctable_query_fields(dialog):
+    assert "publisher" in dialog._query_edits
+    assert "series_year" in dialog._query_edits
+    # Unlike Series/Number, neither is auto-guessed -- both start blank.
+    assert dialog._query_edits["publisher"].text() == ""
+    assert dialog._query_edits["series_year"].text() == ""
+
+
+def test_search_this_item_passes_publisher_and_series_year_to_the_filter(tmp_path, monkeypatch):
+    monkeypatch.setattr("gui.app_settings.load_comicvine_api_key", lambda: "fake-key")
+    monkeypatch.setattr("gui.comicvine_lookup_dialog.search_comicvine", lambda *a, **k: list(CANDIDATES))
+    monkeypatch.setattr("gui.comicvine_lookup_dialog.fetch_issue_details", _fake_fetch_issue_details)
+    monkeypatch.setattr("gui.comicvine_lookup_dialog.fetch_publisher", lambda *a, **k: "")
+
+    calls = []
+
+    def _fake_filter(candidates, publisher, series_year, api_key):
+        calls.append((publisher, series_year))
+        return [candidates[-1]]  # pretend only the last candidate matches
+
+    monkeypatch.setattr("gui.comicvine_lookup_dialog.filter_candidates_by_series", _fake_filter)
+
+    book = _make_book(tmp_path)
+    dlg = ComicVineLookupDialog([book])
+    dlg.table.selectRow(0)
+    dlg._query_edits["publisher"].setText("Marvel")
+    dlg._query_edits["series_year"].setText("2016")
+    dlg.search_this_btn.click()
+
+    assert calls == [("Marvel", "2016")]
+    result = dlg._row_results[0]
+    assert result.fields["series"] == f"Details for {CANDIDATES[-1].detail_url}"
+
+
+def test_search_this_item_skips_the_filter_when_both_fields_are_blank(tmp_path, monkeypatch):
+    monkeypatch.setattr("gui.app_settings.load_comicvine_api_key", lambda: "fake-key")
+    monkeypatch.setattr("gui.comicvine_lookup_dialog.search_comicvine", lambda *a, **k: list(CANDIDATES))
+    monkeypatch.setattr("gui.comicvine_lookup_dialog.fetch_issue_details", _fake_fetch_issue_details)
+    monkeypatch.setattr("gui.comicvine_lookup_dialog.fetch_publisher", lambda *a, **k: "")
+
+    def _unexpected_filter(*a, **k):
+        raise AssertionError("filter_candidates_by_series should not be called")
+
+    monkeypatch.setattr("gui.comicvine_lookup_dialog.filter_candidates_by_series", _unexpected_filter)
+
+    book = _make_book(tmp_path)
+    dlg = ComicVineLookupDialog([book])
+    dlg.table.selectRow(0)
+    dlg.search_this_btn.click()  # Publisher/Series Year left blank
+
+    result = dlg._row_results[0]
+    assert result.fields["series"] == f"Details for {CANDIDATES[0].detail_url}"
