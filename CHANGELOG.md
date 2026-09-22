@@ -1,5 +1,20 @@
 # Changelog
 
+## 2026-09-22#01 -- Rename/Export: month always padded, number padding width is selectable
+
+Rename/Export by Metadata Pattern had two padding gaps. `%month%` now
+always renders as 2 digits ("02" for February, not "2") -- unlike
+`%number%`'s padding, this isn't a per-run choice, it's just always
+correct, so there's no checkbox for it. Separately, `%number%`'s
+existing zero-pad checkbox now has a width dropdown next to it (2, 3
+or 4 digits, e.g. "01", "001", "0001") instead of always padding to a
+fixed 2 digits.
+
+Both are built on `redactor_common`'s `RenamePatternDialog`/
+`zero_pad_numeric_value()`, generalized to take a configurable width
+and a new `always_pad_fields` map (bumped to `2026-09-22-01`) -- see
+that project's own changes for details.
+
 ## 2026-09-19#01 -- Comic Vine matching quality and "Other Matches Found"
 
 The Comic Vine lookup no longer just applies whatever result Comic

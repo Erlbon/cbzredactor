@@ -1089,6 +1089,7 @@ class MainWindow(QMainWindow):
             title="Rename / Export by Metadata Pattern",
             item_noun="file",
             zero_pad_field="number",
+            always_pad_fields={"month": 2},
             parent=self,
         )
         if dialog.exec() != dialog.DialogCode.Accepted:
