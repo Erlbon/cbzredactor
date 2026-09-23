@@ -48,14 +48,13 @@ from PyQt6.QtWidgets import (
     QLineEdit,
     QPlainTextEdit,
     QScrollArea,
-    QSplitter,
     QToolButton,
     QVBoxLayout,
     QWidget,
 )
 
 from redactor_common.gui.collapsible_splitter import CollapseToggleButton
-from redactor_common.gui.image_label import AspectRatioImageLabel
+from redactor_common.gui.image_pane import ImagePanelSplitter, ImagePreviewBox
 
 from core.comic_genres import add_genre
 from core.comicinfo import AGE_RATING_VALUES, BLACK_AND_WHITE_VALUES, MANGA_VALUES, ComicInfoMetadata
@@ -178,18 +177,13 @@ class ComicInfoPanel(QWidget):
         scroll = self._build_fields_scroll_area()
         cover_box = self._build_cover_box()
 
-        # A real draggable divider between the two sections -- same
-        # role as epubredactor's tag_panel.py: lets the cover be given
-        # much more room by dragging, even if that squeezes the field
-        # form down to something that needs to scroll, or vice versa.
-        # Fields on top, cover below -- matching that established order.
-        splitter = QSplitter(Qt.Orientation.Vertical)
-        splitter.addWidget(scroll)
-        splitter.addWidget(cover_box)
-        splitter.setStretchFactor(0, 1)
-        splitter.setStretchFactor(1, 1)
-        splitter.setSizes([600, 300])  # initial bias toward fields; purely a starting hint
-        outer.addWidget(splitter, 1)
+        # Fields on top, cover below, with a draggable divider between --
+        # redactor_common's ImagePanelSplitter, the resizable image area
+        # every Redactor side panel shares. It also wraps the cover box
+        # in the frameless scroll area this panel needed so the group
+        # box's title width couldn't stop the side panel collapsing.
+        self.splitter = ImagePanelSplitter(scroll, cover_box)
+        outer.addWidget(self.splitter, 1)
 
     # ------------------------------------------------------------------
     # Widget construction
@@ -214,53 +208,14 @@ class ComicInfoPanel(QWidget):
         scroll.setWidget(form_container)
         return scroll
 
-    def _build_cover_box(self) -> QScrollArea:
-        self.cover_box = QGroupBox("Cover (First Page)")
-        box = self.cover_box
-        layout = QVBoxLayout(box)
-
-        self.cover_label = AspectRatioImageLabel()
-        # An explicit small minimum WIDTH too, not just height -- a plain
-        # QLabel's auto minimumSizeHint is based on its current text
-        # ("No file selected" etc, whenever there's no pixmap loaded),
-        # which would otherwise impose a much wider floor than needed
-        # and fight the side panel's collapse-to-slim-strip behavior
-        # (same fix epubredactor's own cover_preview uses).
-        self.cover_label.setMinimumSize(60, 80)
-        self.cover_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.cover_label.setStyleSheet("background-color: palette(base); border: 1px solid palette(mid);")
-        self.cover_label.setText("No pages")
-        layout.addWidget(self.cover_label, 1)
+    def _build_cover_box(self) -> ImagePreviewBox:
+        self.cover_box = ImagePreviewBox("Cover (First Page)", placeholder="No pages", minimum_size=(60, 80))
+        self.cover_label = self.cover_box.image_label
 
         self.page_count_label = QLabel("")
         self.page_count_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(self.page_count_label)
-
-        # Wrapped in a QScrollArea for exactly one reason, unrelated to
-        # actually scrolling: a bare QGroupBox's minimumSizeHint is
-        # inflated by its own TITLE text width (confirmed directly --
-        # "Cover (First Page)" alone forces a ~254px floor, regardless
-        # of setMinimumWidth() calls, which don't affect
-        # minimumSizeHint() at all). Since this box sits directly in
-        # the panel's own splitter (not inside a scroll area the way
-        # the field groups already are, via _build_fields_scroll_area()
-        # -- a QScrollArea's OWN minimumSizeHint stays small regardless
-        # of its content's), that title-driven floor was blocking the
-        # whole side panel from ever reaching PANEL_COLLAPSED_WIDTH:
-        # collapsing looked like it worked (the field list visibly
-        # shrank) while the cover silently held the panel open, and
-        # since the resulting width was still bigger than
-        # collapsed_width, is_collapsed() reported False -- so the next
-        # click tried to collapse again instead of restoring, and the
-        # button looked stuck. This wrapper is purely a minimum-size
-        # trick; the cover still renders at full size normally, a
-        # scrollbar only appears if the panel is dragged narrower than
-        # the cover's own natural width.
-        self._cover_scroll = QScrollArea()
-        self._cover_scroll.setWidgetResizable(True)
-        self._cover_scroll.setFrameShape(QScrollArea.Shape.NoFrame)
-        self._cover_scroll.setWidget(box)
-        return self._cover_scroll
+        self.cover_box.add_widget(self.page_count_label)
+        return self.cover_box
 
     def _build_group(self, title: str, fields: list) -> QGroupBox:
         box = QGroupBox(title)
@@ -485,10 +440,9 @@ class ComicInfoPanel(QWidget):
         applied, to every selected file, via the toolbar/Operations
         menu's "Apply to N Selected Files" action."""
         self.bulk_mode = count > 1
-        # Hides the wrapping QScrollArea, not just the inner cover_box
-        # -- hiding only the QGroupBox would leave an empty scroll
-        # viewport occupying space instead of actually disappearing.
-        self._cover_scroll.setVisible(not self.bulk_mode)
+        # Hides the whole image pane (its scroll wrapper, not just the
+        # box), so no empty viewport is left taking up space.
+        self.splitter.set_image_visible(not self.bulk_mode)
         self.bulk_info_label.setVisible(self.bulk_mode)
         if self.bulk_mode:
             self.bulk_info_label.setText(

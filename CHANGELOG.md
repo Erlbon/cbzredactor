@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-09-23#02 -- shared resizable cover area
+
+The side panel's cover/fields splitter is now redactor_common's shared
+`ImagePanelSplitter` + `ImagePreviewBox` (2026-09-23-02), promoted from
+this panel and its siblings. Same behavior, plus: after an image has
+been dragged large, the pane can be dragged smaller again (the image
+label no longer insists on its current size).
+
 ## 2026-09-23#01 -- Covers off the GUI thread, table thumbnails
 
 - **Cover thumbnails in the table** (Filename column), loaded lazily:
