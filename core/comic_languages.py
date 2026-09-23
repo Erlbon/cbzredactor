@@ -13,17 +13,11 @@ language codes/names are plain facts, not something worth maintaining
 two independent copies of across sibling projects.
 """
 
-DEFAULT_LANGUAGES: list[tuple[str, str]] = [
-    ("en", "English"),
-    ("de", "German"),
-    ("fr", "French"),
-    ("es", "Spanish"),
-    ("nl", "Dutch"),
-    ("no", "Norwegian"),
-    ("it", "Italian"),
-    ("sv", "Swedish"),
-    ("da", "Danish"),
-    ("ja", "Japanese"),
-    ("ko", "Korean"),
-    ("pt", "Portuguese"),
-]
+from redactor_common.core.languages import language_pairs
+
+# (ISO 639-1 code, English name) from redactor_common's shared ISO 639
+# table (2026-09-23) -- the "two independent copies" this docstring
+# warned about are now one table for the whole family.
+DEFAULT_LANGUAGES: list[tuple[str, str]] = language_pairs(
+    ["en", "de", "fr", "es", "nl", "no", "it", "sv", "da", "ja", "ko", "pt"], "alpha2",
+)

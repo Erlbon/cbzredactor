@@ -36,7 +36,7 @@ from __future__ import annotations
 from typing import Optional
 
 from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtGui import QPixmap
+from PyQt6.QtGui import QImage, QPixmap
 from PyQt6.QtWidgets import (
     QComboBox,
     QDoubleSpinBox,
@@ -451,6 +451,22 @@ class ComicInfoPanel(QWidget):
     # ------------------------------------------------------------------
     # Load / read-back
     # ------------------------------------------------------------------
+
+    def set_cover_loading(self) -> None:
+        """Placeholder while the cover is read and decoded in the
+        background (see MainWindow._show_book_in_panel)."""
+        self.cover_label.set_original_pixmap(None)
+        self.cover_label.setText("Loading cover\u2026")
+
+    def set_cover_image(self, image: QImage | None) -> None:
+        """Shows a cover already decoded (and downscaled) off the main
+        thread by redactor_common's AsyncPreviewLoader."""
+        if image is None or image.isNull():
+            self.cover_label.set_original_pixmap(None)
+            self.cover_label.setText("Could not read first page")
+            return
+        self.cover_label.setText("")
+        self.cover_label.set_original_pixmap(QPixmap.fromImage(image))
 
     def set_enabled(self, enabled: bool) -> None:
         self.setEnabled(enabled)

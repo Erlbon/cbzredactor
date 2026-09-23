@@ -1,5 +1,22 @@
 # Changelog
 
+## 2026-09-23#01 -- Covers off the GUI thread, table thumbnails
+
+- **Cover thumbnails in the table** (Filename column), loaded lazily:
+  only rows on screen ever read or decode a cover, in the background --
+  epubredactor's mechanism (a 15k-book table went from ~126s to ~2.6s),
+  now shared as redactor_common's `VisibleRowsWatcher` + `AsyncIconCache`.
+- **Selecting a file no longer stutters on its cover.** The side panel
+  used to decode page 1 at full resolution (often 3000x4500 px) on the
+  GUI thread on every selection change; it's now read, downscaled and
+  decoded in the background.
+- **Refresh List picks up new CBT/CB7 files** too (it only looked for
+  .cbz/.cbr), via the shared `folder_refresh`, using the same folder scan
+  as Load Folder.
+- Startup, crash log, app paths, pattern history, Genre/Language list
+  rules and the version bump are the shared implementations now;
+  redactor_common pinned to 2026-09-23-01.
+
 ## 2026-09-22#02 -- Comic Vine: narrow an ambiguous match by Publisher / Series Year
 
 A common series name (e.g. "Batman") can match several different

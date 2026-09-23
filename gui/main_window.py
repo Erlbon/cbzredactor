@@ -17,9 +17,9 @@ from __future__ import annotations
 import copy
 import os
 import shutil
-import sys
 
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import QSize, Qt
+from PyQt6.QtGui import QIcon, QImage
 from PyQt6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
@@ -38,6 +38,11 @@ from PyQt6.QtWidgets import (
 )
 
 from redactor_common.core.table_settings import is_column_visible, merge_column_order, sanitize_hidden_fields
+from core.app_paths import asset_path
+from redactor_common.gui.async_icon_cache import AsyncIconCache, IdentityWeakDict
+from redactor_common.gui.async_preview import AsyncPreviewLoader
+from redactor_common.gui.visible_rows import VisibleRowsWatcher
+from redactor_common.core.folder_refresh import find_new_files_in_loaded_folders
 from redactor_common.core.undo import UndoManager
 from redactor_common.gui.about_dialog import AboutDialog, ChangelogDialog, CreditsDialog
 from redactor_common.gui.action_factory import make_action
@@ -187,16 +192,29 @@ RESIZE_PROGRESS_THRESHOLD = 1
 # width, leaving the toggle button stuck unable to expand it back.
 PANEL_COLLAPSED_WIDTH = 70
 
+# Table cover thumbnails (page 1, in the Filename cell) -- same size as
+# epubredactor's table covers.
+COVER_ICON_SIZE = QSize(24, 32)
+
 
 def resource_path(*parts: str) -> str:
-    """Resolves a bundled resource (icon, README, ...) whether running
-    from source or from a frozen PyInstaller one-file build -- same
-    sys._MEIPASS pattern the sibling tools use (safe here specifically
-    because this is a read-only bundled asset, unlike core.app_paths.
-    base_dir(), which is deliberately NOT sys._MEIPASS for anything
-    meant to persist between runs)."""
-    base = getattr(sys, "_MEIPASS", os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    return os.path.join(base, *parts)
+    """Resolves a bundled read-only resource (icon, README, ...) whether
+    running from source or frozen -- see core.app_paths.asset_path()."""
+    return asset_path(*parts)
+
+def comic_files_in_folder(folder: str) -> list[str]:
+    """Every archive this app opens (.cbz, plus CBR/CBT/CB7 offered for
+    conversion) directly inside `folder`, sorted, non-recursive. Shared
+    by Load Folder and Refresh List so the two can't disagree."""
+    try:
+        names = sorted(os.listdir(folder))
+    except OSError:
+        return []
+    return [
+        os.path.join(folder, name)
+        for name in names
+        if name.lower().endswith((".cbz",) + FOREIGN_ARCHIVE_EXTENSIONS)
+    ]
 
 
 class MainWindow(QMainWindow):
@@ -208,6 +226,22 @@ class MainWindow(QMainWindow):
         self.books: list[CbzBook] = []
         self._selected_rows: list[int] = []
         self.undo_manager: UndoManager[CbzBook] = UndoManager()
+        # Selected file's cover: read + decoded off the GUI thread, see
+        # _show_book_in_panel(). Decoded no larger than this (2x a wide
+        # side panel, for high-DPI screens).
+        self._cover_preview = AsyncPreviewLoader(QSize(900, 1350), parent=self)
+        self._cover_preview.image_ready.connect(self._on_cover_preview_ready)
+        # Table cover thumbnails, loaded lazily: only rows actually on
+        # screen (plus a small buffer) ever read or decode a cover, off
+        # the GUI thread -- redactor_common's VisibleRowsWatcher +
+        # AsyncIconCache, the mechanism that took epub's 15k-book table
+        # rebuild from ~126s to ~2.6s. A cover's version is (path,
+        # mtime), stat'ed only for visible rows; _cover_source remembers
+        # the last one requested so a rebuild can reuse cached icons
+        # without touching the disk.
+        self._cover_icons = AsyncIconCache(COVER_ICON_SIZE, parent=self)
+        self._cover_icons.icon_ready.connect(self._on_cover_icon_ready)
+        self._cover_source = IdentityWeakDict()
         # Click-to-sort state (see _on_header_clicked) -- not persisted
         # across restarts, same as every other app in the family not
         # remembering a sort order (only column order/widths/visibility
@@ -222,6 +256,8 @@ class MainWindow(QMainWindow):
         self.table = QTableWidget(0, len(self._column_keys))
         self.table.setHorizontalHeaderLabels([_COLUMN_LABELS[key] for key in self._column_keys])
         self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.table.setIconSize(COVER_ICON_SIZE)
+        self._visible_rows = VisibleRowsWatcher(self.table, self._load_cover_icons_for_rows)
         # Multi-select (ctrl/shift-click, same as Explorer) -- needed for
         # both bulk metadata editing (see ComicInfoPanel.set_bulk_mode())
         # and looking up several files via one API search in one go.
@@ -549,11 +585,7 @@ class MainWindow(QMainWindow):
         if not folder:
             return
         app_settings.save_last_directory(folder)
-        paths = [
-            os.path.join(folder, name)
-            for name in sorted(os.listdir(folder))
-            if name.lower().endswith((".cbz",) + FOREIGN_ARCHIVE_EXTENSIONS)
-        ]
+        paths = comic_files_in_folder(folder)
         if not paths:
             QMessageBox.information(
                 self, "No Files Found", "No .cbz, .cbr, .cbt, or .cb7 files were found in that folder."
@@ -650,7 +682,12 @@ class MainWindow(QMainWindow):
         if book.page_count_mismatch and not book.load_error:
             status = "Page count mismatch"
 
-        self.table.setItem(row, self._col_index["filename"], QTableWidgetItem(os.path.basename(book.path)))
+        name_item = QTableWidgetItem(os.path.basename(book.path))
+        # Only an already-decoded icon here, never a decode request --
+        # see _load_cover_icons_for_rows().
+        cached = self._cover_icons.get_cached_icon(book, self._cover_source.get(book))
+        name_item.setIcon(cached if cached is not None else QIcon())
+        self.table.setItem(row, self._col_index["filename"], name_item)
         self.table.setItem(row, self._col_index["pages"], QTableWidgetItem(str(book.actual_page_count)))
         self.table.setItem(row, self._col_index["status"], QTableWidgetItem(status))
         # Every other column is a plain ComicInfo field -- one shared
@@ -710,7 +747,7 @@ class MainWindow(QMainWindow):
             page_count_text = f"{book.actual_page_count} page(s)"
             if book.page_count_mismatch:
                 page_count_text += f" -- ComicInfo.xml says {book.metadata.page_count}, will be corrected on save"
-            self.panel.load_metadata(book.metadata, book.read_first_page_bytes(), page_count_text)
+            self._show_book_in_panel(book, page_count_text)
         else:
             self.panel.set_bulk_mode(len(self._selected_rows))
         self._update_apply_bulk_edit_action()
@@ -816,7 +853,7 @@ class MainWindow(QMainWindow):
             self._refresh_table_row(row, book)
             if self._selected_rows == [row]:
                 page_count_text = f"{book.actual_page_count} page(s)"
-                self.panel.load_metadata(book.metadata, book.read_first_page_bytes(), page_count_text)
+                self._show_book_in_panel(book, page_count_text)
         self._update_undo_action()
         self._update_redo_action()
         self._update_status()
@@ -952,9 +989,63 @@ class MainWindow(QMainWindow):
         self.panel.set_enabled(False)
         self._update_status()
 
+    def _load_cover_icons_for_rows(self, rows: list[int]) -> None:
+        """VisibleRowsWatcher callback: request covers for these (on
+        screen) rows only. Rows map to self.books by position -- this
+        app's own sort reorders self.books itself (see _sort_key_for)."""
+        for row in rows:
+            if row >= len(self.books):
+                continue
+            book = self.books[row]
+            if book.load_error or not book.first_page_name:
+                continue
+            try:
+                source = (book.path, os.path.getmtime(book.path))
+            except OSError:
+                continue
+            self._cover_source[book] = source
+            cached = self._cover_icons.get_cached_icon(book, source)
+            if cached is not None:
+                item = self.table.item(row, self._col_index["filename"])
+                if item is not None:
+                    item.setIcon(cached)
+                continue
+            self._cover_icons.request(book, source, loader=book.read_first_page_bytes)
+
+    def _on_cover_icon_ready(self, book: CbzBook, icon: QIcon) -> None:
+        """A background cover decode finished: set that one cell's icon,
+        wherever the book is now (the list may have been re-sorted or
+        rebuilt while it decoded)."""
+        try:
+            row = self.books.index(book)
+        except ValueError:
+            return  # removed from the list meanwhile
+        item = self.table.item(row, self._col_index["filename"])
+        if item is not None:
+            item.setIcon(icon)
+
+    def _show_book_in_panel(self, book: CbzBook, page_count_text: str) -> None:
+        """Loads `book` into the side panel. The fields appear at once;
+        the cover (page 1) is read out of the archive and decoded on a
+        worker thread by redactor_common's AsyncPreviewLoader, downscaled
+        while decoding. This used to be a full-resolution
+        QPixmap.loadFromData() on the GUI thread on every selection
+        change -- comic pages are often 3000x4500 px, so arrowing
+        through a library stuttered on every row."""
+        self.panel.load_metadata(book.metadata, None, page_count_text)
+        if book.first_page_name:
+            self.panel.set_cover_loading()
+            self._cover_preview.request(book, book.read_first_page_bytes)
+        else:
+            self._cover_preview.cancel()
+
+    def _on_cover_preview_ready(self, book: CbzBook, image: QImage) -> None:
+        if len(self._selected_rows) == 1 and self.books[self._selected_rows[0]] is book:
+            self.panel.set_cover_image(image)
+
     def refresh_list(self) -> None:
         """Re-scans the folders your currently-loaded files live in
-        (picking up new .cbz/.cbr files added there since you loaded),
+        (picking up new .cbz/.cbr/.cbt/.cb7 files added there since you loaded),
         then re-reads every file still present from disk. Doesn't
         discover a brand-new subfolder you haven't loaded anything
         from yet (only folders already represented in your current
@@ -967,22 +1058,14 @@ class MainWindow(QMainWindow):
         if self._count_dirty() and not self._confirm_discard("refresh the list (discarding unsaved changes)"):
             return
 
+        # The shared folder_refresh logic, fed the same folder scan Load
+        # Folder uses -- this used to be its own copy that only looked
+        # for .cbz/.cbr, so a CBT/CB7 dropped into a loaded folder never
+        # showed up on refresh.
         existing_paths = [os.path.normpath(book.path) for book in self.books]
-        seen = set(existing_paths)
-        folders = {os.path.dirname(p) for p in existing_paths}
-        all_paths = list(existing_paths)
-        for folder in sorted(folders):
-            try:
-                names = sorted(os.listdir(folder))
-            except OSError:
-                continue
-            for name in names:
-                if not name.lower().endswith((".cbz", ".cbr")):
-                    continue
-                full = os.path.normpath(os.path.join(folder, name))
-                if full not in seen:
-                    seen.add(full)
-                    all_paths.append(full)
+        all_paths = existing_paths + find_new_files_in_loaded_folders(
+            existing_paths, comic_files_in_folder,
+        )
 
         self.books = []
         self._selected_rows = []
@@ -1155,7 +1238,7 @@ class MainWindow(QMainWindow):
             self._refresh_table_row(row, book)
             if self._selected_rows == [row]:
                 page_count_text = f"{book.actual_page_count} page(s)"
-                self.panel.load_metadata(book.metadata, book.read_first_page_bytes(), page_count_text)
+                self._show_book_in_panel(book, page_count_text)
         self._update_status()
 
     def _on_cell_double_clicked(self, row: int, col: int) -> None:
@@ -1384,7 +1467,7 @@ class MainWindow(QMainWindow):
                 self._refresh_table_row(row, book)
                 if self._selected_rows == [row]:
                     page_count_text = f"{book.actual_page_count} page(s)"
-                    self.panel.load_metadata(book.metadata, book.read_first_page_bytes(), page_count_text)
+                    self._show_book_in_panel(book, page_count_text)
 
         run_with_progress(
             self, target_books, _step, "Resizing images...", threshold=RESIZE_PROGRESS_THRESHOLD
@@ -1500,7 +1583,7 @@ class MainWindow(QMainWindow):
             self._refresh_table_row(row, book)
             if self._selected_rows == [row]:
                 page_count_text = f"{book.actual_page_count} page(s)"
-                self.panel.load_metadata(book.metadata, book.read_first_page_bytes(), page_count_text)
+                self._show_book_in_panel(book, page_count_text)
         self._update_status()
 
     def _resolve_overwrite_conflicts(
