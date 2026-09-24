@@ -40,11 +40,13 @@ def test_combo_ignores_wheel_when_not_focused():
     assert event.isAccepted() is False  # bubbles up to the parent QScrollArea instead
 
 
-def test_combo_handles_wheel_normally_when_focused():
+def test_combo_handles_wheel_normally_when_focused(monkeypatch):
     combo = _ScrollSafeComboBox()
     combo.addItems(["A", "B", "C"])
-    combo.show()
-    combo.setFocus()
+    # setFocus() only takes effect in an active window, and a headless
+    # test run (offscreen platform, CI runner) never has one, so fake
+    # the focus state this branch depends on.
+    monkeypatch.setattr(combo, "hasFocus", lambda: True)
 
     event = _make_wheel_event()
     combo.wheelEvent(event)
@@ -63,11 +65,10 @@ def test_spinbox_ignores_wheel_when_not_focused():
     assert event.isAccepted() is False
 
 
-def test_spinbox_handles_wheel_normally_when_focused():
+def test_spinbox_handles_wheel_normally_when_focused(monkeypatch):
     spin = _ScrollSafeDoubleSpinBox()
     spin.setRange(0.0, 5.0)
-    spin.show()
-    spin.setFocus()
+    monkeypatch.setattr(spin, "hasFocus", lambda: True)  # see the combo test above
 
     event = _make_wheel_event()
     spin.wheelEvent(event)
