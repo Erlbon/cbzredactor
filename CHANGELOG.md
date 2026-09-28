@@ -1,5 +1,29 @@
 # Changelog
 
+## 2026-09-28#09 -- Find and remove scanner credit pages
+
+- **Right-click > Credit Pages...**: a file's first 2 and last 4 pages
+  as thumbnails; tick the scanner credit page ("scanned by
+  <group>") and Remove. The page is removed and remembered -- the same
+  idea as epubredactor's Junk Cover flag.
+- **Credit Pages column** (shown by default): flags every file whose
+  first/last pages match a remembered credit page ("last page", "2
+  pages"), checked in the background like the Size column; sortable.
+- **Operations > Remove Credit Pages...**: finds them in the selected
+  files (or all), shows thumbnails for review, removes the ticked ones.
+  Files shrink accordingly.
+- **Visual matching**: a small image fingerprint, so a group's tag page
+  is still recognised after resizing and re-encoding (CbxConverter's
+  renamed, resized WebP pages included). Blank pages are never learned.
+  Hints for pages not learned yet -- "zzzz_..." names, a scan group in
+  the name, an odd page shape -- are shown but never pre-ticked.
+- **Safe rewrite**: ComicInfo's PageCount and per-page (<Pages>)
+  entries are corrected so page tags stay on the right pages; the
+  original file goes to the Recycle Bin; files with unsaved edits are
+  skipped until saved.
+- **Settings > Known Credit Pages...** lists what's been learned, with
+  thumbnails, and Forget for a mistake.
+
 ## 2026-09-28#08 -- Look up in your own copy of the GCD database
 
 - **Import > Look Up via GCD (Local Database)...** searches a local copy

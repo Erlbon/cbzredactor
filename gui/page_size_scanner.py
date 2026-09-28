@@ -37,8 +37,9 @@ class _Signals(QObject):
 
 
 class _ScanTask(QRunnable):
-    def __init__(self, book, source, path: str, page_names: list[str], signals: _Signals):
+    def __init__(self, scan, book, source, path: str, page_names: list[str], signals: _Signals):
         super().__init__()
+        self._scan = scan
         self._book = book
         self._source = source
         self._path = path
@@ -46,17 +47,20 @@ class _ScanTask(QRunnable):
         self._signals = signals
 
     def run(self) -> None:
-        self._signals.done.emit(self._book, self._source, _scan(self._path, self._page_names))
+        self._signals.done.emit(self._book, self._source, self._scan(self._path, self._page_names))
 
 
 class PageSizeScanner(QObject):
-    """`stats_ready(book, stats)` fires on the main thread whenever a
-    background scan finishes."""
+    """`stats_ready(book, result)` fires on the main thread whenever a
+    background scan finishes. `scan(path, page_names)` is the per-book
+    work -- page sizes by default; the Credit Pages column passes
+    core.credit_pages.scan_book instead (same lazy, cached machinery)."""
 
     stats_ready = pyqtSignal(object, object)
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, scan=None):
         super().__init__(parent)
+        self._scan_fn = scan or _scan
         self._cache = IdentityWeakDict()  # book -> (source, stats)
         self._in_flight = IdentityWeakDict()  # book -> source
         self._signals = _Signals()
@@ -73,7 +77,7 @@ class PageSizeScanner(QObject):
             return
         self._in_flight[book] = source
         QThreadPool.globalInstance().start(
-            _ScanTask(book, source, book.path, list(book.page_names), self._signals)
+            _ScanTask(self._scan_fn, book, source, book.path, list(book.page_names), self._signals)
         )
 
     def scan_now(self, book, source) -> PageSizeStats:
@@ -82,7 +86,7 @@ class PageSizeScanner(QObject):
         cached = self.get_cached(book, source)
         if cached is not None:
             return cached
-        stats = _scan(book.path, list(book.page_names))
+        stats = self._scan_fn(book.path, list(book.page_names))
         self._cache[book] = (source, stats)
         return stats
 

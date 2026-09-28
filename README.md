@@ -172,6 +172,21 @@ understands that this app now supports too).
   single pages, so double-page spreads and one oversized cover don't
   skew it; hover for the width breakdown. Measured from image headers
   only, in the background. A **File Size** column is available too.
+- **Scanner credit pages** (the "scanned by <group>" tag page scene
+  releases add): right-click a file > **Credit Pages...** shows its
+  first 2 and last 4 pages as thumbnails. Tick the credit page and
+  Remove: it's removed from the file and **remembered**, like
+  epubredactor's Junk Cover flag. From then on the **Credit Pages**
+  column flags every file containing that page, and **Operations >
+  Remove Credit Pages...** removes them all after a thumbnail review.
+  Matching is visual (a small image fingerprint), so the same tag page
+  is recognised after resizing or re-encoding -- CbxConverter's
+  renamed, resized WebP pages included. Unlearned candidates get hints
+  (a "zzzz_..." name, a scan group in the name, an odd page shape) but
+  are never pre-ticked. Blank pages are never learned (they'd match
+  every blank page). ComicInfo's PageCount and per-page entries are
+  corrected; the original file goes to the Recycle Bin. Learned pages:
+  **Settings > Known Credit Pages...**, with Forget.
 - **Operations > Tag Low-Res Scans** adds a `Low-res scan` entry to the
   ComicInfo **Tags** field of every low-res (yellow) book, so they can
   be found and replaced with better copies later (your comic server can

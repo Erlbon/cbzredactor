@@ -25,6 +25,7 @@ side effect of a normal save.
 
 from __future__ import annotations
 
+import copy
 import os
 import posixpath
 import shutil
@@ -32,7 +33,7 @@ import zipfile
 import zlib
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Callable, Optional
 
 from redactor_common.core.save_errors import describe_save_error
 
@@ -107,6 +108,25 @@ def _needs_rename(name: str, output_format: str) -> bool:
 
 def _renamed_for_format(name: str, output_format: str) -> str:
     return posixpath.splitext(name)[0] + OUTPUT_FORMAT_EXTENSIONS[output_format]
+
+
+def _remap_pages_element(metadata: ComicInfoMetadata, removed_positions: list[int]) -> None:
+    """ComicInfo's <Pages><Page Image="N" .../></Pages> refers to pages
+    by position. Drops entries for removed pages and shifts later ones
+    down so every remaining entry still describes the same page."""
+    removed = set(removed_positions)
+    for element in metadata.extra_elements:
+        if not isinstance(element.tag, str) or element.tag.rsplit("}", 1)[-1] != "Pages":
+            continue
+        for page in list(element):
+            try:
+                position = int(page.get("Image", ""))
+            except ValueError:
+                continue
+            if position in removed:
+                element.remove(page)
+            else:
+                page.set("Image", str(position - sum(1 for r in removed_positions if r < position)))
 
 
 def _needs_conversion(path: str, container: str) -> bool:
@@ -288,6 +308,72 @@ class CbzBook:
             self.path = target
             self.comicinfo_name = write_name
             self.dirty = False
+
+    # ------------------------------------------------------------------
+    # Removing pages (scanner credit pages -- see core/credit_pages.py)
+    # ------------------------------------------------------------------
+
+    def remove_pages(self, names: list[str], dispose_original: Optional[Callable[[str], None]] = None) -> int:
+        """Rewrites the archive without the page entries in `names`,
+        keeping everything else byte for byte. ComicInfo.xml is updated
+        to match: PageCount recomputed, and <Pages> entries (indexed by
+        page position) dropped for removed pages and renumbered for the
+        rest, so per-page tags stay on the right pages. Returns the
+        number of pages removed.
+
+        `dispose_original(path)` is called on the original file just
+        before the new one replaces it -- the GUI passes "move to the
+        Recycle Bin", since this can't be undone. If it raises, nothing
+        is replaced.
+
+        Refuses a book with unsaved metadata edits: this writes
+        ComicInfo.xml too, and must not quietly save someone's
+        half-finished edits along with it."""
+        if self.load_error:
+            raise CbzError(f"Cannot remove pages, file failed to load: {self.load_error}")
+        if self.needs_conversion:
+            raise CbzError("Cannot remove pages, this file needs converting to CBZ first (Convert to CBZ)")
+        if self.dirty:
+            raise CbzError("Save or undo this file's unsaved changes first")
+        remove = set(names) & set(self.page_names)
+        if not remove:
+            return 0
+
+        removed_positions = sorted(i for i, name in enumerate(self.page_names) if name in remove)
+        new_pages = [name for name in self.page_names if name not in remove]
+        metadata = copy.deepcopy(self.metadata)
+        metadata.page_count = str(len(new_pages))
+        _remap_pages_element(metadata, removed_positions)
+
+        tmp_path = self.path + ".tmp_pages"
+        try:
+            with zipfile.ZipFile(self.path, "r") as src, zipfile.ZipFile(tmp_path, "w") as dst:
+                for info in src.infolist():
+                    if info.filename in remove:
+                        continue
+                    if info.filename == self.comicinfo_name:
+                        dst.writestr(info.filename, serialize_comicinfo_xml(metadata))
+                        continue
+                    new_info = zipfile.ZipInfo(info.filename, date_time=info.date_time)
+                    new_info.compress_type = info.compress_type
+                    new_info.external_attr = info.external_attr
+                    dst.writestr(new_info, src.read(info.filename))
+            if dispose_original is not None:
+                dispose_original(self.path)
+            os.replace(tmp_path, self.path)
+        except Exception as exc:
+            try:
+                os.remove(tmp_path)
+            except OSError:
+                pass
+            if isinstance(exc, (zipfile.BadZipFile, KeyError, OSError, zlib.error)):
+                raise CbzError(f"Could not remove pages: {describe_save_error(exc)}") from exc
+            raise
+
+        self.page_names = new_pages
+        if self.comicinfo_name:
+            self.metadata = metadata
+        return len(removed_positions)
 
     # ------------------------------------------------------------------
     # Resizing (Operations > Resize Images...)

@@ -42,6 +42,7 @@ from redactor_common.core.table_settings import is_column_visible, merge_column_
 from core.app_paths import asset_path
 from redactor_common.gui.async_icon_cache import AsyncIconCache, IdentityWeakDict
 from redactor_common.gui.async_preview import AsyncPreviewLoader
+from redactor_common.gui.background_call import call_in_background
 from redactor_common.gui.visible_rows import VisibleRowsWatcher
 from redactor_common.core.folder_refresh import find_new_files_in_loaded_folders
 from redactor_common.core.undo import UndoManager
@@ -79,6 +80,7 @@ from core.trash import TrashError, move_to_trash
 from core.page_dimensions import SIZE_LOW, SIZE_OK, SIZE_OVERSIZED, PageSizeStats
 from core.scan_quality_tag import LOW_RES_TAG, add_tag, has_tag, remove_tag
 from core.scene_name import parse_filename, proposed_fields
+from core.credit_pages import KnownCreditPages, credit_matches, scan_book
 from core.version import APP_NAME, APP_REPO_URL, APP_VERSION, RELEASE_LABEL
 from gui import app_settings
 from gui.bedetheque_lookup_dialog import BedethequeLookupDialog
@@ -146,11 +148,11 @@ _AUTO_NUMBER_NUMERIC_FIELDS: frozenset[str] = frozenset(
 COLUMN_SPECS: list[tuple[str, str]] = (
     [("filename", "Filename"), ("ext", "Ext")]
     + list(_FIELD_LABELS.items())
-    + [("pages", "Pages"), ("size", "Size"), ("filesize", "File Size"), ("status", "Status")]
+    + [("pages", "Pages"), ("size", "Size"), ("credit", "Credit Pages"), ("filesize", "File Size"), ("status", "Status")]
 )
 # Measured from the archive itself, never ComicInfo fields -- sort
 # numerically, never by their display text.
-_NUMERIC_SYNTHETIC_COLUMNS = frozenset({"pages", "size", "filesize"})
+_NUMERIC_SYNTHETIC_COLUMNS = frozenset({"pages", "size", "credit", "filesize"})
 
 # Size column cell colors, one per core.page_dimensions band. Solid
 # light tints with dark text (HIGHLIGHT_TEXT_COLOR) so they read the
@@ -167,6 +169,8 @@ SIZE_CATEGORY_COLORS = {
 # (see CbzBook.needs_conversion) -- mid grey reads as "inactive" on both
 # light and dark backgrounds.
 UNCONVERTED_TEXT_COLOR = QColor("#8a8a8a")
+# Credit Pages column: a book with a known scanner credit page.
+CREDIT_PAGE_COLOR = QColor("#fca5a5")
 NEEDS_CONVERSION_STATUS = "Needs conversion"
 
 # What to do with files needing conversion when they're loaded -- see
@@ -186,7 +190,7 @@ PROTECTED_COLUMNS = frozenset({"filename"})  # the one column you always need to
 # has touched column visibility at all (via the header menu or Settings
 # > Add/Remove Columns...), their own saved choice always wins, even if
 # that choice is "show everything".
-_DEFAULT_VISIBLE_COLUMNS = frozenset({"filename", "ext", "title", "series", "number", "pages", "size", "status"})
+_DEFAULT_VISIBLE_COLUMNS = frozenset({"filename", "ext", "title", "series", "number", "pages", "size", "credit", "status"})
 DEFAULT_HIDDEN_COLUMNS: frozenset[str] = frozenset(_ALL_COLUMN_KEYS) - _DEFAULT_VISIBLE_COLUMNS
 
 # Metadata fields offered as %placeholder% tokens in Rename/Export and
@@ -301,6 +305,13 @@ class MainWindow(QMainWindow):
         self._page_sizes = PageSizeScanner(parent=self)
         self._page_sizes.stats_ready.connect(self._on_page_sizes_ready)
         self._size_source = IdentityWeakDict()
+        # Credit Pages column: the first/last pages fingerprinted in the
+        # background by the same lazy machinery (core/credit_pages.py),
+        # compared against the learned pages at display time -- so
+        # learning or forgetting a page never needs a rescan.
+        self._known_credits = KnownCreditPages(app_settings.credit_pages_path())
+        self._credit_scanner = PageSizeScanner(parent=self, scan=scan_book)
+        self._credit_scanner.stats_ready.connect(self._on_credit_scan_ready)
         # Click-to-sort state (see _on_header_clicked) -- not persisted
         # across restarts, same as every other app in the family not
         # remembering a sort order (only column order/widths/visibility
@@ -426,6 +437,7 @@ class MainWindow(QMainWindow):
                 Separator(),
                 MenuAction("resize_images", "Resi&ze Images...", self.open_resize_images_dialog),
                 MenuAction("tag_low_res", "&Tag Low-Res Scans", self.tag_low_res_scans),
+                MenuAction("remove_credit_pages", "Remove Credit &Pages...", self.open_remove_credit_pages_dialog),
                 Separator(),
                 MenuAction("save_all", "Save &All Changed", self.save_all_changed, shortcut=shortcuts.SAVE_ALL),
                 Separator(),
@@ -434,6 +446,7 @@ class MainWindow(QMainWindow):
             ],
             "Settings": [
                 MenuAction("comicvine_api_key", "Comic Vine API &Key...", self.change_comicvine_api_key),
+                MenuAction("known_credit_pages", "Known C&redit Pages...", self.open_known_credit_pages_dialog),
                 MenuAction("gcd_account", "&GCD Account...", self.open_gcd_account_dialog),
                 MenuAction("gcd_local_settings", "GCD &Local Database...", self.open_gcd_local_settings_dialog),
                 MenuAction("conversion_settings", "Converting to CB&Z...", self.open_conversion_settings_dialog),
@@ -624,6 +637,9 @@ class MainWindow(QMainWindow):
             # "Rename / Export Files..." (the pattern-based batch tool).
             if len(self._selected_rows) == 1 and not self.books[self._selected_rows[0]].load_error:
                 items.append(self.actions_["rename_file"])
+            if len(self._selected_rows) == 1 and self._editable_selected_rows():
+                one = self.books[self._selected_rows[0]]
+                items.append(MenuAction("credit_pages", "Credit Pages...", lambda: self.open_credit_pages_dialog(one)))
             if self._editable_selected_rows():
                 selected_books = [self.books[r] for r in self._editable_selected_rows()]
                 items.append(MenuAction(
@@ -843,7 +859,9 @@ class MainWindow(QMainWindow):
         # Only already-measured sizes here, never a scan -- see
         # _load_lazy_cells_for_rows().
         self.table.setItem(row, self._col_index["size"], QTableWidgetItem())
+        self.table.setItem(row, self._col_index["credit"], QTableWidgetItem())
         stats = self._page_sizes.get_cached(book, self._size_source.get(book))
+        credit_scan = self._credit_scanner.get_cached(book, self._size_source.get(book))
         # Every other column is a plain ComicInfo field -- one shared
         # loop covers all of them (title/series/number plus every field
         # only reachable as a column once you turn it on; see
@@ -855,6 +873,53 @@ class MainWindow(QMainWindow):
         self._apply_row_status_color(row, book)
         if stats is not None:
             self._set_size_cell(row, book, stats)
+        if credit_scan is not None:
+            self._set_credit_cell(row, book, credit_scan)
+
+    def _credit_matches_for(self, book: CbzBook) -> list | None:
+        scan = self._credit_scanner.get_cached(book, self._size_source.get(book))
+        return None if scan is None else credit_matches(scan, self._known_credits)
+
+    def _set_credit_cell(self, row: int, book: CbzBook, scan) -> None:
+        """"last page" / "page 1" / "2 pages" in red when the book's
+        first or last pages match a learned credit page; blank otherwise."""
+        item = self.table.item(row, self._col_index["credit"])
+        if item is None:
+            return
+        matches = credit_matches(scan, self._known_credits)
+        if not matches:
+            item.setText("")
+            item.setToolTip("")
+            item.setData(Qt.ItemDataRole.BackgroundRole, None)
+            if not book.needs_conversion:
+                item.setData(Qt.ItemDataRole.ForegroundRole, None)
+            return
+        last = len(book.page_names) - 1
+        if len(matches) == 1:
+            item.setText("last page" if matches[0].index == last else f"page {matches[0].index + 1}")
+        else:
+            item.setText(f"{len(matches)} pages")
+        item.setToolTip("Known scanner credit page(s):\n" + "\n".join(
+            f"page {m.index + 1}: {m.name}" for m in matches
+        ) + "\n\nOperations > Remove Credit Pages... removes them.")
+        item.setBackground(CREDIT_PAGE_COLOR)
+        item.setForeground(HIGHLIGHT_TEXT_COLOR)
+
+    def _on_credit_scan_ready(self, book: CbzBook, scan) -> None:
+        try:
+            row = self.books.index(book)
+        except ValueError:
+            return
+        if self._credit_scanner.get_cached(book, self._size_source.get(book)) is scan:
+            self._set_credit_cell(row, book, scan)
+
+    def _refresh_all_credit_cells(self) -> None:
+        """After learning/forgetting a page: re-check every row from the
+        cached scans -- no rescan needed (see __init__)."""
+        for row, book in enumerate(self.books):
+            scan = self._credit_scanner.get_cached(book, self._size_source.get(book))
+            if scan is not None:
+                self._set_credit_cell(row, book, scan)
 
     def _set_size_cell(self, row: int, book: CbzBook, stats: PageSizeStats) -> None:
         """Fills the Size cell: typical single-page width, colored by
@@ -1100,6 +1165,8 @@ class MainWindow(QMainWindow):
 
         if key == "size":
             self._ensure_page_sizes(self.books)
+        elif key == "credit":
+            self._ensure_credit_scans(self.books)
         self.books.sort(key=lambda book: self._sort_key_for(book, key), reverse=not self._sort_ascending)
         self._rebuild_table()
 
@@ -1130,6 +1197,9 @@ class MainWindow(QMainWindow):
         elif key == "size":
             stats = self._page_sizes.get_cached(book, self._size_source.get(book))
             raw = stats.representative_width if stats is not None else None
+        elif key == "credit":
+            matches = self._credit_matches_for(book)
+            raw = len(matches) if matches is not None else None
         elif key == "filesize":
             raw = _file_size_bytes(book.path)
         elif key == "status":
@@ -1221,6 +1291,11 @@ class MainWindow(QMainWindow):
 
     def _request_page_sizes(self, row: int, book: CbzBook, source) -> None:
         self._size_source[book] = source
+        credit_scan = self._credit_scanner.get_cached(book, source)
+        if credit_scan is None:
+            self._credit_scanner.request(book, source)
+        else:
+            self._set_credit_cell(row, book, credit_scan)
         cached = self._page_sizes.get_cached(book, source)
         if cached is not None:
             item = self.table.item(row, self._col_index["size"])
@@ -1884,6 +1959,144 @@ class MainWindow(QMainWindow):
             if self._selected_rows == [row]:
                 self._show_book_in_panel(book, f"{book.actual_page_count} page(s)")
         self._update_status()
+
+    # ------------------------------------------------------------------
+    # Scanner credit pages (core/credit_pages.py)
+    # ------------------------------------------------------------------
+
+    def _ensure_credit_scans(self, books: list[CbzBook]) -> None:
+        """Fingerprints every book in `books` not scanned yet, under a
+        progress dialog (sorting by the column, or the batch removal,
+        needs all of them -- not only the visible rows)."""
+        def _step(book: CbzBook, _index: int) -> None:
+            if book.load_error or book.needs_conversion or not book.first_page_name:
+                return
+            try:
+                source = (book.path, os.path.getmtime(book.path))
+            except OSError:
+                return
+            self._size_source[book] = source
+            self._credit_scanner.scan_now(book, source)
+
+        pending = [b for b in books if self._credit_scanner.get_cached(b, self._size_source.get(b)) is None]
+        run_with_progress(
+            self, pending, _step, "Checking for credit pages...", threshold=LOAD_PROGRESS_THRESHOLD,
+            cancellable=False, label_for=lambda book: f"Checking: {os.path.basename(book.path)}",
+        )
+
+    def open_credit_pages_dialog(self, book: CbzBook) -> None:
+        """Right-click > Credit Pages...: this book's first/last pages as
+        thumbnails; ticked ones are learned and removed."""
+        from gui.credit_pages_dialogs import CreditPagesDialog
+
+        self._commit_current_edits()
+        if book.dirty:
+            QMessageBox.information(
+                self, "Credit Pages", "This file has unsaved changes -- save it first, then remove pages."
+            )
+            return
+        candidates = call_in_background(scan_book, book.path, list(book.page_names), True)
+        dialog = CreditPagesDialog(os.path.basename(book.path), candidates, self._known_credits, self)
+        if dialog.exec() != dialog.DialogCode.Accepted:
+            return
+        ticked = dialog.ticked()
+        if not ticked:
+            return
+        for candidate in ticked:
+            if candidate.hash is not None:
+                self._known_credits.add(candidate.hash, candidate.thumbnail, candidate.name)
+        self._remove_pages([(book, [c.name for c in ticked])])
+        self._refresh_all_credit_cells()
+
+    def open_remove_credit_pages_dialog(self) -> None:
+        """Operations > Remove Credit Pages...: finds every learned credit
+        page in the selected files (or all), for review, then removes the
+        ticked ones."""
+        from gui.credit_pages_dialogs import RemoveCreditPagesDialog
+
+        self._commit_current_edits()
+        if not self._known_credits.pages:
+            QMessageBox.information(
+                self, "Remove Credit Pages",
+                "No credit pages have been learned yet. Right-click a file whose credit page "
+                "you can see, choose Credit Pages..., tick it and remove it -- from then on the "
+                "same page is found in every file.",
+            )
+            return
+        target_books = self._target_books()
+        unsaved = [b for b in target_books if b.dirty]
+        target_books = [b for b in target_books if not b.dirty]
+        self._ensure_credit_scans(target_books)
+
+        with_matches = [b for b in target_books if self._credit_matches_for(b)]
+        found = []
+
+        def _step(book: CbzBook, _index: int) -> None:
+            # Thumbnails only for the books that need showing.
+            for candidate in credit_matches(scan_book(book.path, list(book.page_names), True), self._known_credits):
+                found.append((book, os.path.basename(book.path), candidate))
+
+        run_with_progress(self, with_matches, _step, "Preparing previews...", threshold=LOAD_PROGRESS_THRESHOLD, cancellable=False)
+        skipped = f"{len(unsaved)} file(s) with unsaved changes were skipped -- save them first." if unsaved else ""
+        if not found:
+            QMessageBox.information(
+                self, "Remove Credit Pages",
+                f"No known credit pages found in {len(target_books)} file(s)." + (f"\n\n{skipped}" if skipped else ""),
+            )
+            return
+        dialog = RemoveCreditPagesDialog(found, skipped, self)
+        if dialog.exec() != dialog.DialogCode.Accepted:
+            return
+        by_book: dict[int, tuple[CbzBook, list[str]]] = {}
+        for book, _label, candidate in dialog.ticked():
+            by_book.setdefault(id(book), (book, []))[1].append(candidate.name)
+        self._remove_pages(list(by_book.values()))
+
+    def _remove_pages(self, work: list[tuple[CbzBook, list[str]]]) -> None:
+        """Removes pages from each book (originals to the Recycle Bin)
+        and refreshes their rows."""
+        errors: list[str] = []
+        removed_total = 0
+        size_before = size_after = 0
+
+        def _step(entry, _index: int) -> None:
+            nonlocal removed_total, size_before, size_after
+            book, names = entry
+            before = _file_size_bytes(book.path) or 0
+            try:
+                removed_total += book.remove_pages(names, dispose_original=move_to_trash)
+            except (CbzError, TrashError) as exc:
+                errors.append(f"{os.path.basename(book.path)}: {exc}")
+                return
+            size_before += before
+            size_after += _file_size_bytes(book.path) or 0
+            self._size_source.pop(book)
+            row = self.books.index(book)
+            self._refresh_table_row(row, book)
+            if self._selected_rows == [row]:
+                self._show_book_in_panel(book, f"{book.actual_page_count} page(s)")
+
+        run_with_progress(
+            self, work, _step, "Removing credit pages...", threshold=1,
+            label_for=lambda entry: f"Rewriting: {os.path.basename(entry[0].path)}",
+        )
+        if errors:
+            from redactor_common.core.error_summary import summarize_errors
+            QMessageBox.warning(self, "Some Files Failed", summarize_errors(errors))
+        self._visible_rows.schedule()
+        self._update_status()
+        if removed_total:
+            saved_mb = (size_before - size_after) / (1024 * 1024)
+            self.statusBar().showMessage(
+                f"Removed {removed_total} credit page(s) from {len(work) - len(errors)} file(s), "
+                f"{saved_mb:.1f} MB smaller. Originals are in the Recycle Bin.", 10000,
+            )
+
+    def open_known_credit_pages_dialog(self) -> None:
+        from gui.credit_pages_dialogs import KnownCreditPagesDialog
+
+        KnownCreditPagesDialog(self._known_credits, self).exec()
+        self._refresh_all_credit_cells()
 
     # ------------------------------------------------------------------
     # Import

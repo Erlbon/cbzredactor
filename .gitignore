@@ -14,3 +14,6 @@ cbzredactor_settings.ini
 # Written next to the exe on an unhandled exception -- per-machine
 # diagnostic output, not something to ship in the repo.
 cbzredactor_crash.log
+
+# Learned scanner credit pages (fingerprints + thumbnails) -- per-user data.
+cbzredactor_credit_pages.json

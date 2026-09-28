@@ -129,6 +129,12 @@ def save_gcd_account(username: str, password: str) -> None:
     settings.sync()
 
 
+def credit_pages_path() -> str:
+    """Learned scanner credit pages (core/credit_pages.py) -- their own
+    JSON file next to the settings, since each carries a thumbnail."""
+    return os.path.join(base_dir(), "cbzredactor_credit_pages.json")
+
+
 _GCD_LOCAL_DB_KEY = "gcd/local_database"
 
 
