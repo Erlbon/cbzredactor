@@ -12,6 +12,11 @@ lookup instead of seconds, no hourly limit, works offline, and credits
 come as structured per-creator rows instead of free text. No cover
 images (the dump holds none), so the "Found" cover stays empty.
 
+The generic machinery -- read-only opening, the in-memory name index,
+chunked queries, the session cache -- is redactor_common's
+core/local_db.py (promoted from this module 2026-09-28). What's here is
+GCD's schema: the queries, the ranking, and the mapping to ComicInfo.
+
 Two things make it fast without ever writing to the user's file:
 
 1. Series names are matched through an in-memory full-text index
@@ -39,12 +44,17 @@ often have no credit rows, only free-text fields on gcd_story
 
 from __future__ import annotations
 
-import os
 import re
-import sqlite3
-import threading
 from dataclasses import dataclass
 from typing import Optional
+
+from redactor_common.core.local_db import (
+    LocalDatabase,
+    LocalDatabaseError,
+    normalize_words,
+    open_cached,
+    year_gap,
+)
 
 from core.gcd_lookup import (
     GcdIssueDetails,
@@ -74,16 +84,13 @@ _ROLE_WORDS = [
 _PAINTING_FIELDS = ("penciller", "inker", "colorist")
 
 
-class GcdLocalError(Exception):
+class GcdLocalError(LocalDatabaseError):
     """The local GCD database file is missing, unreadable or not a GCD dump."""
 
 
-def normalize_name(name: str) -> str:
-    """Lower-case words only: punctuation and "&"/"and" differences
-    removed, so "G.I. Joe - A Real American Hero" and "G.I. Joe: A Real
-    American Hero" compare equal."""
-    text = (name or "").casefold().replace("&", " and ")
-    return re.sub(r"[^0-9a-z]+", " ", text).strip()
+# Punctuation-insensitive name comparison -- redactor_common's, kept
+# under this module's own name for its callers.
+normalize_name = normalize_words
 
 
 def _normalize_number(number: str) -> str:
@@ -119,64 +126,29 @@ class LocalCandidate:
         return " ".join(bits)
 
 
-class GcdLocalDatabase:
-    """One opened dump. Thread-safe for this app's use: lookups run on
-    worker threads (redactor_common's call_in_background), one at a
-    time, so a single connection guarded by a lock is enough."""
+class GcdLocalDatabase(LocalDatabase):
+    """One opened GCD dump (read-only; see redactor_common's LocalDatabase
+    for the connection, locking and error handling)."""
 
     def __init__(self, path: str):
-        if not path or not os.path.isfile(path):
-            raise GcdLocalError(f"GCD database file not found: {path or '(not set)'}")
-        self.path = path
-        try:
-            self._con = sqlite3.connect(f"file:{path}?mode=ro", uri=True, check_same_thread=False)
-            tables = {r[0] for r in self._con.execute("select name from sqlite_master where type='table'")}
-        except sqlite3.DatabaseError as exc:
-            raise GcdLocalError(f"Not a readable SQLite database: {exc}") from exc
-        missing = _REQUIRED_TABLES - tables
-        if missing:
-            raise GcdLocalError(
-                "This doesn't look like a GCD SQLite dump (missing tables: " + ", ".join(sorted(missing)) + ")."
-            )
-        self._lock = threading.Lock()
-        self._names: Optional[sqlite3.Connection] = None
-
-    def close(self) -> None:
-        self._con.close()
-        if self._names is not None:
-            self._names.close()
-
-    # ------------------------------------------------------------------
+        super().__init__(path, _REQUIRED_TABLES, kind="a GCD SQLite dump", error_cls=GcdLocalError)
 
     def summary(self) -> dict:
         """Counts and the newest change date, for the Settings dialog."""
-        with self._lock:
-            series = self._con.execute("select count(*) from gcd_series where deleted = 0").fetchone()[0]
-            issues = self._con.execute("select count(*) from gcd_issue where +deleted = 0").fetchone()[0]
-            newest = self._con.execute("select max(modified) from gcd_issue").fetchone()[0] or ""
+        series = self.query_one("select count(*) from gcd_series where deleted = 0")[0]
+        issues = self.query_one("select count(*) from gcd_issue where +deleted = 0")[0]
+        newest = self.query_one("select max(modified) from gcd_issue")[0] or ""
         return {"series": series, "issues": issues, "newest": str(newest)[:10]}
 
-    def _name_index(self) -> sqlite3.Connection:
-        """In-memory FTS5 index of every live series' normalized name,
-        built once per session (about 1.5 s for ~230k series)."""
-        if self._names is None:
-            names = sqlite3.connect(":memory:", check_same_thread=False)
-            names.execute("create virtual table names using fts5(norm, series_id unindexed, tokenize='unicode61')")
-            names.executemany(
-                "insert into names(norm, series_id) values (?, ?)",
-                ((normalize_name(name), sid) for sid, name in self._con.execute(
-                    "select id, name from gcd_series where deleted = 0"
-                )),
-            )
-            names.commit()
-            self._names = names
-        return self._names
+    def _series_index(self):
+        """Every live series name, indexed in memory on first use (about
+        1.5 s for ~230k series), kept for the session."""
+        return self.name_index("series", "select id, name from gcd_series where deleted = 0")
 
     def prepare(self) -> None:
         """Builds the name index now (e.g. behind a progress dialog)
         instead of on the first search."""
-        with self._lock:
-            self._name_index()
+        self._series_index()
 
     # ------------------------------------------------------------------
 
@@ -192,35 +164,29 @@ class GcdLocalDatabase:
         `year`; English editions ahead of translated reprints of the
         same title; numbered ahead of "[nn]"; then the series with more
         issues. Variant-cover records are skipped."""
-        words = normalize_name(series).split()
-        wanted = _normalize_number(number)
-        if not words:
+        if not normalize_name(series):
             return []
+        wanted = _normalize_number(number)
         numbers = [wanted, *(wanted.zfill(width) for width in (2, 3, 4))] if wanted else []
         if wanted in ("", "1"):
             numbers.append(NO_NUMBER)
         numbers = list(dict.fromkeys(numbers))
-        query = " ".join(f'"{w}"' for w in words)
-        with self._lock:
-            # No LIMIT: a common word like "Batman" matches thousands of
-            # series, and the right one must not be cut off.
-            series_ids = [r[0] for r in self._name_index().execute(
-                "select series_id from names where names match ?", (query,)
-            )]
-            rows = []
-            for start in range(0, len(series_ids), 5000):  # stay under SQLite's variable limit
-                chunk = series_ids[start:start + 5000]
-                rows += self._con.execute(
-                    f"""select i.id, s.id, s.name, s.year_began, s.issue_count, p.name, i.number, i.key_date, l.code
-                        from gcd_issue i
-                        join gcd_series s on s.id = i.series_id
-                        left join gcd_publisher p on p.id = s.publisher_id
-                        left join stddata_language l on l.id = s.language_id
-                        where i.series_id in ({",".join("?" * len(chunk))})
-                          and +i.number in ({",".join("?" * len(numbers))})
-                          and +i.deleted = 0 and i.variant_of_id is null""",
-                    [*chunk, *numbers],
-                ).fetchall()
+        # Every series whose name contains all the words -- no limit: a
+        # common word like "Batman" matches thousands of series, and the
+        # right one must not be cut off (query_in chunks the id list).
+        series_ids = self._series_index().match(series)
+        rows = self.query_in(
+            f"""select i.id, s.id, s.name, s.year_began, s.issue_count, p.name, i.number, i.key_date, l.code
+                from gcd_issue i
+                join gcd_series s on s.id = i.series_id
+                left join gcd_publisher p on p.id = s.publisher_id
+                left join stddata_language l on l.id = s.language_id
+                where i.series_id in ({{ids}})
+                  and +i.number in ({",".join("?" * len(numbers))})
+                  and +i.deleted = 0 and i.variant_of_id is null""",
+            series_ids,
+            after=numbers,
+        ) if series_ids else []
 
         wanted_name = normalize_name(series)
         candidates = [
@@ -232,14 +198,11 @@ class GcdLocalDatabase:
             for r in rows
         ]
 
-        def gap(a, b) -> int:
-            return abs(int(a) - int(b)) if str(a).isdigit() and str(b).isdigit() else 9999
-
         def rank(c: LocalCandidate):
             return (
                 not c.exact_name,
-                gap(c.series_year, series_year) if series_year else 0,
-                gap(c.key_date[:4], year) if year else 0,
+                year_gap(c.series_year, series_year) if series_year else 0,
+                year_gap(c.key_date[:4], year) if year else 0,
                 c.language not in ("en", ""),
                 c.number == NO_NUMBER,
                 -c.issue_count,
@@ -252,31 +215,31 @@ class GcdLocalDatabase:
     def details(self, issue_id: int) -> GcdIssueDetails:
         """ComicInfo-shaped details for one issue (same shape as the
         online lookup's, so the GUI treats both alike)."""
-        with self._lock:
-            issue = self._con.execute(
+        with self.lock:
+            issue = self.query_one(
                 """select i.number, i.key_date, i.title, i.editing, s.name, p.name, l.code
                    from gcd_issue i join gcd_series s on s.id = i.series_id
                    left join gcd_publisher p on p.id = s.publisher_id
                    left join stddata_language l on l.id = s.language_id
                    where i.id = ?""",
                 (issue_id,),
-            ).fetchone()
+            )
             if issue is None:
                 raise GcdLocalError(f"Issue {issue_id} not found in the local database.")
-            stories = self._con.execute(
+            stories = self.query(
                 """select st.id, st.title, st.genre, st.characters, st.synopsis,
                           st.script, st.pencils, st.inks, st.colors, st.letters, st.editing
                    from gcd_story st
                    where st.issue_id = ? and +st.type_id = ? and +st.deleted = 0
                    order by st.sequence_number""",
                 (issue_id, COMIC_STORY_TYPE_ID),
-            ).fetchall()
+            )
             story_ids = [s[0] for s in stories]
             credit_rows = []
             character_rows = []
             if story_ids:
                 marks = ",".join("?" * len(story_ids))
-                credit_rows = self._con.execute(
+                credit_rows = self.query(
                     f"""select sc.story_id, ct.name, cnd.name
                         from gcd_story_credit sc
                         join gcd_credit_type ct on ct.id = sc.credit_type_id
@@ -284,22 +247,22 @@ class GcdLocalDatabase:
                         where sc.story_id in ({marks}) and +sc.deleted = 0
                         order by sc.id""",
                     story_ids,
-                ).fetchall()
-                character_rows = self._con.execute(
+                )
+                character_rows = self.query(
                     # character_id points at gcd_character_name_detail
                     # (the name as used in that story), not gcd_character.
                     f"""select distinct c.name
                         from gcd_story_character sch join gcd_character_name_detail c on c.id = sch.character_id
                         where sch.story_id in ({marks}) and +sch.deleted = 0""",
                     story_ids,
-                ).fetchall()
-            issue_editors = self._con.execute(
+                )
+            issue_editors = self.query(
                 """select cnd.name from gcd_issue_credit ic
                    join gcd_credit_type ct on ct.id = ic.credit_type_id
                    join gcd_creator_name_detail cnd on cnd.id = ic.creator_id
                    where ic.issue_id = ? and +ic.deleted = 0 and ct.name = 'editing'""",
                 (issue_id,),
-            ).fetchall()
+            )
 
         number, key_date, issue_title, issue_editing, series_name, publisher, language = issue
         credits = _collect_credits(stories, credit_rows)
@@ -367,17 +330,7 @@ def _fields_for_role(role: str) -> list[str]:
     return [field for word, field in _ROLE_WORDS if word in role]
 
 
-# One opened database per path for the whole session, so the name index
-# is only ever built once.
-_open: dict[str, GcdLocalDatabase] = {}
-_open_lock = threading.Lock()
-
-
 def open_database(path: str) -> GcdLocalDatabase:
-    key = os.path.normcase(os.path.abspath(path)) if path else ""
-    with _open_lock:
-        db = _open.get(key)
-        if db is None:
-            db = GcdLocalDatabase(path)
-            _open[key] = db
-        return db
+    """The session's opened dump for `path` -- opened once, so the name
+    index is built once (redactor_common's open_cached)."""
+    return open_cached(path, GcdLocalDatabase)

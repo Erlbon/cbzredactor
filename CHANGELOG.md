@@ -1,5 +1,16 @@
 # Changelog
 
+## 2026-09-28#12 -- Local GCD lookup on the shared local-database layer
+
+No visible change. The generic parts of the local GCD lookup -- opening
+the file read-only, the in-memory name index, chunked queries, the
+session cache, and the Settings dialog -- moved to redactor_common
+(2026-09-28-02, core/local_db.py and gui/local_db_settings_dialog.py),
+so other sources and apps can reuse them: a converted ComicRack
+library, a Calibre library, or other dumps. What stays here is GCD's
+own schema, ranking and ComicInfo mapping. Same results and speed on
+the real 2026-09-15 dump.
+
 ## 2026-09-28#11 -- Cover thumbnails first
 
 Cover thumbnails in the file list no longer wait behind the Size and
