@@ -157,6 +157,13 @@ understands that this app now supports too).
   single pages, so double-page spreads and one oversized cover don't
   skew it; hover for the width breakdown. Measured from image headers
   only, in the background. A **File Size** column is available too.
+- **Operations > Tag Low-Res Scans** adds a `Low-res scan` entry to the
+  ComicInfo **Tags** field of every low-res (yellow) book, so they can
+  be found and replaced with better copies later (your comic server can
+  filter on it too). Running it again removes the tag from books that
+  are no longer low-res. Other tags are kept, `ScanInformation` (the
+  scan group's credit) is never touched; undoable, written on Save.
+  There's deliberately no upscaling: plain resampling can't add detail.
 - `Import > Look Up via Comic Vine...` searches [Comic Vine](https://comicvine.gamespot.com/api/)
   by Series + Number (guessed from the filename when Series is blank)
   and offers to fill in series, issue title, summary, date, full

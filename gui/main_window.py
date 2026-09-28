@@ -77,6 +77,7 @@ from core.cbz_file import CbzBook, CbzError, path_needs_conversion
 from core.foreign_archive_convert import relabel_mislabeled_cbz
 from core.trash import TrashError, move_to_trash
 from core.page_dimensions import SIZE_LOW, SIZE_OK, SIZE_OVERSIZED, PageSizeStats
+from core.scan_quality_tag import LOW_RES_TAG, add_tag, has_tag, remove_tag
 from core.version import APP_NAME, APP_REPO_URL, APP_VERSION, RELEASE_LABEL
 from gui import app_settings
 from gui.bedetheque_lookup_dialog import BedethequeLookupDialog
@@ -419,6 +420,7 @@ class MainWindow(QMainWindow):
                 MenuAction("auto_numbering", "Auto-&Numbering...", self.open_auto_numbering_dialog),
                 Separator(),
                 MenuAction("resize_images", "Resi&ze Images...", self.open_resize_images_dialog),
+                MenuAction("tag_low_res", "&Tag Low-Res Scans", self.tag_low_res_scans),
                 Separator(),
                 MenuAction("save_all", "Save &All Changed", self.save_all_changed, shortcut=shortcuts.SAVE_ALL),
                 Separator(),
@@ -1761,6 +1763,64 @@ class MainWindow(QMainWindow):
         if export_mode and exported_paths:
             self._load_paths(exported_paths)
         self._visible_rows.schedule()
+        self._update_status()
+
+    def tag_low_res_scans(self) -> None:
+        """Adds the "Low-res scan" tag (core/scan_quality_tag.py) to
+        every targeted book whose Size is low-res (yellow), and removes
+        it from any that carry it but no longer are -- e.g. a copy since
+        replaced by a better scan -- so the tag stays accurate when run
+        again. A normal metadata edit: undoable, written on Save."""
+        self._commit_current_edits()
+        target_books = self._target_books()
+        if not target_books:
+            QMessageBox.information(self, "No Files", "Load some files first (or select the ones to check).")
+            return
+
+        sizes = self._ensure_page_sizes(target_books)
+        to_add, to_remove = [], []
+        for book in target_books:
+            stats = sizes.get(id(book))
+            if stats is None or stats.category is None:
+                continue  # couldn't measure -- leave its tags alone
+            tagged = has_tag(book.metadata.tags)
+            if stats.category == SIZE_LOW and not tagged:
+                to_add.append(book)
+            elif stats.category != SIZE_LOW and tagged:
+                to_remove.append(book)
+
+        if not to_add and not to_remove:
+            QMessageBox.information(
+                self, "Tag Low-Res Scans",
+                f'Nothing to change: every low-res file already has the "{LOW_RES_TAG}" tag.',
+            )
+            return
+
+        lines = []
+        if to_add:
+            lines.append(f'Add "{LOW_RES_TAG}" to {len(to_add)} low-res file(s) (under 1000px wide).')
+        if to_remove:
+            lines.append(f"Remove it from {len(to_remove)} file(s) that are no longer low-res.")
+        reply = QMessageBox.question(
+            self, "Tag Low-Res Scans",
+            "\n".join(lines) + "\n\nOther tags are kept. Written on Save; can be undone.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.Yes,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
+        self._push_undo("Tag Low-Res Scans", to_add + to_remove)
+        for book in to_add:
+            book.metadata.tags = add_tag(book.metadata.tags)
+        for book in to_remove:
+            book.metadata.tags = remove_tag(book.metadata.tags)
+        for book in to_add + to_remove:
+            book.dirty = True
+            row = self.books.index(book)
+            self._refresh_table_row(row, book)
+            if self._selected_rows == [row]:
+                self._show_book_in_panel(book, f"{book.actual_page_count} page(s)")
         self._update_status()
 
     # ------------------------------------------------------------------

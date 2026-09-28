@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026-09-28#04 -- Tag Low-Res Scans
+
+- **Operations > Tag Low-Res Scans**: adds `Low-res scan` to the Tags
+  field of every low-res (yellow, under 1000px) book in the selection
+  (or the whole list), so low-quality copies can be found and replaced
+  later -- here via the Tags column, or in a comic server. Running it
+  again removes the tag from books that are no longer low-res (e.g.
+  replaced by a better scan). Other tags are kept and ScanInformation
+  is never touched. Undoable; written on Save.
+
 ## 2026-09-28#03 -- Settings > Converting to CBZ...
 
 - **When loading CBR/CBT/CB7 (or mislabeled) files**, choose:
