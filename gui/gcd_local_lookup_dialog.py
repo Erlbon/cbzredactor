@@ -14,6 +14,10 @@ under "Other Matches"; picking one is instant.
 
 No covers: the dump holds none, so the "Found" side stays empty.
 Compare the credits/date instead.
+
+The same dialog searches a ComicRack library converted to GCD's layout
+(core/comicrack_import.py) -- `database.is_comicrack` switches the
+wording.
 """
 
 from __future__ import annotations
@@ -30,18 +34,24 @@ from core.scene_name import parse_filename
 class GcdLocalLookupDialog(LookupDialogBase):
     def __init__(self, books: list[CbzBook], database: GcdLocalDatabase, parent=None):
         self._db = database
+        if database.is_comicrack:
+            window_title = "Look Up via ComicRack Library"
+            source = "your ComicRack library"
+        else:
+            window_title = "Look Up via GCD (Local Database)"
+            source = "your local copy of the Grand Comics Database"
         super().__init__(
             books,
             parent,
-            window_title="Look Up via GCD (Local Database)",
+            window_title=window_title,
             info_text=(
-                f"Searching your local copy of the Grand Comics Database for {len(books)} "
+                f"Searching {source} for {len(books)} "
                 "file(s), by Series + Number (+ year), from ComicInfo or the filename. "
                 "Other matching issues are listed under Other Matches. The local database "
                 "has no cover images -- check the credits and date before trusting a match. "
                 "Untick anything you don't trust, then Apply."
             ),
-            search_label="Searching the local GCD database…",
+            search_label=f"Searching {source}…",
             item_label=lambda book: os.path.basename(book.path),
             search_one=self._search_one_book,
             query_fields=[("series", "Series"), ("number", "Number"), ("year", "Year"), ("series_year", "Series start year")],

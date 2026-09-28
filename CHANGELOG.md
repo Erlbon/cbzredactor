@@ -1,5 +1,24 @@
 # Changelog
 
+## 2026-09-28#13 -- Look up in your own ComicRack library
+
+- **Settings > ComicRack Library Database... > Build from ComicRack
+  Library...** converts a ComicRack library (its `ComicDb.xml`, plain or
+  zipped) into a local database with the same layout as the GCD dump:
+  series (Series + Volume + Publisher), issues, credits, characters,
+  summaries, and the Comic Vine link and ids. Several files of one issue
+  become one entry, taken from the best-tagged copy. File paths, sizes
+  and reading history are never copied. About 30-40 s for 234k books,
+  with a progress bar and a Cancel that really stops; a cancelled or
+  failed build leaves any earlier one untouched.
+- **Import > Look Up via ComicRack Library...**: the local lookup
+  against that database -- milliseconds per file, offline -- writing the
+  issue's own Web link (usually Comic Vine) instead of a GCD page.
+- Both local lookups: a blank issue number (common in scene filenames)
+  now also finds a #1, since one-shots are numbered #1 on Comic Vine and
+  often on GCD.
+- redactor_common 2026-09-28-03 (the shared dump importer).
+
 ## 2026-09-28#12 -- Local GCD lookup on the shared local-database layer
 
 No visible change. The generic parts of the local GCD lookup -- opening

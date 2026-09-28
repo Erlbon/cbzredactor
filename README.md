@@ -246,6 +246,16 @@ understands that this app now supports too).
   editions rank ahead of translated reprints, which are offered under
   Other Matches. No cover images (the dump has none). Never writes to
   the database file.
+- `Import > Look Up via ComicRack Library...` -- the same local lookup
+  against **your own ComicRack library**: **Settings > ComicRack
+  Library Database... > Build from ComicRack Library...** converts
+  ComicRack's `ComicDb.xml` (plain or zipped) into a database with the
+  GCD dump's table layout -- about 30-40 s for a 234k-book library,
+  cancellable. Duplicate files of one issue become one entry (the best
+  tagged copy); credits, characters, summaries and the Comic Vine link
+  come along, file paths and reading history never do. A blank issue
+  number now also finds a #1 (one-shots are #1 on Comic Vine), in this
+  lookup and the GCD one.
 - `Import > Look Up via Bedetheque...` -- same Series + Number
   search and review-then-Apply flow, against [Bedetheque](https://www.bedetheque.com/),
   the reference database for French-language "bande dessinée" (BD).

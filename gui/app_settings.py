@@ -147,6 +147,24 @@ def save_gcd_local_database(path: str) -> None:
     _settings().setValue(_GCD_LOCAL_DB_KEY, path or "")
 
 
+_COMICRACK_DB_KEY = "comicrack/library_database"
+
+
+def load_comicrack_database() -> str:
+    """Path to the user's ComicRack library converted to GCD's layout
+    (core/comicrack_import.py), or ""."""
+    return str(_settings().value(_COMICRACK_DB_KEY, ""))
+
+
+def save_comicrack_database(path: str) -> None:
+    _settings().setValue(_COMICRACK_DB_KEY, path or "")
+
+
+def default_comicrack_database_path() -> str:
+    """Where a new conversion is suggested to go: next to the settings."""
+    return os.path.join(base_dir(), "comicrack_library.db")
+
+
 def load_last_directory() -> str:
     """Returns "" if nothing's been remembered yet, or the remembered
     directory no longer exists (e.g. a removable drive that's since

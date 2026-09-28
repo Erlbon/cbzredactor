@@ -33,6 +33,11 @@ Two things make it fast without ever writing to the user's file:
    The "+column" form (unary plus) keeps a column out of index
    selection, so only the selective index is left to use.
 
+The same class also reads a ComicRack library converted to GCD's layout
+(core/comicrack_import.py): it recognises one by the import-info table
+the converter writes, and then links each issue to its own Web link
+(usually Comic Vine) instead of a comics.org page that doesn't exist.
+
 Schema notes (verified against the 2026-09-15 dump): gcd_series ->
 gcd_issue (series_id) -> gcd_story (issue_id; type_id 19 = "comic
 story") -> gcd_story_credit (story_id; creator_id is a
@@ -48,6 +53,7 @@ import re
 from dataclasses import dataclass
 from typing import Optional
 
+from redactor_common.core.dump_import import read_import_info
 from redactor_common.core.local_db import (
     LocalDatabase,
     LocalDatabaseError,
@@ -132,12 +138,19 @@ class GcdLocalDatabase(LocalDatabase):
 
     def __init__(self, path: str):
         super().__init__(path, _REQUIRED_TABLES, kind="a GCD SQLite dump", error_cls=GcdLocalError)
+        with self.lock:
+            self.import_info = read_import_info(self._con)
+        # A ComicRack library converted by core/comicrack_import.py.
+        self.is_comicrack = self.import_info.get("source") == "ComicRack"
 
     def summary(self) -> dict:
         """Counts and the newest change date, for the Settings dialog."""
         series = self.query_one("select count(*) from gcd_series where deleted = 0")[0]
         issues = self.query_one("select count(*) from gcd_issue where +deleted = 0")[0]
-        newest = self.query_one("select max(modified) from gcd_issue")[0] or ""
+        if self.import_info:
+            newest = self.import_info.get("built", "")
+        else:
+            newest = self.query_one("select max(modified) from gcd_issue")[0] or ""
         return {"series": series, "issues": issues, "newest": str(newest)[:10]}
 
     def _series_index(self):
@@ -156,8 +169,8 @@ class GcdLocalDatabase(LocalDatabase):
         self, series: str, number: str, year: str = "", series_year: str = "", limit: int = 8
     ) -> list[LocalCandidate]:
         """Issues numbered `number` in every series whose name contains
-        all of `series`'s words. A blank `number` or "1" also matches an
-        unnumbered issue (GCD's "[nn]", typical for one-shots).
+        all of `series`'s words. A blank `number` means "1"; "1" also
+        matches an unnumbered issue (GCD's "[nn]", typical for one-shots).
 
         Ranked by: exact series name; the series' start year matching
         `series_year` ("Batman (2016)"); the issue's year closest to
@@ -166,9 +179,12 @@ class GcdLocalDatabase(LocalDatabase):
         issues. Variant-cover records are skipped."""
         if not normalize_name(series):
             return []
-        wanted = _normalize_number(number)
-        numbers = [wanted, *(wanted.zfill(width) for width in (2, 3, 4))] if wanted else []
-        if wanted in ("", "1"):
+        # A blank number is searched as "1" as well as "[nn]": a one-shot
+        # is #1 on Comic Vine (and so in a ComicRack library) and often in
+        # GCD too, while a scene filename rarely carries its number.
+        wanted = _normalize_number(number) or "1"
+        numbers = [wanted, *(wanted.zfill(width) for width in (2, 3, 4))]
+        if wanted == "1":
             numbers.append(NO_NUMBER)
         numbers = list(dict.fromkeys(numbers))
         # Every series whose name contains all the words -- no limit: a
@@ -296,10 +312,17 @@ class GcdLocalDatabase(LocalDatabase):
             genre=", ".join(_dedupe(genres)),
             characters=", ".join(_dedupe(characters)),
             publisher=publisher or "",
-            web=ISSUE_PAGE_URL.format(issue_id),
+            web=self._web_link(issue_id),
             language_iso=language or "",
         )
         return details
+
+
+    def _web_link(self, issue_id: int) -> str:
+        if not self.is_comicrack:
+            return ISSUE_PAGE_URL.format(issue_id)
+        row = self.query_one("select web from cr_issue where issue_id = ?", (issue_id,))
+        return (row[0] or "") if row else ""
 
 
 def _dedupe(items) -> list[str]:

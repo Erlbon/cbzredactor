@@ -425,6 +425,9 @@ class MainWindow(QMainWindow):
                 MenuAction(
                     "gcd_local_lookup", "Look Up via GCD (&Local Database)...", self.open_gcd_local_lookup_dialog
                 ),
+                MenuAction(
+                    "comicrack_lookup", "Look Up via Comic&Rack Library...", self.open_comicrack_lookup_dialog
+                ),
                 MenuAction("bedetheque_lookup", "Look Up via &Bedetheque...", self.open_bedetheque_lookup_dialog),
             ],
             "Operations": [
@@ -455,6 +458,9 @@ class MainWindow(QMainWindow):
                 MenuAction("known_credit_pages", "Known C&redit Pages...", self.open_known_credit_pages_dialog),
                 MenuAction("gcd_account", "&GCD Account...", self.open_gcd_account_dialog),
                 MenuAction("gcd_local_settings", "GCD &Local Database...", self.open_gcd_local_settings_dialog),
+                MenuAction(
+                    "comicrack_settings", "Comic&Rack Library Database...", self.open_comicrack_settings_dialog
+                ),
                 MenuAction("conversion_settings", "Converting to CB&Z...", self.open_conversion_settings_dialog),
                 Separator(),
                 MenuAction("column_settings", "Add/Remove &Columns...", self.open_column_settings_dialog),
@@ -2302,35 +2308,52 @@ class MainWindow(QMainWindow):
 
         GcdLocalSettingsDialog(self).exec()
 
+    def open_comicrack_settings_dialog(self) -> None:
+        from gui.comicrack_settings_dialog import ComicRackSettingsDialog
+
+        ComicRackSettingsDialog(self).exec()
+
     def open_gcd_local_lookup_dialog(self) -> None:
-        """Look Up via GCD (Local Database): needs the user's own
-        downloaded dump set in Settings first -- if it isn't, explain
-        and offer to open that dialog rather than just failing."""
+        self._open_local_lookup(
+            "GCD Local Database", app_settings.load_gcd_local_database, self.open_gcd_local_settings_dialog,
+            "No local GCD database is set up yet. It's a free download from the "
+            "Grand Comics Database (you need a comics.org account).\n\n"
+            "Open Settings > GCD Local Database... for instructions?",
+        )
+
+    def open_comicrack_lookup_dialog(self) -> None:
+        self._open_local_lookup(
+            "ComicRack Library Database", app_settings.load_comicrack_database, self.open_comicrack_settings_dialog,
+            "No ComicRack library has been converted yet -- it's built from ComicRack's "
+            "ComicDb.xml file.\n\nOpen Settings > ComicRack Library Database... to build it?",
+        )
+
+    def _open_local_lookup(self, name: str, load_path, open_settings, not_set_up: str) -> None:
+        """Look Up via a local database (GCD's dump or a converted ComicRack
+        library): needs its file set in Settings first -- if it isn't,
+        explain and offer to open that dialog rather than just failing."""
         from core.gcd_local import GcdLocalError, open_database
         from gui.gcd_local_lookup_dialog import GcdLocalLookupDialog
 
-        path = app_settings.load_gcd_local_database()
+        path = load_path()
         if not path:
             reply = QMessageBox.question(
-                self, "GCD Local Database",
-                "No local GCD database is set up yet. It's a free download from the "
-                "Grand Comics Database (you need a comics.org account).\n\n"
-                "Open Settings > GCD Local Database... for instructions?",
+                self, name, not_set_up,
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
                 QMessageBox.StandardButton.Yes,
             )
             if reply == QMessageBox.StandardButton.Yes:
-                self.open_gcd_local_settings_dialog()
-            path = app_settings.load_gcd_local_database()
+                open_settings()
+            path = load_path()
             if not path:
                 return
         try:
             database = open_database(path)
         except GcdLocalError as exc:
-            QMessageBox.warning(self, "GCD Local Database", f"{exc}\n\nCheck Settings > GCD Local Database...")
+            QMessageBox.warning(self, name, f"{exc}\n\nCheck Settings > {name}...")
             return
         self._run_lookup_dialog(
-            GcdLocalLookupDialog, "GCD local lookup",
+            GcdLocalLookupDialog, f"{name} lookup",
             factory=lambda books: GcdLocalLookupDialog(books, database, self),
         )
 
