@@ -105,6 +105,40 @@ def save_resize_jpeg_quality(quality: int) -> None:
     _settings().setValue(_RESIZE_JPEG_QUALITY_KEY, int(quality))
 
 
+# ------------------------------------------------------------------
+# Foreign/mislabeled archives on load (Settings > Converting to CBZ...)
+# ------------------------------------------------------------------
+
+FOREIGN_LOAD_UNCONVERTED = "unconverted"  # list read-only, convert later from the table
+FOREIGN_LOAD_CONVERT = "convert"  # convert during load, no prompt
+FOREIGN_LOAD_ASK = "ask"  # prompt once per batch
+_FOREIGN_LOAD_BEHAVIORS = (FOREIGN_LOAD_UNCONVERTED, FOREIGN_LOAD_CONVERT, FOREIGN_LOAD_ASK)
+_FOREIGN_LOAD_KEY = "conversion/on_load"
+_DELETE_ORIGINALS_KEY = "conversion/recycle_originals"
+
+
+def load_foreign_load_behavior() -> str:
+    """Defaults to FOREIGN_LOAD_UNCONVERTED: nothing is written or
+    removed until the user explicitly converts."""
+    value = str(_settings().value(_FOREIGN_LOAD_KEY, FOREIGN_LOAD_UNCONVERTED))
+    return value if value in _FOREIGN_LOAD_BEHAVIORS else FOREIGN_LOAD_UNCONVERTED
+
+
+def save_foreign_load_behavior(behavior: str) -> None:
+    if behavior in _FOREIGN_LOAD_BEHAVIORS:
+        _settings().setValue(_FOREIGN_LOAD_KEY, behavior)
+
+
+def load_recycle_originals() -> bool:
+    """Move originals to the Recycle Bin after a verified conversion.
+    Off by default."""
+    return _settings().value(_DELETE_ORIGINALS_KEY, False, type=bool)
+
+
+def save_recycle_originals(enabled: bool) -> None:
+    _settings().setValue(_DELETE_ORIGINALS_KEY, bool(enabled))
+
+
 def load_resize_max_height() -> int:
     return int(_settings().value(_RESIZE_MAX_HEIGHT_KEY, 0))
 

@@ -34,6 +34,7 @@ from PyQt6.QtWidgets import (
     QStatusBar,
     QTableWidget,
     QTableWidgetItem,
+    QVBoxLayout,
     QWidget,
 )
 
@@ -80,6 +81,7 @@ from core.version import APP_NAME, APP_REPO_URL, APP_VERSION, RELEASE_LABEL
 from gui import app_settings
 from gui.bedetheque_lookup_dialog import BedethequeLookupDialog
 from gui.comicvine_lookup_dialog import ComicVineLookupDialog
+from gui.conversion_settings_dialog import ConversionSettingsDialog
 from gui.gcd_lookup_dialog import GcdLookupDialog
 from gui.page_size_scanner import PageSizeScanner
 from gui.resize_dialog import ResizeImagesDialog
@@ -425,6 +427,7 @@ class MainWindow(QMainWindow):
             ],
             "Settings": [
                 MenuAction("comicvine_api_key", "Comic Vine API &Key...", self.change_comicvine_api_key),
+                MenuAction("conversion_settings", "Converting to CB&Z...", self.open_conversion_settings_dialog),
                 Separator(),
                 MenuAction("column_settings", "Add/Remove &Columns...", self.open_column_settings_dialog),
                 MenuAction("genre_settings", "Add/Remove &Genres...", self.open_genre_settings_dialog),
@@ -683,8 +686,19 @@ class MainWindow(QMainWindow):
             "Convert them now, or add them to the list unconverted and "
             "convert later from the table (right-click > Convert to CBZ)?"
         )
+        # Two options, so not QMessageBox.setCheckBox() (which takes one):
+        # the checkboxes go into the box's own grid, under the text.
+        options = QWidget()
+        options_layout = QVBoxLayout(options)
+        options_layout.setContentsMargins(0, 0, 0, 0)
         delete_checkbox = QCheckBox("Move the originals to the Recycle Bin after a successful conversion")
-        box.setCheckBox(delete_checkbox)
+        delete_checkbox.setChecked(app_settings.load_recycle_originals())
+        remember_checkbox = QCheckBox("Remember my choice (change it in Settings > Converting to CBZ...)")
+        remember_checkbox.setToolTip("Remembers Convert Now or Add Unconverted; Skip is never remembered.")
+        options_layout.addWidget(delete_checkbox)
+        options_layout.addWidget(remember_checkbox)
+        box.layout().addWidget(options, box.layout().rowCount(), 0, 1, box.layout().columnCount())
+
         convert_btn = box.addButton("Convert Now", QMessageBox.ButtonRole.AcceptRole)
         unconverted_btn = box.addButton("Add Unconverted", QMessageBox.ButtonRole.ActionRole)
         box.addButton("Skip", QMessageBox.ButtonRole.RejectRole)
@@ -692,10 +706,29 @@ class MainWindow(QMainWindow):
         box.exec()
         clicked = box.clickedButton()
         if clicked is convert_btn:
-            return FOREIGN_CONVERT, delete_checkbox.isChecked()
-        if clicked is unconverted_btn:
-            return FOREIGN_UNCONVERTED, False
-        return FOREIGN_SKIP, False
+            choice = FOREIGN_CONVERT
+        elif clicked is unconverted_btn:
+            choice = FOREIGN_UNCONVERTED
+        else:
+            return FOREIGN_SKIP, False
+
+        if remember_checkbox.isChecked():
+            app_settings.save_foreign_load_behavior(
+                app_settings.FOREIGN_LOAD_CONVERT if choice == FOREIGN_CONVERT else app_settings.FOREIGN_LOAD_UNCONVERTED
+            )
+            app_settings.save_recycle_originals(delete_checkbox.isChecked())
+        return choice, choice == FOREIGN_CONVERT and delete_checkbox.isChecked()
+
+    def _resolve_foreign_choice(self, paths: list[str]) -> tuple[str, bool]:
+        """What _load_paths() does with files needing conversion, per
+        Settings > Converting to CBZ...: list them unconverted (the
+        default), convert them without asking, or ask."""
+        behavior = app_settings.load_foreign_load_behavior()
+        if behavior == app_settings.FOREIGN_LOAD_ASK:
+            return self._prompt_convert_foreign_archives(paths)
+        if behavior == app_settings.FOREIGN_LOAD_CONVERT:
+            return FOREIGN_CONVERT, app_settings.load_recycle_originals()
+        return FOREIGN_UNCONVERTED, False
 
     def _convert_path(self, path: str, delete_original: bool, errors: list[str]) -> str | None:
         """Converts one file to a real .cbz (see core/foreign_archive_convert.py
@@ -724,7 +757,7 @@ class MainWindow(QMainWindow):
 
     def _load_paths(self, paths: list[str]) -> None:
         errors: list[str] = []
-        choice, should_delete = self._prompt_convert_foreign_archives(paths)
+        choice, should_delete = self._resolve_foreign_choice(paths)
 
         def _step(path: str, _index: int) -> None:
             resolved_path = path
@@ -1754,9 +1787,10 @@ class MainWindow(QMainWindow):
         if not paths:
             QMessageBox.information(self, "Nothing to Convert", "Those files are already real CBZ files.")
             return
-        choice, should_delete = self._prompt_convert_foreign_archives(paths)
-        if choice != FOREIGN_CONVERT:
-            return
+        # Picking files here already says "convert these" -- no prompt;
+        # the Recycle Bin choice comes from Settings like every other
+        # conversion.
+        should_delete = app_settings.load_recycle_originals()
 
         errors: list[str] = []
         converted: list[str] = []
@@ -1784,27 +1818,26 @@ class MainWindow(QMainWindow):
         books = [book for book in books if book.needs_conversion]
         if not books:
             return
+        recycle = app_settings.load_recycle_originals()
+        originals = (
+            "The originals will be moved to the Recycle Bin afterwards."
+            if recycle else "The originals will be kept next to the new .cbz files."
+        )
         reply = QMessageBox.question(
             self, "Convert to CBZ",
             f"Convert {len(books)} file(s) to CBZ?\n\n"
             "Each converted file is checked (it opens, and has as many pages "
-            "as the original) before anything else happens.",
+            f"as the original) before anything else happens. {originals}\n\n"
+            "(Change this in Settings > Converting to CBZ...)",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.Yes,
         )
         if reply != QMessageBox.StandardButton.Yes:
             return
-        self._convert_books(books, self._ask_delete_originals())
+        self._convert_books(books, recycle)
 
-    def _ask_delete_originals(self) -> bool:
-        reply = QMessageBox.question(
-            self, "Keep the Originals?",
-            "Move the original files to the Recycle Bin after a successful conversion?\n\n"
-            "(No keeps them next to the new .cbz files.)",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No,
-        )
-        return reply == QMessageBox.StandardButton.Yes
+    def open_conversion_settings_dialog(self) -> None:
+        ConversionSettingsDialog(self).exec()
 
     def _convert_books(self, books: list[CbzBook], delete_originals: bool) -> None:
         errors: list[str] = []

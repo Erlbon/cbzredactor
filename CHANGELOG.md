@@ -1,5 +1,20 @@
 # Changelog
 
+## 2026-09-28#03 -- Settings > Converting to CBZ...
+
+- **When loading CBR/CBT/CB7 (or mislabeled) files**, choose:
+  - **Add to the list unconverted** -- the new default. Nothing is
+    written or removed until you convert from the table.
+  - **Convert automatically** -- no prompt.
+  - **Ask each time** -- the Convert Now / Add Unconverted / Skip
+    prompt, which now has a **"Remember my choice"** box that saves
+    Convert Now or Add Unconverted as the setting (Skip is never
+    remembered).
+- **Move originals to the Recycle Bin after a successful conversion**
+  -- off by default, and now one setting for every conversion (load,
+  right-click > Convert to CBZ, Import > Convert to CBZ) instead of a
+  question each time.
+
 ## 2026-09-28#02 -- Ext column, convert from the table
 
 - **New Ext column** (shown by default): the file's extension, plus its

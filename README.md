@@ -267,13 +267,21 @@ its extension. A `.cbr` that's really a ZIP converts by a plain copy
 (no unpacking); a `.cbz` that's really a RAR/7z/tar is first renamed to
 its true extension, then converted normally.
 
-Loading files that need converting via **Load Files**/**Load Folder**
-asks once per batch: **Convert Now**, **Add Unconverted**, or **Skip**.
-"Add Unconverted" lists them as greyed, read-only rows (Status "Needs
-conversion") -- sort by Ext, then select and right-click > **Convert
-to CBZ** (or use **Import > Convert to CBZ**, which converts the
-selected unconverted rows, or all of them). Each row is replaced by
-its converted .cbz in place.
+What **Load Files**/**Load Folder** does with files that need
+converting is set in **Settings > Converting to CBZ...**:
+
+- **Add to the list unconverted** (the default) -- listed as greyed,
+  read-only rows (Status "Needs conversion"). Sort by Ext, then select
+  and right-click > **Convert to CBZ** (or use **Import > Convert to
+  CBZ**, which converts the selected unconverted rows, or all of them).
+  Each row is replaced by its converted .cbz in place.
+- **Convert automatically** -- converted while loading, no prompt.
+- **Ask each time** -- one prompt per load: **Convert Now**, **Add
+  Unconverted**, or **Skip**, with a "Remember my choice" box that
+  saves Convert Now / Add Unconverted as the setting.
+
+The same dialog has **Move originals to the Recycle Bin after a
+successful conversion** (off by default), used by every conversion.
 
 Every conversion is checked before anything else happens: the new
 .cbz must open, pass its CRC checks, and hold as many page images as

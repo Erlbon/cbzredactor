@@ -13,9 +13,10 @@ import sys
 import tarfile
 
 import pytest
-from PyQt6.QtWidgets import QApplication, QMessageBox
+from PyQt6.QtWidgets import QApplication, QCheckBox, QMessageBox
 
 from core.foreign_archive_convert import ForeignArchiveConversionError
+from gui import app_settings
 from gui.main_window import FOREIGN_CONVERT, FOREIGN_SKIP, FOREIGN_UNCONVERTED, MainWindow
 
 _app = QApplication.instance() or QApplication(sys.argv)
@@ -40,7 +41,20 @@ def _make_real_cbz(path, title="Native") -> None:
 
 
 @pytest.fixture
-def window(monkeypatch):
+def settings(monkeypatch):
+    """In-memory stand-in for the two conversion settings, so tests never
+    read or write the real cbzredactor_settings.ini. Starts at "ask" so
+    the tests that monkeypatch the prompt itself keep exercising it."""
+    store = {"behavior": app_settings.FOREIGN_LOAD_ASK, "recycle": False}
+    monkeypatch.setattr(app_settings, "load_foreign_load_behavior", lambda: store["behavior"])
+    monkeypatch.setattr(app_settings, "save_foreign_load_behavior", lambda v: store.__setitem__("behavior", v))
+    monkeypatch.setattr(app_settings, "load_recycle_originals", lambda: store["recycle"])
+    monkeypatch.setattr(app_settings, "save_recycle_originals", lambda v: store.__setitem__("recycle", v))
+    return store
+
+
+@pytest.fixture
+def window(monkeypatch, settings):
     # Never touch the real Recycle Bin from a test run.
     monkeypatch.setattr("gui.main_window.move_to_trash", lambda path: os.remove(path))
     return MainWindow()
@@ -124,13 +138,13 @@ def test_prompt_not_shown_at_all_for_an_all_cbz_batch(window, tmp_path, monkeypa
     assert len(window.books) == 1
 
 
-def test_convert_foreign_archives_dialog_respects_delete_option(window, tmp_path, monkeypatch):
+def test_convert_foreign_archives_dialog_respects_delete_option(window, settings, tmp_path, monkeypatch):
     cbt_path = tmp_path / "book.cbt"
     _make_cbt(cbt_path, {"page001.jpg": b"data"})
     monkeypatch.setattr(
         "gui.main_window.QFileDialog.getOpenFileNames", lambda *a, **k: ([str(cbt_path)], "")
     )
-    monkeypatch.setattr(window, "_prompt_convert_foreign_archives", lambda paths: (FOREIGN_CONVERT, True))
+    settings["recycle"] = True
     # The "Conversion Complete" QMessageBox.information() at the end of
     # the real dialog would otherwise block forever in a headless test
     # run, waiting for a click that never comes -- same class of issue
@@ -176,8 +190,7 @@ def test_convert_from_the_table_replaces_the_row_in_place(window, tmp_path, monk
     monkeypatch.setattr(window, "_prompt_convert_foreign_archives", lambda paths: (FOREIGN_UNCONVERTED, False))
     window._load_paths([str(tmp_path / "first.cbz"), str(cbt_path)])
 
-    answers = iter([QMessageBox.StandardButton.Yes, QMessageBox.StandardButton.No])  # convert; keep originals
-    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: next(answers))
+    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.Yes)
     window.convert_books_to_cbz([window.books[1]])
 
     book = window.books[1]
@@ -185,14 +198,15 @@ def test_convert_from_the_table_replaces_the_row_in_place(window, tmp_path, monk
     assert not book.needs_conversion
     assert book.actual_page_count == 2
     assert window.table.item(1, window._col_index["ext"]).text() == "CBZ"
-    assert cbt_path.exists()  # kept: "No" to the Recycle Bin question
+    assert cbt_path.exists()  # kept: the Recycle Bin setting is off by default
 
 
-def test_convert_from_the_table_can_recycle_the_original(window, tmp_path, monkeypatch):
+def test_convert_from_the_table_can_recycle_the_original(window, settings, tmp_path, monkeypatch):
     cbt_path = tmp_path / "book.cbt"
     _make_cbt(cbt_path, {"page001.jpg": b"data"})
     monkeypatch.setattr(window, "_prompt_convert_foreign_archives", lambda paths: (FOREIGN_UNCONVERTED, False))
     window._load_paths([str(cbt_path)])
+    settings["recycle"] = True
 
     trashed = []
     monkeypatch.setattr("gui.main_window.move_to_trash", trashed.append)
@@ -201,6 +215,76 @@ def test_convert_from_the_table_can_recycle_the_original(window, tmp_path, monke
 
     assert trashed == [str(cbt_path)]
     assert not window.books[0].needs_conversion
+
+
+# ---------------------------------------------------------------------------
+# Settings > Converting to CBZ...
+# ---------------------------------------------------------------------------
+
+
+def test_default_setting_adds_unconverted_without_prompting(window, settings, tmp_path, monkeypatch):
+    settings["behavior"] = app_settings.FOREIGN_LOAD_UNCONVERTED
+    cbt_path = tmp_path / "book.cbt"
+    _make_cbt(cbt_path, {"page001.jpg": b"data"})
+    monkeypatch.setattr(QMessageBox, "exec", lambda self: pytest.fail("should not prompt"))
+
+    window._load_paths([str(cbt_path)])
+
+    assert window.books[0].needs_conversion
+    assert not (tmp_path / "book.cbz").exists()
+
+
+def test_convert_setting_converts_and_recycles_without_prompting(window, settings, tmp_path, monkeypatch):
+    settings["behavior"] = app_settings.FOREIGN_LOAD_CONVERT
+    settings["recycle"] = True
+    cbt_path = tmp_path / "book.cbt"
+    _make_cbt(cbt_path, {"page001.jpg": b"data"})
+    monkeypatch.setattr(QMessageBox, "exec", lambda self: pytest.fail("should not prompt"))
+
+    window._load_paths([str(cbt_path)])
+
+    assert not window.books[0].needs_conversion
+    assert not cbt_path.exists()
+
+
+def test_remember_my_choice_saves_the_setting(window, settings, tmp_path, monkeypatch):
+    cbt_path = tmp_path / "book.cbt"
+    _make_cbt(cbt_path, {"page001.jpg": b"data"})
+
+    def _click(box):
+        for check in box.findChildren(QCheckBox):
+            check.setChecked(True)  # recycle + remember
+        next(b for b in box.buttons() if b.text() == "Convert Now").click()
+
+    monkeypatch.setattr(QMessageBox, "exec", _click)
+    choice, delete = window._prompt_convert_foreign_archives([str(cbt_path)])
+
+    assert (choice, delete) == (FOREIGN_CONVERT, True)
+    assert settings == {"behavior": app_settings.FOREIGN_LOAD_CONVERT, "recycle": True}
+
+
+def test_skip_is_never_remembered(window, settings, tmp_path, monkeypatch):
+    cbt_path = tmp_path / "book.cbt"
+    _make_cbt(cbt_path, {"page001.jpg": b"data"})
+
+    def _click(box):
+        for check in box.findChildren(QCheckBox):
+            check.setChecked(True)
+        next(b for b in box.buttons() if b.text() == "Skip").click()
+
+    monkeypatch.setattr(QMessageBox, "exec", _click)
+    window._prompt_convert_foreign_archives([str(cbt_path)])
+    assert settings["behavior"] == app_settings.FOREIGN_LOAD_ASK
+
+
+def test_settings_dialog_saves_both_choices(settings):
+    from gui.conversion_settings_dialog import ConversionSettingsDialog
+
+    dialog = ConversionSettingsDialog()
+    dialog._radios[app_settings.FOREIGN_LOAD_CONVERT].setChecked(True)
+    dialog.recycle_check.setChecked(True)
+    dialog.accept()
+    assert settings == {"behavior": app_settings.FOREIGN_LOAD_CONVERT, "recycle": True}
 
 
 @pytest.mark.parametrize(
