@@ -406,6 +406,9 @@ class MainWindow(QMainWindow):
                 Separator(),
                 MenuAction("comicvine_lookup", "Look Up via Comic &Vine...", self.open_comicvine_lookup_dialog),
                 MenuAction("gcd_lookup", "Look Up via &Grand Comics Database...", self.open_gcd_lookup_dialog),
+                MenuAction(
+                    "gcd_local_lookup", "Look Up via GCD (&Local Database)...", self.open_gcd_local_lookup_dialog
+                ),
                 MenuAction("bedetheque_lookup", "Look Up via &Bedetheque...", self.open_bedetheque_lookup_dialog),
             ],
             "Operations": [
@@ -432,6 +435,7 @@ class MainWindow(QMainWindow):
             "Settings": [
                 MenuAction("comicvine_api_key", "Comic Vine API &Key...", self.change_comicvine_api_key),
                 MenuAction("gcd_account", "&GCD Account...", self.open_gcd_account_dialog),
+                MenuAction("gcd_local_settings", "GCD &Local Database...", self.open_gcd_local_settings_dialog),
                 MenuAction("conversion_settings", "Converting to CB&Z...", self.open_conversion_settings_dialog),
                 Separator(),
                 MenuAction("column_settings", "Add/Remove &Columns...", self.open_column_settings_dialog),
@@ -1957,6 +1961,43 @@ class MainWindow(QMainWindow):
     def open_conversion_settings_dialog(self) -> None:
         ConversionSettingsDialog(self).exec()
 
+    def open_gcd_local_settings_dialog(self) -> None:
+        from gui.gcd_local_settings_dialog import GcdLocalSettingsDialog
+
+        GcdLocalSettingsDialog(self).exec()
+
+    def open_gcd_local_lookup_dialog(self) -> None:
+        """Look Up via GCD (Local Database): needs the user's own
+        downloaded dump set in Settings first -- if it isn't, explain
+        and offer to open that dialog rather than just failing."""
+        from core.gcd_local import GcdLocalError, open_database
+        from gui.gcd_local_lookup_dialog import GcdLocalLookupDialog
+
+        path = app_settings.load_gcd_local_database()
+        if not path:
+            reply = QMessageBox.question(
+                self, "GCD Local Database",
+                "No local GCD database is set up yet. It's a free download from the "
+                "Grand Comics Database (you need a comics.org account).\n\n"
+                "Open Settings > GCD Local Database... for instructions?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.Yes,
+            )
+            if reply == QMessageBox.StandardButton.Yes:
+                self.open_gcd_local_settings_dialog()
+            path = app_settings.load_gcd_local_database()
+            if not path:
+                return
+        try:
+            database = open_database(path)
+        except GcdLocalError as exc:
+            QMessageBox.warning(self, "GCD Local Database", f"{exc}\n\nCheck Settings > GCD Local Database...")
+            return
+        self._run_lookup_dialog(
+            GcdLocalLookupDialog, "GCD local lookup",
+            factory=lambda books: GcdLocalLookupDialog(books, database, self),
+        )
+
     def open_gcd_account_dialog(self) -> None:
         from gui.gcd_account_dialog import GcdAccountDialog
 
@@ -2004,7 +2045,7 @@ class MainWindow(QMainWindow):
             return [self.books[row] for row in self._editable_selected_rows()]
         return [book for book in self.books if not book.needs_conversion]
 
-    def _run_lookup_dialog(self, dialog_class, label: str) -> None:
+    def _run_lookup_dialog(self, dialog_class, label: str, factory=None) -> None:
         """Shared flow for every online lookup dialog (Comic Vine, GCD,
         ...): they all take (target_books, parent) and expose the same
         accepted_metadata() -> {index: {field: value}} shape (see
@@ -2019,7 +2060,7 @@ class MainWindow(QMainWindow):
             QMessageBox.information(self, "No Files", "Load some files first.")
             return
 
-        dialog = dialog_class(target_books, self)
+        dialog = factory(target_books) if factory else dialog_class(target_books, self)
         if dialog.exec() != dialog_class.DialogCode.Accepted:
             return
 

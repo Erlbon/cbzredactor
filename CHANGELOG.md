@@ -1,5 +1,33 @@
 # Changelog
 
+## 2026-09-28#08 -- Look up in your own copy of the GCD database
+
+- **Import > Look Up via GCD (Local Database)...** searches a local copy
+  of the Grand Comics Database -- GCD's SQLite data dump, which
+  registered comics.org users can download. Milliseconds per file
+  instead of seconds, offline, no hourly limit, and structured credits.
+  The app never bundles, downloads or writes to it; **Settings > GCD
+  Local Database...** explains how to get it and checks the file.
+- Word-based series matching that ignores punctuation, so scene names
+  find GCD's fuller titles ("M1 - Monster Racing League" -> "M1 Monster
+  Racing League", "Mangaverse - Ghostlocke" -> "Marvel Mangaverse:
+  Ghostlocke"). Unnumbered one-shots (GCD's "[nn]") match #1 or no
+  number, and "[nn]" is never written to ComicInfo.
+- Ranking: exact name, then a series start year from the filename
+  ("Batman (2016) 045" -> the 2016 series), then the issue's year,
+  then English editions ahead of translated reprints (offered under
+  Other Matches; picking one is instant).
+- Fills writer/penciller/inker/colorist/letterer/editor (combined GCD
+  roles such as "pencils and inks" split correctly; free-text credits
+  for older entries), title, date, genre, characters, publisher,
+  **LanguageISO** and the issue's GCD page in Web. No covers (the dump
+  has none).
+- Fast without touching the file: series names go into an in-memory
+  full-text index on first use (about 1.5 s), and queries steer SQLite
+  to the right indexes itself -- the dump ships without index
+  statistics, which made a naive credits query take 35 s instead of
+  8 ms.
+
 ## 2026-09-28#07 -- Lookups no longer freeze the window
 
 Comic Vine, GCD and Bedetheque lookups now run in the background: the

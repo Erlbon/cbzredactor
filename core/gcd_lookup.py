@@ -133,6 +133,7 @@ class GcdIssueDetails:
     publisher: str = ""
     cover_image_url: str = ""
     web: str = ""  # the issue's GCD page, e.g. https://www.comics.org/issue/12345/
+    language_iso: str = ""  # only the local dump has this (core/gcd_local.py)
 
     def as_dict(self) -> dict:
         """Only the fields that actually came back, keyed to match
@@ -155,6 +156,7 @@ class GcdIssueDetails:
             "characters": self.characters,
             "publisher": self.publisher,
             "web": self.web,
+            "language_iso": self.language_iso,
         }
         return {k: v for k, v in raw.items() if v}
 

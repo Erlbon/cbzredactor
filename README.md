@@ -206,6 +206,19 @@ understands that this app now supports too).
   account (**Settings > GCD Account...**) raises that limit, and the
   batch stops cleanly with a clear message when the limit is reached
   instead of failing every remaining file.
+- `Import > Look Up via GCD (Local Database)...` -- the same lookup
+  against **your own downloaded copy** of the Grand Comics Database
+  (its SQLite data dump, `current.zip`, free for registered comics.org
+  users -- see **Settings > GCD Local Database...** for step-by-step
+  instructions; the app never bundles or downloads it). Milliseconds
+  per file instead of seconds, works offline, no hourly limit, and
+  structured credits. Matching is word-based and ignores punctuation,
+  so scene names find GCD's fuller titles ("Mangaverse - Ghostlocke" ->
+  "Marvel Mangaverse: Ghostlocke"); a series start year in the filename
+  ("Batman (2016) 045") picks the right same-named series; English
+  editions rank ahead of translated reprints, which are offered under
+  Other Matches. No cover images (the dump has none). Never writes to
+  the database file.
 - `Import > Look Up via Bedetheque...` -- same Series + Number
   search and review-then-Apply flow, against [Bedetheque](https://www.bedetheque.com/),
   the reference database for French-language "bande dessinée" (BD).

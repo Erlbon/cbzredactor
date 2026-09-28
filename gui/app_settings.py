@@ -129,6 +129,18 @@ def save_gcd_account(username: str, password: str) -> None:
     settings.sync()
 
 
+_GCD_LOCAL_DB_KEY = "gcd/local_database"
+
+
+def load_gcd_local_database() -> str:
+    """Path to the user's own downloaded GCD SQLite dump, or ""."""
+    return str(_settings().value(_GCD_LOCAL_DB_KEY, ""))
+
+
+def save_gcd_local_database(path: str) -> None:
+    _settings().setValue(_GCD_LOCAL_DB_KEY, path or "")
+
+
 def load_last_directory() -> str:
     """Returns "" if nothing's been remembered yet, or the remembered
     directory no longer exists (e.g. a removable drive that's since
