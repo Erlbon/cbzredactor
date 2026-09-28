@@ -1,5 +1,14 @@
 # Changelog
 
+## 2026-09-28#07 -- Lookups no longer freeze the window
+
+Comic Vine, GCD and Bedetheque lookups now run in the background: the
+window keeps redrawing and Cancel responds at once, instead of the
+whole app freezing for every request (seconds each against GCD). A
+progress dialog is now shown even for a single file. Also applies to
+Search This Item and picking one of the Other Matches.
+(redactor_common 2026-09-28-01.)
+
 ## 2026-09-28#06 -- Faster, more reliable GCD lookups
 
 Based on GCD's own API wiki
