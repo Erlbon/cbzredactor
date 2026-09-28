@@ -428,6 +428,7 @@ class MainWindow(QMainWindow):
                 MenuAction(
                     "comicrack_lookup", "Look Up via Comic&Rack Library...", self.open_comicrack_lookup_dialog
                 ),
+                MenuAction("compare_with_gcd", "Compare ComicRack Library &with GCD...", self.compare_library_with_gcd),
                 MenuAction("bedetheque_lookup", "Look Up via &Bedetheque...", self.open_bedetheque_lookup_dialog),
             ],
             "Operations": [
@@ -2320,6 +2321,11 @@ class MainWindow(QMainWindow):
             "Grand Comics Database (you need a comics.org account).\n\n"
             "Open Settings > GCD Local Database... for instructions?",
         )
+
+    def compare_library_with_gcd(self) -> None:
+        from gui.gcd_compare_flow import compare_library_with_gcd
+
+        compare_library_with_gcd(self)
 
     def open_comicrack_lookup_dialog(self) -> None:
         self._open_local_lookup(

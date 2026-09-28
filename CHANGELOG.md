@@ -1,5 +1,31 @@
 # Changelog
 
+## 2026-09-28#14 -- Compare your ComicRack library with GCD
+
+- **Import > Compare ComicRack Library with GCD...**: compares the
+  converted ComicRack library with the local GCD database and saves the
+  difference -- what the library knows that GCD doesn't -- as a database
+  plus three spreadsheets (CSV): series not found in GCD, issues not in
+  GCD (with the library's own credits, characters, summary and Comic
+  Vine link, ready to hand over), and GCD issues that lack credits,
+  characters or a summary the library has. About 20-40 s for a
+  234k-book library, cancellable.
+- Series are matched by name (punctuation, "S.H.I.E.L.D."/"SHIELD", a
+  trailing "TPB"/"v2" and GCD's [bracketed] qualifiers don't matter),
+  start year, publisher ("DC Comics" = "DC"), language and shared issue
+  numbers; a Comic Vine volume whose numbering carried on ("Detective
+  Comics (2016)" #934-) is found in GCD's original series, and a run GCD
+  splits by era over several series is matched across them -- always
+  checked against the issues' publication years. Issue numbers compare
+  across both sites' conventions ("6/1976" = "1976-06", "[nn]" = #1).
+  Each match records how it was made; unmatched series are reported as
+  "not found", since some are named differently rather than missing.
+- On the real library: 22,906 of 28,407 series and 188,764 of 227,012
+  issues matched; GCD lacks a summary for 71,803 of the matched issues,
+  characters for 41,824 and credits for 26,399.
+- GCD's dump has no cover images or per-issue cover flags, so covers
+  aren't compared.
+
 ## 2026-09-28#13 -- Look up in your own ComicRack library
 
 - **Settings > ComicRack Library Database... > Build from ComicRack

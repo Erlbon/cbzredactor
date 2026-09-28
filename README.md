@@ -256,6 +256,17 @@ understands that this app now supports too).
   come along, file paths and reading history never do. A blank issue
   number now also finds a #1 (one-shots are #1 on Comic Vine), in this
   lookup and the GCD one.
+- `Import > Compare ComicRack Library with GCD...` -- compares that
+  converted library with the local GCD database and saves the
+  difference (a database plus CSV spreadsheets): series not found in
+  GCD, issues GCD doesn't have, and GCD issues missing credits,
+  characters or a summary your library has -- each with the library's
+  own data, ready to offer to GCD. Series match by name, start year,
+  publisher and shared issue numbers (checked against publication
+  years), including Comic Vine volumes that GCD keeps inside an older
+  series and runs GCD splits over several series; every match records
+  how it was made. GCD's dump holds no cover images, so covers aren't
+  compared.
 - `Import > Look Up via Bedetheque...` -- same Series + Number
   search and review-then-Apply flow, against [Bedetheque](https://www.bedetheque.com/),
   the reference database for French-language "bande dessinée" (BD).
