@@ -1,5 +1,17 @@
 # Changelog
 
+## 2026-09-28#15 -- Linux version
+
+- **A Linux download** alongside the Windows one:
+  `cbzredactor-linux-x86_64.tar.gz`, a single self-contained program for
+  64-bit desktop Linux (glibc 2.35+: Ubuntu 22.04+, Debian 12+, Fedora
+  36+, Mint 21+). Built with Python 3.12 like the Windows version; the
+  whole test suite runs on Linux as part of every release build.
+- On Linux the settings (and the Known Credit Pages, the ComicRack
+  database's default place) live in `~/.config/cbzredactor/`, the
+  standard place, instead of next to the program; Windows is unchanged
+  (redactor_common 2026-09-28-04).
+
 ## 2026-09-28#14 -- Compare your ComicRack library with GCD
 
 - **Import > Compare ComicRack Library with GCD...**: compares the

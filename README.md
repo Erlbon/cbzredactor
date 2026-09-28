@@ -404,6 +404,26 @@ pip install -r requirements.txt
 python main.py
 ```
 
+## Linux
+
+Each release also has a Linux download,
+`cbzredactor-linux-x86_64.tar.gz`: one self-contained program (Python
+and Qt inside) for 64-bit desktop Linux with glibc 2.35 or newer
+(Ubuntu 22.04+, Debian 12+, Fedora 36+, Mint 21+). Unpack and run
+`./cbzredactor/cbzredactor`. On Linux the settings live in
+`~/.config/cbzredactor/` instead of next to the program.
+
+It's built in Docker with the family's shared toolchain,
+[redactor-build-tools](https://github.com/Erlbon/redactor-build-tools):
+
+```bash
+./linux-build/build.sh /path/to/cbzredactor cbzredactor.spec --test
+./linux-build/package.sh /path/to/cbzredactor cbzredactor "The ƆBZ Redactor"
+```
+
+The release workflow does the same on GitHub Actions after the Windows
+build.
+
 ## Building a standalone Windows .exe
 
 You need to do this step **on a Windows machine** (PyInstaller builds

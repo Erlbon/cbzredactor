@@ -4,6 +4,9 @@ __pycache__/
 .pytest_cache/
 build/
 dist/
+# Linux builds (redactor-build-tools/linux-build/build.sh)
+build-linux/
+dist-linux/
 *.spec.bak
 *.tmp_write
 
