@@ -81,6 +81,7 @@ from core.page_dimensions import SIZE_LOW, SIZE_OK, SIZE_OVERSIZED, PageSizeStat
 from core.scan_quality_tag import LOW_RES_TAG, add_tag, has_tag, remove_tag
 from core.scene_name import parse_filename, proposed_fields
 from core.credit_pages import KnownCreditPages, credit_matches, scan_book
+from core.duplicates import BookFacts, find_duplicates, fingerprint_book
 from core.version import APP_NAME, APP_REPO_URL, APP_VERSION, RELEASE_LABEL
 from gui import app_settings
 from gui.bedetheque_lookup_dialog import BedethequeLookupDialog
@@ -312,6 +313,10 @@ class MainWindow(QMainWindow):
         self._known_credits = KnownCreditPages(app_settings.credit_pages_path())
         self._credit_scanner = PageSizeScanner(parent=self, scan=scan_book)
         self._credit_scanner.stats_ready.connect(self._on_credit_scan_ready)
+        # Find Duplicates: cover + story-page fingerprints per book
+        # (core/duplicates.py), cached the same way, so a second run over
+        # the same files is instant.
+        self._dupe_fingerprints = PageSizeScanner(parent=self, scan=fingerprint_book)
         # Click-to-sort state (see _on_header_clicked) -- not persisted
         # across restarts, same as every other app in the family not
         # remembering a sort order (only column order/widths/visibility
@@ -438,6 +443,7 @@ class MainWindow(QMainWindow):
                 MenuAction("resize_images", "Resi&ze Images...", self.open_resize_images_dialog),
                 MenuAction("tag_low_res", "&Tag Low-Res Scans", self.tag_low_res_scans),
                 MenuAction("remove_credit_pages", "Remove Credit &Pages...", self.open_remove_credit_pages_dialog),
+                MenuAction("find_duplicates", "Find &Duplicates...", self.open_find_duplicates_dialog),
                 Separator(),
                 MenuAction("save_all", "Save &All Changed", self.save_all_changed, shortcut=shortcuts.SAVE_ALL),
                 Separator(),
@@ -2091,6 +2097,123 @@ class MainWindow(QMainWindow):
                 f"Removed {removed_total} credit page(s) from {len(work) - len(errors)} file(s), "
                 f"{saved_mb:.1f} MB smaller. Originals are in the Recycle Bin.", 10000,
             )
+
+    # ------------------------------------------------------------------
+    # Duplicates (core/duplicates.py)
+    # ------------------------------------------------------------------
+
+    def _ensure_fingerprints(self, books: list[CbzBook]) -> None:
+        """Fingerprints books not done yet, several at once on a thread
+        pool (decoding a few pages per book is the slow part -- about a
+        second for a book of large WebP pages), under a progress dialog."""
+        from concurrent.futures import ThreadPoolExecutor
+
+        pending = []
+        for book in books:
+            try:
+                source = (book.path, os.path.getmtime(book.path))
+            except OSError:
+                continue
+            self._size_source[book] = source
+            if self._dupe_fingerprints.get_cached(book, source) is None:
+                pending.append((book, source))
+        if not pending:
+            return
+        scan = self._dupe_fingerprints.scan_function
+        with ThreadPoolExecutor(max_workers=min(8, os.cpu_count() or 2)) as pool:
+            futures = [(book, source, pool.submit(scan, book.path, list(book.page_names))) for book, source in pending]
+
+            def _step(entry, _index: int) -> None:
+                book, source, future = entry
+                self._dupe_fingerprints.store(book, source, future.result())
+
+            finished = run_with_progress(
+                self, futures, _step, "Fingerprinting pages...", threshold=1,
+                label_for=lambda entry: f"Fingerprinting: {os.path.basename(entry[0].path)}",
+            )
+            if finished is False:
+                for _book, _source, future in futures:
+                    future.cancel()
+
+    def open_find_duplicates_dialog(self) -> None:
+        """Operations > Find Duplicates...: the same comic loaded more than
+        once (another release, resolution or format), with the best copy
+        suggested -- see core/duplicates.py. Ticked copies go to the
+        Recycle Bin and leave the list."""
+        from gui.duplicates_dialog import DuplicatesDialog
+
+        self._commit_current_edits()
+        books = [b for b in self._target_books() if not b.load_error and b.page_names]
+        if len(books) < 2:
+            QMessageBox.information(self, "Find Duplicates", "Load (or select) at least two files to compare.")
+            return
+        sizes = self._ensure_page_sizes(books)
+        self._ensure_fingerprints(books)
+
+        kept_books, facts = [], []
+        for book in books:
+            fingerprint = self._dupe_fingerprints.get_cached(book, self._size_source.get(book))
+            if fingerprint is None:
+                continue  # fingerprinting was cancelled for this one
+            stats = sizes.get(id(book))
+            credit = self._credit_matches_for(book) or []
+            meta = book.metadata
+            filled = sum(
+                1 for name in vars(meta)
+                if name not in ("extra_elements", "page_count") and str(getattr(meta, name) or "").strip()
+            )
+            kept_books.append(book)
+            facts.append(BookFacts(
+                fingerprint=fingerprint,
+                width=(stats.representative_width or 0) if stats else 0,
+                pages=book.actual_page_count - len(credit),
+                metadata_fields=filled,
+                file_size=_file_size_bytes(book.path) or 0,
+                web=meta.web or "",
+            ))
+
+        groups = find_duplicates(facts)
+        if not groups:
+            QMessageBox.information(self, "Find Duplicates", f"No duplicates among {len(kept_books)} file(s).")
+            return
+        labels = [os.path.basename(b.path) for b in kept_books]
+        covers = [None] * len(kept_books)
+        for group in groups:
+            for index in group.members:
+                covers[index] = kept_books[index].read_first_page_bytes()
+        dialog = DuplicatesDialog(groups, facts, labels, covers, self)
+        if dialog.exec() != dialog.DialogCode.Accepted:
+            return
+        doomed = [kept_books[i] for i in dialog.ticked()]
+        if not doomed:
+            return
+        unsaved = [b for b in doomed if b.dirty]
+        if unsaved and not self._confirm_discard(f"move {len(unsaved)} file(s) with unsaved changes to the Recycle Bin"):
+            return
+
+        errors: list[str] = []
+        gone: list[CbzBook] = []
+        for book in doomed:
+            try:
+                move_to_trash(book.path)
+                gone.append(book)
+            except TrashError as exc:
+                errors.append(f"{os.path.basename(book.path)}: {exc}")
+        if gone:
+            gone_ids = {id(b) for b in gone}
+            self.books = [b for b in self.books if id(b) not in gone_ids]
+            self._selected_rows = []
+            self.undo_manager.clear()  # its entries could reference removed books
+            self._update_undo_action()
+            self._update_redo_action()
+            self._rebuild_table()
+            self.panel.set_enabled(False)
+        if errors:
+            from redactor_common.core.error_summary import summarize_errors
+            QMessageBox.warning(self, "Some Files Couldn't Be Moved", summarize_errors(errors))
+        self._update_status()
+        if gone:
+            self.statusBar().showMessage(f"Moved {len(gone)} duplicate(s) to the Recycle Bin.", 10000)
 
     def open_known_credit_pages_dialog(self) -> None:
         from gui.credit_pages_dialogs import KnownCreditPagesDialog

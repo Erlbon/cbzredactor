@@ -1,5 +1,23 @@
 # Changelog
 
+## 2026-09-28#10 -- Find duplicates, keep the best copy
+
+- **Operations > Find Duplicates...** (selected files, or all): the
+  same comic loaded more than once, grouped, with the best copy
+  suggested -- highest page resolution, then most pages (credit pages
+  not counted), then the most filled-in ComicInfo, then the biggest
+  file. Ticked copies go to the Recycle Bin and leave the list.
+- **Matches the story, not just the cover**: visual fingerprints of the
+  cover and of a few pages around 1/3 and 2/3 of the way in, compared
+  with some slack (ads and credit pages shift page numbers between
+  releases). A TPB reusing issue #1's cover is not a duplicate; a
+  variant cover of the same issue is, labelled "different cover".
+  Files sharing a Comic Vine/GCD link in Web are grouped as well.
+- Survives resizing and re-encoding (tested with a real 329-page book
+  against a re-encoded, smaller copy missing two pages; 14 unrelated
+  books in the same run stayed separate). Fingerprinting runs several
+  files at once and is cached, so a second run is instant.
+
 ## 2026-09-28#09 -- Find and remove scanner credit pages
 
 - **Right-click > Credit Pages...**: a file's first 2 and last 4 pages

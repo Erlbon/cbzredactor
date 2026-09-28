@@ -187,6 +187,18 @@ understands that this app now supports too).
   every blank page). ComicInfo's PageCount and per-page entries are
   corrected; the original file goes to the Recycle Bin. Learned pages:
   **Settings > Known Credit Pages...**, with Forget.
+- **Operations > Find Duplicates...** finds the same comic loaded more
+  than once -- another release, resolution or format -- and suggests
+  the copy to keep: highest page resolution, then most pages (credit
+  pages not counted), then the most filled-in ComicInfo, then the
+  biggest file. Matching is visual, on the STORY pages (a few pages
+  around a third and two thirds in, compared with some slack either
+  way, since ads and credit pages shift page numbers between
+  releases), so a trade paperback reusing issue #1's cover is not a
+  duplicate, while a variant cover of the same issue is (and is
+  labelled as such). Files sharing a Comic Vine/GCD link in Web are
+  grouped too. Review with covers side by side; ticked copies go to
+  the Recycle Bin and leave the list.
 - **Operations > Tag Low-Res Scans** adds a `Low-res scan` entry to the
   ComicInfo **Tags** field of every low-res (yellow) book, so they can
   be found and replaced with better copies later (your comic server can

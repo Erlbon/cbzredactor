@@ -90,6 +90,15 @@ class PageSizeScanner(QObject):
         self._cache[book] = (source, stats)
         return stats
 
+    def store(self, book, source, result) -> None:
+        """Caches a result computed elsewhere (e.g. several books at
+        once on a thread pool)."""
+        self._cache[book] = (source, result)
+
+    @property
+    def scan_function(self):
+        return self._scan_fn
+
     def _on_done(self, book, source, stats) -> None:
         if self._in_flight.get(book) == source:
             self._in_flight.pop(book)
