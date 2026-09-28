@@ -132,3 +132,46 @@ def test_corrupt_image_is_left_untouched_with_error_set():
     assert result.resized is False
     assert result.error
     assert result.data == b"not actually an image"
+
+
+# ------------------------------------------------------------------
+# max_height / output_format (added after reviewing CbxConverter)
+# ------------------------------------------------------------------
+
+def test_max_height_limits_a_tall_page():
+    data = _make_image_bytes(1000, 4000)
+    result = resize_page(data, max_width=1440, max_height=2000)
+    assert result.resized is True
+    assert _dimensions(result.data) == (500, 2000)
+
+
+def test_max_height_is_not_doubled_for_spreads():
+    data = _make_image_bytes(3000, 2000)  # spread
+    result = resize_page(data, max_width=1440, max_height=1000)
+    assert _dimensions(result.data) == (1500, 1000)
+
+
+def test_output_format_converts_even_a_page_that_fits():
+    data = _make_image_bytes(800, 1200, fmt="PNG")
+    result = resize_page(data, max_width=1440, output_format="WEBP")
+    assert result.resized is True
+    assert result.extension == ".webp"
+    assert Image.open(io.BytesIO(result.data)).format == "WEBP"
+    assert _dimensions(result.data) == (800, 1200)
+
+
+def test_output_format_matching_the_source_leaves_page_untouched():
+    data = _make_image_bytes(800, 1200)  # JPEG
+    result = resize_page(data, max_width=1440, output_format="JPEG")
+    assert result.resized is False
+    assert result.data == data
+    assert result.extension is None
+
+
+def test_palette_png_converts_to_jpeg():
+    image = Image.new("P", (800, 1200))
+    out = io.BytesIO()
+    image.save(out, format="PNG")
+    result = resize_page(out.getvalue(), max_width=1440, output_format="JPEG")
+    assert Image.open(io.BytesIO(result.data)).format == "JPEG"
+    assert result.extension == ".jpg"

@@ -116,3 +116,53 @@ def test_summary_reports_accurate_byte_totals(tmp_path):
     assert summary.pages_resized == 0
     assert summary.pages_skipped == 1
     assert summary.original_bytes == summary.new_bytes  # nothing changed size
+
+
+def _png_bytes(width: int, height: int) -> bytes:
+    out = io.BytesIO()
+    Image.new("RGB", (width, height), color=(10, 20, 30)).save(out, format="PNG")
+    return out.getvalue()
+
+
+def test_output_format_renames_entries_and_keeps_order(tmp_path):
+    path = _make_cbz(tmp_path / "book.cbz", {
+        "001.png": _png_bytes(800, 1200),
+        "002.jpeg": _page_bytes(800, 1200),
+        "003.png": _png_bytes(3000, 4500),
+    })
+    book = CbzBook(path)
+    summary = book.resize_images(1440, output_format="WEBP", workers=2)
+
+    assert summary.pages_failed == 0
+    assert book.page_names == ["001.webp", "002.webp", "003.webp"]
+    with zipfile.ZipFile(path) as zf:
+        assert "ComicInfo.xml" in zf.namelist()
+        assert Image.open(io.BytesIO(zf.read("003.webp"))).size == (1440, 2160)
+
+
+def test_jpeg_output_keeps_a_jpeg_extension_name(tmp_path):
+    path = _make_cbz(tmp_path / "book.cbz", {"001.jpeg": _png_bytes(800, 1200)})  # misnamed PNG
+    book = CbzBook(path)
+    book.resize_images(1440, output_format="JPEG")
+    assert book.page_names == ["001.jpeg"]
+    with zipfile.ZipFile(path) as zf:
+        assert Image.open(io.BytesIO(zf.read("001.jpeg"))).format == "JPEG"
+
+
+def test_conversion_that_would_collide_keeps_the_original_format(tmp_path):
+    path = _make_cbz(tmp_path / "book.cbz", {
+        "001.png": _png_bytes(800, 1200),
+        "001.gif": _png_bytes(800, 1200),  # both would become 001.webp
+        "002.png": _png_bytes(800, 1200),
+    })
+    book = CbzBook(path)
+    book.resize_images(1440, output_format="WEBP")
+    assert book.page_names == ["001.gif", "001.png", "002.webp"]
+
+
+def test_many_pages_parallel_keep_source_order(tmp_path):
+    pages = {f"{i:03}.jpg": _page_bytes(1600 + i, 2400) for i in range(20)}
+    path = _make_cbz(tmp_path / "book.cbz", pages)
+    CbzBook(path).resize_images(1440, workers=4)
+    with zipfile.ZipFile(path) as zf:
+        assert [n for n in zf.namelist() if n.endswith(".jpg")] == sorted(pages)

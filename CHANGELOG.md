@@ -1,5 +1,33 @@
 # Changelog
 
+## 2026-09-28#01 -- Size column, smarter Resize Images
+
+Resize features modeled on CbxConverter (github.com/tomek-o/CbxConverter),
+done in-process with Pillow rather than by wrapping ImageMagick.
+
+- **New Size column** (shown by default): each book's typical page
+  width, colored by band -- **yellow** low-res (under 1000px),
+  **green** acceptable (1000-1599px), **orange** oversized (1600px+).
+  It's the median width of the single (portrait) pages, so double-page
+  spreads and a one-off huge cover don't mark a book oversized. The
+  tooltip shows the most common widths, typical height and spread
+  count. Measured from image headers only (about 50ms for a 200-page
+  book), in the background for visible rows; sorting by Size measures
+  the rest first.
+- **New File Size column** (hidden by default for new installs).
+- **Resize Images...:**
+  - Default target width is now **1440px** (lands in the green band).
+    A width you've already used is still remembered.
+  - Optional **height limit**, for tall manga/webtoon pages (not
+    doubled for spreads).
+  - Optional **output format**: JPEG or WebP. Converting re-encodes
+    every page and renames it to the new extension, keeping reading
+    order; a page whose new name would clash with another entry keeps
+    its format.
+  - **"Only files marked Oversized"** option, so a whole list can be
+    fixed in one go.
+  - Pages are processed in parallel, so big books resize faster.
+
 ## 2026-09-23#02 -- shared resizable cover area
 
 The side panel's cover/fields splitter is now redactor_common's shared

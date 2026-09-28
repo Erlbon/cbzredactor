@@ -42,7 +42,11 @@ _HIDDEN_DEFAULT_LANGUAGES_KEY = "languages/hidden_defaults"
 
 _RESIZE_MAX_WIDTH_KEY = "resize/max_width"
 _RESIZE_JPEG_QUALITY_KEY = "resize/jpeg_quality"
-_DEFAULT_RESIZE_MAX_WIDTH = 1600
+_RESIZE_MAX_HEIGHT_KEY = "resize/max_height"  # 0 = no height limit
+_RESIZE_OUTPUT_FORMAT_KEY = "resize/output_format"  # "" = keep each page's format
+# 1440 lands a resized book inside the Size column's "Acceptable" band
+# (1000-1599 px, see core/page_dimensions.py).
+_DEFAULT_RESIZE_MAX_WIDTH = 1440
 _DEFAULT_RESIZE_JPEG_QUALITY = 90
 
 
@@ -99,6 +103,22 @@ def load_resize_jpeg_quality() -> int:
 
 def save_resize_jpeg_quality(quality: int) -> None:
     _settings().setValue(_RESIZE_JPEG_QUALITY_KEY, int(quality))
+
+
+def load_resize_max_height() -> int:
+    return int(_settings().value(_RESIZE_MAX_HEIGHT_KEY, 0))
+
+
+def save_resize_max_height(max_height: int) -> None:
+    _settings().setValue(_RESIZE_MAX_HEIGHT_KEY, int(max_height))
+
+
+def load_resize_output_format() -> str:
+    return str(_settings().value(_RESIZE_OUTPUT_FORMAT_KEY, ""))
+
+
+def save_resize_output_format(output_format: str) -> None:
+    _settings().setValue(_RESIZE_OUTPUT_FORMAT_KEY, output_format or "")
 
 
 # ------------------------------------------------------------------

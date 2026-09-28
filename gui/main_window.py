@@ -19,7 +19,7 @@ import os
 import shutil
 
 from PyQt6.QtCore import QSize, Qt
-from PyQt6.QtGui import QIcon, QImage
+from PyQt6.QtGui import QColor, QIcon, QImage
 from PyQt6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
@@ -72,11 +72,13 @@ from core.foreign_archive_convert import (
     convert_to_cbz,
 )
 from core.cbz_file import CbzBook, CbzError
+from core.page_dimensions import SIZE_LOW, SIZE_OK, SIZE_OVERSIZED, PageSizeStats
 from core.version import APP_NAME, APP_REPO_URL, APP_VERSION, RELEASE_LABEL
 from gui import app_settings
 from gui.bedetheque_lookup_dialog import BedethequeLookupDialog
 from gui.comicvine_lookup_dialog import ComicVineLookupDialog
 from gui.gcd_lookup_dialog import GcdLookupDialog
+from gui.page_size_scanner import PageSizeScanner
 from gui.resize_dialog import ResizeImagesDialog
 from gui.metadata_panel import (
     CREDIT_FIELDS,
@@ -137,8 +139,22 @@ _AUTO_NUMBER_NUMERIC_FIELDS: frozenset[str] = frozenset(
 COLUMN_SPECS: list[tuple[str, str]] = (
     [("filename", "Filename")]
     + list(_FIELD_LABELS.items())
-    + [("pages", "Pages"), ("status", "Status")]
+    + [("pages", "Pages"), ("size", "Size"), ("filesize", "File Size"), ("status", "Status")]
 )
+# Measured from the archive itself, never ComicInfo fields -- sort
+# numerically, never by their display text.
+_NUMERIC_SYNTHETIC_COLUMNS = frozenset({"pages", "size", "filesize"})
+
+# Size column cell colors, one per core.page_dimensions band. Solid
+# light tints with dark text (HIGHLIGHT_TEXT_COLOR) so they read the
+# same in light and dark themes; deliberately stronger than
+# DIRTY_COLOR's soft amber so low-res yellow isn't mistaken for
+# "unsaved change".
+SIZE_CATEGORY_COLORS = {
+    SIZE_LOW: QColor("#fde047"),  # yellow
+    SIZE_OK: QColor("#86efac"),  # green
+    SIZE_OVERSIZED: QColor("#fdba74"),  # orange
+}
 _COLUMN_LABELS: dict[str, str] = dict(COLUMN_SPECS)
 _ALL_COLUMN_KEYS: list[str] = [key for key, _ in COLUMN_SPECS]
 PROTECTED_COLUMNS = frozenset({"filename"})  # the one column you always need to tell rows apart
@@ -151,7 +167,7 @@ PROTECTED_COLUMNS = frozenset({"filename"})  # the one column you always need to
 # has touched column visibility at all (via the header menu or Settings
 # > Add/Remove Columns...), their own saved choice always wins, even if
 # that choice is "show everything".
-_DEFAULT_VISIBLE_COLUMNS = frozenset({"filename", "title", "series", "number", "pages", "status"})
+_DEFAULT_VISIBLE_COLUMNS = frozenset({"filename", "title", "series", "number", "pages", "size", "status"})
 DEFAULT_HIDDEN_COLUMNS: frozenset[str] = frozenset(_ALL_COLUMN_KEYS) - _DEFAULT_VISIBLE_COLUMNS
 
 # Metadata fields offered as %placeholder% tokens in Rename/Export and
@@ -217,6 +233,24 @@ def comic_files_in_folder(folder: str) -> list[str]:
     ]
 
 
+def _file_size_bytes(path: str) -> int | None:
+    try:
+        return os.path.getsize(path)
+    except OSError:
+        return None
+
+
+def _format_file_size(path: str) -> str:
+    size = _file_size_bytes(path)
+    if size is None:
+        return ""
+    if size >= 1024 ** 3:
+        return f"{size / 1024 ** 3:.2f} GB"
+    if size >= 1024 ** 2:
+        return f"{size / 1024 ** 2:.1f} MB"
+    return f"{size / 1024:.0f} KB"
+
+
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -242,6 +276,12 @@ class MainWindow(QMainWindow):
         self._cover_icons = AsyncIconCache(COVER_ICON_SIZE, parent=self)
         self._cover_icons.icon_ready.connect(self._on_cover_icon_ready)
         self._cover_source = IdentityWeakDict()
+        # Size column: page dimensions measured in the background for
+        # visible rows, same lazy scheme as the covers above (and the
+        # same (path, mtime) version key, kept in _size_source).
+        self._page_sizes = PageSizeScanner(parent=self)
+        self._page_sizes.stats_ready.connect(self._on_page_sizes_ready)
+        self._size_source = IdentityWeakDict()
         # Click-to-sort state (see _on_header_clicked) -- not persisted
         # across restarts, same as every other app in the family not
         # remembering a sort order (only column order/widths/visibility
@@ -257,7 +297,7 @@ class MainWindow(QMainWindow):
         self.table.setHorizontalHeaderLabels([_COLUMN_LABELS[key] for key in self._column_keys])
         self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.table.setIconSize(COVER_ICON_SIZE)
-        self._visible_rows = VisibleRowsWatcher(self.table, self._load_cover_icons_for_rows)
+        self._visible_rows = VisibleRowsWatcher(self.table, self._load_lazy_cells_for_rows)
         # Multi-select (ctrl/shift-click, same as Explorer) -- needed for
         # both bulk metadata editing (see ComicInfoPanel.set_bulk_mode())
         # and looking up several files via one API search in one go.
@@ -665,6 +705,8 @@ class MainWindow(QMainWindow):
         # covers Refresh List and Convert to CBZ/Resize Images' "load
         # the result back in" calls, all of which route through here).
         if self._sort_key:
+            if self._sort_key == "size":
+                self._ensure_page_sizes(self.books)
             self.books.sort(
                 key=lambda book: self._sort_key_for(book, self._sort_key), reverse=not self._sort_ascending
             )
@@ -689,7 +731,12 @@ class MainWindow(QMainWindow):
         name_item.setIcon(cached if cached is not None else QIcon())
         self.table.setItem(row, self._col_index["filename"], name_item)
         self.table.setItem(row, self._col_index["pages"], QTableWidgetItem(str(book.actual_page_count)))
+        self.table.setItem(row, self._col_index["filesize"], QTableWidgetItem(_format_file_size(book.path)))
         self.table.setItem(row, self._col_index["status"], QTableWidgetItem(status))
+        # Only already-measured sizes here, never a scan -- see
+        # _load_lazy_cells_for_rows().
+        self.table.setItem(row, self._col_index["size"], QTableWidgetItem())
+        stats = self._page_sizes.get_cached(book, self._size_source.get(book))
         # Every other column is a plain ComicInfo field -- one shared
         # loop covers all of them (title/series/number plus every field
         # only reachable as a column once you turn it on; see
@@ -699,6 +746,25 @@ class MainWindow(QMainWindow):
             self.table.setItem(row, self._col_index[attr], QTableWidgetItem(value))
 
         self._apply_row_status_color(row, book)
+        if stats is not None:
+            self._set_size_cell(row, book, stats)
+
+    def _set_size_cell(self, row: int, book: CbzBook, stats: PageSizeStats) -> None:
+        """Fills the Size cell: typical single-page width, colored by
+        band (see core/page_dimensions.py), with the full breakdown as a
+        tooltip. Applied after the row tint so the band color stays
+        visible on a modified row -- but not on a failed one, where the
+        red "this file is broken" tint matters more."""
+        item = self.table.item(row, self._col_index["size"])
+        if item is None:
+            return
+        width = stats.representative_width
+        item.setText(f"{width}px" if width is not None else "?")
+        item.setToolTip(stats.describe())
+        category = stats.category
+        if category is not None and not book.load_error:
+            item.setBackground(SIZE_CATEGORY_COLORS[category])
+            item.setForeground(HIGHLIGHT_TEXT_COLOR)
 
     def _apply_row_status_color(self, row: int, book: CbzBook) -> None:
         """Tints every cell in the row so a problem file (failed to
@@ -902,6 +968,8 @@ class MainWindow(QMainWindow):
             self._sort_key = key
             self._sort_ascending = True
 
+        if key == "size":
+            self._ensure_page_sizes(self.books)
         self.books.sort(key=lambda book: self._sort_key_for(book, key), reverse=not self._sort_ascending)
         self._rebuild_table()
 
@@ -929,12 +997,17 @@ class MainWindow(QMainWindow):
             raw = os.path.basename(book.path)
         elif key == "pages":
             raw = str(book.actual_page_count)
+        elif key == "size":
+            stats = self._page_sizes.get_cached(book, self._size_source.get(book))
+            raw = stats.representative_width if stats is not None else None
+        elif key == "filesize":
+            raw = _file_size_bytes(book.path)
         elif key == "status":
             raw = book.load_error or ("Modified" if book.dirty else "OK")
         else:
             raw = getattr(book.metadata, key, "")
 
-        if key in NUMERIC_FILENAME_FIELDS or key == "pages":
+        if key in NUMERIC_FILENAME_FIELDS or key in _NUMERIC_SYNTHETIC_COLUMNS:
             try:
                 return (0, float(raw))
             except (TypeError, ValueError):
@@ -989,10 +1062,11 @@ class MainWindow(QMainWindow):
         self.panel.set_enabled(False)
         self._update_status()
 
-    def _load_cover_icons_for_rows(self, rows: list[int]) -> None:
-        """VisibleRowsWatcher callback: request covers for these (on
-        screen) rows only. Rows map to self.books by position -- this
-        app's own sort reorders self.books itself (see _sort_key_for)."""
+    def _load_lazy_cells_for_rows(self, rows: list[int]) -> None:
+        """VisibleRowsWatcher callback: request covers and page sizes
+        for these (on screen) rows only. Rows map to self.books by
+        position -- this app's own sort reorders self.books itself (see
+        _sort_key_for)."""
         for row in rows:
             if row >= len(self.books):
                 continue
@@ -1003,6 +1077,7 @@ class MainWindow(QMainWindow):
                 source = (book.path, os.path.getmtime(book.path))
             except OSError:
                 continue
+            self._request_page_sizes(row, book, source)
             self._cover_source[book] = source
             cached = self._cover_icons.get_cached_icon(book, source)
             if cached is not None:
@@ -1011,6 +1086,57 @@ class MainWindow(QMainWindow):
                     item.setIcon(cached)
                 continue
             self._cover_icons.request(book, source, loader=book.read_first_page_bytes)
+
+    def _request_page_sizes(self, row: int, book: CbzBook, source) -> None:
+        self._size_source[book] = source
+        cached = self._page_sizes.get_cached(book, source)
+        if cached is not None:
+            item = self.table.item(row, self._col_index["size"])
+            if item is not None and not item.text():
+                self._set_size_cell(row, book, cached)
+            return
+        self._page_sizes.request(book, source)
+
+    def _on_page_sizes_ready(self, book: CbzBook, stats: PageSizeStats) -> None:
+        try:
+            row = self.books.index(book)
+        except ValueError:
+            return  # removed from the list meanwhile
+        if self._page_sizes.get_cached(book, self._size_source.get(book)) is stats:
+            self._set_size_cell(row, book, stats)
+
+    def _ensure_page_sizes(self, books: list[CbzBook]) -> dict[int, PageSizeStats]:
+        """Measures every book in `books` that isn't measured yet (under
+        a progress dialog -- a sort or the Resize dialog needs all of
+        them, not only the visible rows) and returns id(book) -> stats.
+        Books that can't be measured at all are left out."""
+        result: dict[int, PageSizeStats] = {}
+
+        def _step(book: CbzBook, _index: int) -> None:
+            if book.load_error or not book.first_page_name:
+                return
+            try:
+                source = (book.path, os.path.getmtime(book.path))
+            except OSError:
+                return
+            self._size_source[book] = source
+            result[id(book)] = self._page_sizes.scan_now(book, source)
+
+        pending = [
+            book for book in books
+            if self._page_sizes.get_cached(book, self._size_source.get(book)) is None
+        ]
+        run_with_progress(
+            self, pending, _step, "Measuring page sizes...", threshold=LOAD_PROGRESS_THRESHOLD,
+            cancellable=False,
+            label_for=lambda book: f"Measuring: {os.path.basename(book.path)}",
+        )
+        for book in books:
+            if id(book) not in result:
+                cached = self._page_sizes.get_cached(book, self._size_source.get(book))
+                if cached is not None:
+                    result[id(book)] = cached
+        return result
 
     def _on_cover_icon_ready(self, book: CbzBook, icon: QIcon) -> None:
         """A background cover decode finished: set that one cell's icon,
@@ -1427,20 +1553,35 @@ class MainWindow(QMainWindow):
             QMessageBox.information(self, "No Files", "Load some files first (or select the ones to resize).")
             return
 
+        sizes = self._ensure_page_sizes(target_books)
+        oversized_books = [
+            book for book in target_books
+            if id(book) in sizes and sizes[id(book)].category == SIZE_OVERSIZED
+        ]
+
         dialog = ResizeImagesDialog(
             len(target_books),
             app_settings.load_resize_max_width(),
             app_settings.load_resize_jpeg_quality(),
             parent=self,
+            oversized_count=len(oversized_books),
+            default_max_height=app_settings.load_resize_max_height(),
+            default_output_format=app_settings.load_resize_output_format() or None,
         )
         if dialog.exec() != dialog.DialogCode.Accepted:
             return
 
         max_width = dialog.max_width()
+        max_height = dialog.max_height()
+        output_format = dialog.output_format()
         jpeg_quality = dialog.jpeg_quality()
         app_settings.save_resize_max_width(max_width)
+        app_settings.save_resize_max_height(max_height or 0)
+        app_settings.save_resize_output_format(output_format or "")
         app_settings.save_resize_jpeg_quality(jpeg_quality)
         export_mode = dialog.is_export_mode()
+        if dialog.oversized_only():
+            target_books = oversized_books
 
         errors: list[str] = []
         exported_paths: list[str] = []
@@ -1449,7 +1590,9 @@ class MainWindow(QMainWindow):
         def _step(book: CbzBook, _index: int) -> None:
             output_path = dialog.output_path_for(book.path)
             try:
-                summary = book.resize_images(max_width, jpeg_quality, output_path)
+                summary = book.resize_images(
+                    max_width, jpeg_quality, output_path, max_height=max_height, output_format=output_format
+                )
             except CbzError as exc:
                 errors.append(f"{os.path.basename(book.path)}: {exc}")
                 return
@@ -1463,6 +1606,9 @@ class MainWindow(QMainWindow):
             if output_path:
                 exported_paths.append(output_path)
             else:
+                # Pixels changed on disk: forget the old measurement so
+                # the Size cell is re-measured (see the schedule() below).
+                self._size_source.pop(book)
                 row = self.books.index(book)
                 self._refresh_table_row(row, book)
                 if self._selected_rows == [row]:
@@ -1482,7 +1628,7 @@ class MainWindow(QMainWindow):
             saved_mb = (totals["original_bytes"] - totals["new_bytes"]) / (1024 * 1024)
             QMessageBox.information(
                 self, "Resize Complete",
-                f"{totals['resized']} page(s) resized, {totals['skipped']} already small enough, "
+                f"{totals['resized']} page(s) resized or converted, {totals['skipped']} already small enough, "
                 f"{totals['failed']} couldn't be read.\n\n"
                 f"Total size: {totals['original_bytes'] / (1024 * 1024):.1f} MB → "
                 f"{totals['new_bytes'] / (1024 * 1024):.1f} MB ({saved_mb:+.1f} MB).",
@@ -1490,6 +1636,7 @@ class MainWindow(QMainWindow):
 
         if export_mode and exported_paths:
             self._load_paths(exported_paths)
+        self._visible_rows.schedule()
         self._update_status()
 
     # ------------------------------------------------------------------

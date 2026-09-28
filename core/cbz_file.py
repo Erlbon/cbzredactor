@@ -25,17 +25,23 @@ side effect of a normal save.
 
 from __future__ import annotations
 
+import os
 import posixpath
 import shutil
 import zipfile
 import zlib
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from typing import Optional
 
 from redactor_common.core.save_errors import describe_save_error
 
 from core.comicinfo import ComicInfoError, ComicInfoMetadata, parse_comicinfo_xml, serialize_comicinfo_xml
-from core.image_resize import resize_page
+from core.image_resize import OUTPUT_FORMAT_EXTENSIONS, resize_page
+
+# Entry extensions that already mean "this format" -- a page named
+# .jpeg converted to JPEG keeps its name rather than becoming .jpg.
+_FORMAT_EXTENSION_FAMILY = {"JPEG": (".jpg", ".jpeg"), "WEBP": (".webp",)}
 
 # Recognized page image types. Readers in the wild are lenient about
 # this too (a CBZ is "mostly JPGs" by convention, not by enforced
@@ -68,6 +74,38 @@ class ResizeSummary:
 
 def _is_image(name: str) -> bool:
     return posixpath.splitext(name)[1].lower() in IMAGE_EXTENSIONS
+
+
+def _renamable_pages(names: list[str], output_format: Optional[str]) -> set[str]:
+    """Image entries that can safely be converted to `output_format`:
+    those whose renamed entry ("001.png" -> "001.webp") wouldn't clash
+    with another entry already in the archive, or with another page
+    being renamed to the same thing ("001.png" and "001.gif" both
+    becoming "001.webp"). Anything else keeps its original format."""
+    if not output_format:
+        return set()
+    lower_names = {n.lower() for n in names}
+    safe: set[str] = set()
+    planned: dict[str, list[str]] = {}
+    for name in names:
+        if not _is_image(name):
+            continue
+        if not _needs_rename(name, output_format):
+            safe.add(name)  # already named for that format -- no rename involved
+            continue
+        new_name = _renamed_for_format(name, output_format).lower()
+        if new_name not in lower_names:
+            planned.setdefault(new_name, []).append(name)
+    safe.update(group[0] for group in planned.values() if len(group) == 1)
+    return safe
+
+
+def _needs_rename(name: str, output_format: str) -> bool:
+    return posixpath.splitext(name)[1].lower() not in _FORMAT_EXTENSION_FAMILY[output_format]
+
+
+def _renamed_for_format(name: str, output_format: str) -> str:
+    return posixpath.splitext(name)[0] + OUTPUT_FORMAT_EXTENSIONS[output_format]
 
 
 def _find_comicinfo_name(names: list[str]) -> Optional[str]:
@@ -220,7 +258,13 @@ class CbzBook:
     # ------------------------------------------------------------------
 
     def resize_images(
-        self, max_width: int, jpeg_quality: int = 90, output_path: Optional[str] = None
+        self,
+        max_width: int,
+        jpeg_quality: int = 90,
+        output_path: Optional[str] = None,
+        max_height: Optional[int] = None,
+        output_format: Optional[str] = None,
+        workers: Optional[int] = None,
     ) -> ResizeSummary:
         """Rewrites every page image down to `max_width` (see
         core/image_resize.py for the double-page-spread doubling rule),
@@ -228,6 +272,17 @@ class CbzBook:
         byte untouched. Same temp-file-then-rename safety as save():
         overwrites self.path in place when output_path is None,
         otherwise writes a new file and leaves the source alone.
+
+        `max_height` and `output_format` are passed through to
+        resize_page(). A format change renames each page entry to the
+        new extension ("001.png" -> "001.webp"), keeping its place in
+        reading order; a page whose new name would collide with another
+        entry keeps its original format instead.
+
+        Pages are decoded/encoded on a small thread pool (Pillow
+        releases the GIL while it works), a bounded window at a time so
+        a huge book is never held in memory all at once. Output order
+        always matches the source's.
 
         Unlike save() and everything else in this module, this DOES
         re-encode pixel data -- the one deliberate exception to "images
@@ -244,43 +299,68 @@ class CbzBook:
         summary = ResizeSummary()
         target = output_path or self.path
         tmp_path = target + ".tmp_resize"
+        workers = workers or min(8, os.cpu_count() or 1)
+
+        def _process(name: str, original: bytes, fmt: Optional[str]):
+            return resize_page(original, max_width, jpeg_quality, max_height, fmt)
 
         try:
             with zipfile.ZipFile(self.path, "r") as src:
                 names = src.namelist()
                 infos = {info.filename: info for info in src.infolist()}
+                convertible = _renamable_pages(names, output_format)
 
-                with zipfile.ZipFile(tmp_path, "w") as dst:
-                    for name in names:
-                        original = src.read(name)
-                        data_to_write = original
+                with zipfile.ZipFile(tmp_path, "w") as dst, ThreadPoolExecutor(max_workers=workers) as pool:
+                    window = workers * 2
+                    for start in range(0, len(names), window):
+                        chunk = names[start:start + window]
+                        pending = []
+                        for name in chunk:
+                            original = src.read(name)
+                            future = None
+                            if _is_image(name):
+                                fmt = output_format if name in convertible else None
+                                future = pool.submit(_process, name, original, fmt)
+                            pending.append((name, original, future))
 
-                        if _is_image(name):
-                            result = resize_page(original, max_width, jpeg_quality)
-                            data_to_write = result.data
-                            if result.error:
-                                summary.pages_failed += 1
-                            elif result.resized:
-                                summary.pages_resized += 1
-                            else:
-                                summary.pages_skipped += 1
+                        for name, original, future in pending:
+                            data_to_write = original
+                            write_name = name
+                            if future is not None:
+                                result = future.result()
+                                data_to_write = result.data
+                                if result.extension and _needs_rename(name, output_format):
+                                    write_name = _renamed_for_format(name, output_format)
+                                if result.error:
+                                    summary.pages_failed += 1
+                                elif result.resized:
+                                    summary.pages_resized += 1
+                                else:
+                                    summary.pages_skipped += 1
 
-                        summary.original_bytes += len(original)
-                        summary.new_bytes += len(data_to_write)
+                            summary.original_bytes += len(original)
+                            summary.new_bytes += len(data_to_write)
 
-                        info = infos[name]
-                        new_info = zipfile.ZipInfo(name, date_time=info.date_time)
-                        new_info.compress_type = info.compress_type
-                        new_info.external_attr = info.external_attr
-                        dst.writestr(new_info, data_to_write)
+                            info = infos[name]
+                            new_info = zipfile.ZipInfo(write_name, date_time=info.date_time)
+                            new_info.compress_type = info.compress_type
+                            new_info.external_attr = info.external_attr
+                            dst.writestr(new_info, data_to_write)
             shutil.move(tmp_path, target)
         except (zipfile.BadZipFile, KeyError, OSError, zlib.error) as exc:
+            try:
+                os.remove(tmp_path)
+            except OSError:
+                pass
             raise CbzError(f"Could not resize CBZ file: {describe_save_error(exc)}") from exc
 
         if output_path is None or output_path == self.path:
             self.path = target
-            # page_names/comicinfo_name/metadata are all unchanged --
-            # resizing only ever shrinks existing pages' pixels, it
-            # never adds, removes, or renames an archive entry.
+            if output_format:
+                # Entries may have been renamed to a new extension --
+                # re-read the page list rather than guess at it.
+                # comicinfo_name/metadata are unchanged.
+                with zipfile.ZipFile(self.path, "r") as zf:
+                    self.page_names = sorted(n for n in zf.namelist() if _is_image(n))
 
         return summary
