@@ -197,6 +197,15 @@ understands that this app now supports too).
   follows pagination and promotes an exact series-name match to the
   top automatically, but an unusual or very generic series name may
   still need reviewing the candidate list carefully.
+  Following [GCD's API wiki](https://github.com/GrandComicsDatabase/gcd-django/wiki/API):
+  searches also send the **year** (GCD's own year filter -- usually one
+  request instead of several pages), try a scene name's " - " as the
+  ":" it stands for ("G.I. Joe - A Real American Hero" finds "G.I.
+  Joe: A Real American Hero"), and record the issue's GCD page in
+  **Web**. GCD limits anonymous use per hour; an optional free GCD
+  account (**Settings > GCD Account...**) raises that limit, and the
+  batch stops cleanly with a clear message when the limit is reached
+  instead of failing every remaining file.
 - `Import > Look Up via Bedetheque...` -- same Series + Number
   search and review-then-Apply flow, against [Bedetheque](https://www.bedetheque.com/),
   the reference database for French-language "bande dessinée" (BD).

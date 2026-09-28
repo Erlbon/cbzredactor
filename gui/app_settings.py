@@ -16,6 +16,7 @@ something worth inventing a different persistence scheme for here.
 
 from __future__ import annotations
 
+import base64
 import json
 import os
 
@@ -69,6 +70,62 @@ def load_comicvine_api_key() -> str:
 def save_comicvine_api_key(api_key: str) -> None:
     settings = _settings()
     settings.setValue(_COMICVINE_API_KEY, api_key.strip())
+    settings.sync()
+
+
+# ------------------------------------------------------------------
+# GCD account (Settings > GCD Account...) -- optional; GCD's API gives
+# a logged-in account a higher hourly limit than anonymous access.
+#
+# The password is stored SCRAMBLED, not encrypted: GCD's login is HTTP
+# Basic auth, which needs the real password on every request, so it
+# can't be hashed. Scrambling only keeps it from being readable at a
+# glance in this per-install settings file (a comics-database login,
+# by the user's own call "hardly top secret") -- anyone with the file
+# and this source can reverse it.
+# ------------------------------------------------------------------
+
+_GCD_USERNAME_KEY = "gcd/username"
+_GCD_PASSWORD_KEY = "gcd/password"
+_SCRAMBLE_PREFIX = "s1:"
+_SCRAMBLE_KEY = b"cbzredactor-gcd"
+
+
+def scramble(text: str) -> str:
+    data = text.encode("utf-8")
+    mixed = bytes(b ^ _SCRAMBLE_KEY[i % len(_SCRAMBLE_KEY)] for i, b in enumerate(data))
+    return _SCRAMBLE_PREFIX + base64.urlsafe_b64encode(mixed).decode("ascii")
+
+
+def unscramble(stored: str) -> str:
+    if not stored.startswith(_SCRAMBLE_PREFIX):
+        return ""
+    try:
+        mixed = base64.urlsafe_b64decode(stored[len(_SCRAMBLE_PREFIX):].encode("ascii"))
+    except (ValueError, UnicodeEncodeError):
+        return ""
+    data = bytes(b ^ _SCRAMBLE_KEY[i % len(_SCRAMBLE_KEY)] for i, b in enumerate(mixed))
+    return data.decode("utf-8", errors="replace")
+
+
+def load_gcd_account() -> tuple[str, str]:
+    """(username, password); ("", "") when none is set."""
+    settings = _settings()
+    username = str(settings.value(_GCD_USERNAME_KEY, ""))
+    password = unscramble(str(settings.value(_GCD_PASSWORD_KEY, "")))
+    return (username, password) if username and password else ("", "")
+
+
+def save_gcd_account(username: str, password: str) -> None:
+    """Blank username or password removes the account."""
+    settings = _settings()
+    username = username.strip()
+    if username and password:
+        settings.setValue(_GCD_USERNAME_KEY, username)
+        settings.setValue(_GCD_PASSWORD_KEY, scramble(password))
+    else:
+        settings.remove(_GCD_USERNAME_KEY)
+        settings.remove(_GCD_PASSWORD_KEY)
     settings.sync()
 
 

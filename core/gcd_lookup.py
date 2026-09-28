@@ -51,8 +51,11 @@ independent of live network access.
 
 from __future__ import annotations
 
+import base64
 import json
 import re
+import urllib.error
+import urllib.request
 from dataclasses import dataclass
 from urllib.parse import quote
 
@@ -69,6 +72,26 @@ CONTENT_STORY_TYPES = {"comic story"}
 class GcdLookupError(Exception):
     """Raised for any problem searching for, parsing, or downloading
     GCD results."""
+
+
+class GcdRateLimitError(GcdLookupError):
+    """GCD's hourly request limit was reached (HTTP 429). Anonymous
+    access has a lower limit than a logged-in account -- see
+    make_gcd_fetch(). A batch should stop at this point rather than
+    fail every remaining file one request at a time."""
+
+
+class GcdAuthError(GcdLookupError):
+    """GCD rejected the configured username/password (HTTP 401/403)."""
+
+
+RATE_LIMIT_MESSAGE = (
+    "The Grand Comics Database's hourly request limit was reached. Try again later"
+)
+AUTH_MESSAGE = (
+    "The Grand Comics Database didn't accept your username/password -- check "
+    "Settings > GCD Account..."
+)
 
 
 @dataclass
@@ -109,6 +132,7 @@ class GcdIssueDetails:
     characters: str = ""
     publisher: str = ""
     cover_image_url: str = ""
+    web: str = ""  # the issue's GCD page, e.g. https://www.comics.org/issue/12345/
 
     def as_dict(self) -> dict:
         """Only the fields that actually came back, keyed to match
@@ -130,8 +154,54 @@ class GcdIssueDetails:
             "genre": self.genre,
             "characters": self.characters,
             "publisher": self.publisher,
+            "web": self.web,
         }
         return {k: v for k, v in raw.items() if v}
+
+
+def make_gcd_fetch(username: str = "", password: str = "", timeout: float = 30.0):
+    """A fetch(url) -> bytes for GCD's API, optionally logged in.
+
+    GCD's API wiki: anonymous access is limited per hour, a logged-in
+    account gets larger limits, and anonymous access "will likely be
+    turned off at some point". Logging in is plain HTTP Basic
+    authentication with the user's comics.org account.
+
+    Translates GCD's own refusals into specific errors: HTTP 429 ->
+    GcdRateLimitError, and (only when credentials were sent) 401/403 ->
+    GcdAuthError. Everything else is left for fetch_json()'s usual
+    translation."""
+    base_fetch = make_default_fetch(USER_AGENT, timeout=timeout)
+    auth_header = ""
+    if username and password:
+        token = base64.b64encode(f"{username}:{password}".encode("utf-8")).decode("ascii")
+        auth_header = f"Basic {token}"
+
+    def _fetch(url) -> bytes:
+        request = url if isinstance(url, urllib.request.Request) else urllib.request.Request(url)
+        if auth_header:
+            request.add_header("Authorization", auth_header)
+        try:
+            return base_fetch(request)
+        except urllib.error.HTTPError as exc:
+            if exc.code == 429:
+                hint = "" if auth_header else ", or add a free GCD account in Settings > GCD Account... for a higher limit"
+                raise GcdRateLimitError(f"{RATE_LIMIT_MESSAGE}{hint}.") from exc
+            if exc.code in (401, 403) and auth_header:
+                raise GcdAuthError(AUTH_MESSAGE) from exc
+            raise
+
+    return _fetch
+
+
+def check_login(username: str, password: str, fetch=None) -> None:
+    """Checks a username/password against GCD's API. GCD answers an
+    anonymous request normally, but a request carrying WRONG
+    credentials is refused -- so any small authenticated request tells
+    us whether the login works. Raises GcdAuthError, GcdRateLimitError
+    or GcdLookupError; returns normally when the login is accepted."""
+    fetch = fetch or make_gcd_fetch(username, password)
+    _get_json(f"{API_BASE}/series/7096/?format=json", fetch)
 
 
 _default_fetch = make_default_fetch(USER_AGENT)
@@ -153,15 +223,21 @@ def _clean_series_name(raw_name: str) -> str:
     return _SERIES_YEAR_SUFFIX_RE.sub("", raw_name or "").strip()
 
 
-def build_search_url(series: str, number: str) -> str:
+def build_search_url(series: str, number: str, year: str = "") -> str:
+    """GCD's series+issue search. With `year`, adds GCD's own
+    ".../year/<year>/" filter (matched against the issue's key date,
+    per GCD's API wiki) -- cuts a common title's dozens of
+    alphabetically-sorted results down to a handful in one request."""
     series = (series or "").strip()
     number = (number or "").strip()
+    year = (year or "").strip()
     if not series or not number:
         raise GcdLookupError(
             "Both a series name and an issue number are required to search the "
             "Grand Comics Database (unlike Comic Vine, GCD has no free-text search)."
         )
-    return f"{API_BASE}/series/name/{quote(series)}/issue/{quote(number)}/?format=json"
+    year_part = f"year/{quote(year)}/" if re.fullmatch(r"\d{4}", year) else ""
+    return f"{API_BASE}/series/name/{quote(series)}/issue/{quote(number)}/{year_part}?format=json"
 
 
 def parse_search_response(raw: bytes) -> list[GcdCandidate]:
@@ -196,8 +272,8 @@ def _rank_candidates(candidates: list[GcdCandidate], queried_series: str) -> lis
     "Watchmen (1986 series)" purely because "A"/"B" sorts before "W".
     A stable sort preserves that alphabetical order among everything
     that isn't an exact match."""
-    query = queried_series.strip().lower()
-    return sorted(candidates, key=lambda c: c.series_name.strip().lower() != query)
+    query = _comparable(queried_series)
+    return sorted(candidates, key=lambda c: _comparable(c.series_name) != query)
 
 
 # Safety cap on how many result pages search_gcd will follow looking
@@ -208,7 +284,9 @@ def _rank_candidates(candidates: list[GcdCandidate], queried_series: str) -> lis
 MAX_SEARCH_PAGES = 5
 
 
-def search_gcd(series: str, number: str, fetch=None, max_results: int = 8) -> list[GcdCandidate]:
+def search_gcd(
+    series: str, number: str, fetch=None, max_results: int = 8, year: str = ""
+) -> list[GcdCandidate]:
     """Searches for issues matching `series` + `number` exactly (GCD's
     own endpoint shape requires both -- see build_search_url()).
 
@@ -226,9 +304,35 @@ def search_gcd(series: str, number: str, fetch=None, max_results: int = 8) -> li
     result set, not an error, since it's the expected outcome of a
     typo or a series GCD simply doesn't have)."""
     fetch = fetch or _default_fetch
-    url = build_search_url(series, number)
-    query = series.strip().lower()
+    build_search_url(series, number)  # validates series + number up front
 
+    # Narrowest first: the year filter, then without it (a filename's
+    # year can be a cover year that GCD's key date files a month
+    # apart, or plain wrong); the series as written, then with scene
+    # naming's " - " turned back into the ":" Windows filenames can't
+    # hold ("G.I. Joe - A Real ..." -> "G.I. Joe: A Real ..."), since
+    # GCD's name search is a plain "contains".
+    for name in series_name_variants(series):
+        for year_filter in ([year, ""] if year else [""]):
+            candidates = _search_pages(name, number, year_filter, fetch)
+            if candidates:
+                return _rank_candidates(candidates, name)[:max_results]
+    return []
+
+
+def series_name_variants(series: str) -> list[str]:
+    """The series to try, in order. A scene-style " - " subtitle
+    separator almost always stands for a ":" in the real title, so the
+    colon form goes first, then the name exactly as given."""
+    series = series.strip()
+    if " - " in series:
+        return [series.replace(" - ", ": ", 1), series]
+    return [series]
+
+
+def _search_pages(series: str, number: str, year: str, fetch) -> list[GcdCandidate]:
+    url = build_search_url(series, number, year)
+    query = _comparable(series)
     all_candidates: list[GcdCandidate] = []
     for _ in range(MAX_SEARCH_PAGES):
         data = fetch_json(url, fetch, error_cls=GcdLookupError, source_name=_SOURCE_NAME, ignore_404=True)
@@ -237,14 +341,18 @@ def search_gcd(series: str, number: str, fetch=None, max_results: int = 8) -> li
 
         page_candidates = _candidates_from_page(data)
         all_candidates.extend(page_candidates)
-        if any(c.series_name.strip().lower() == query for c in page_candidates):
+        if any(_comparable(c.series_name) == query for c in page_candidates):
             break
         next_url = data.get("next")
         if not next_url:
             break
         url = next_url
+    return all_candidates
 
-    return _rank_candidates(all_candidates, series)[:max_results]
+
+def _comparable(name: str) -> str:
+    """Case-folded, with ":" and " - " treated alike."""
+    return re.sub(r"\s*(:|\s-)\s*", ": ", (name or "").strip()).casefold()
 
 
 _TRAILING_PAREN_RE = re.compile(r"\s*\([^()]*\)\s*$")
@@ -349,7 +457,19 @@ def fetch_issue_details(detail_url: str, fetch=None) -> GcdIssueDetails:
         characters=_aggregate_list_field("characters"),
         publisher=data.get("indicia_publisher", "") or "",
         cover_image_url=data.get("cover", "") or "",
+        web=issue_page_url(detail_url),
     )
+
+
+_ISSUE_API_URL_RE = re.compile(r"^(https?://[^/]+)/api/issue/(\d+)/")
+
+
+def issue_page_url(detail_url: str) -> str:
+    """The issue's public GCD page for its API URL:
+    https://www.comics.org/api/issue/12345/?format=json ->
+    https://www.comics.org/issue/12345/ ("" if it doesn't look like one)."""
+    match = _ISSUE_API_URL_RE.match(detail_url or "")
+    return f"{match.group(1)}/issue/{match.group(2)}/" if match else ""
 
 
 def download_cover_image(details: GcdIssueDetails, fetch=None) -> bytes:

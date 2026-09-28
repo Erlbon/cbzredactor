@@ -431,6 +431,7 @@ class MainWindow(QMainWindow):
             ],
             "Settings": [
                 MenuAction("comicvine_api_key", "Comic Vine API &Key...", self.change_comicvine_api_key),
+                MenuAction("gcd_account", "&GCD Account...", self.open_gcd_account_dialog),
                 MenuAction("conversion_settings", "Converting to CB&Z...", self.open_conversion_settings_dialog),
                 Separator(),
                 MenuAction("column_settings", "Add/Remove &Columns...", self.open_column_settings_dialog),
@@ -1955,6 +1956,11 @@ class MainWindow(QMainWindow):
 
     def open_conversion_settings_dialog(self) -> None:
         ConversionSettingsDialog(self).exec()
+
+    def open_gcd_account_dialog(self) -> None:
+        from gui.gcd_account_dialog import GcdAccountDialog
+
+        GcdAccountDialog(self).exec()
 
     def _convert_books(self, books: list[CbzBook], delete_originals: bool) -> None:
         errors: list[str] = []

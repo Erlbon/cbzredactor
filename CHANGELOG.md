@@ -1,5 +1,30 @@
 # Changelog
 
+## 2026-09-28#06 -- Faster, more reliable GCD lookups
+
+Based on GCD's own API wiki
+(github.com/GrandComicsDatabase/gcd-django/wiki/API):
+
+- **Year-filtered searches.** The year from the file (ComicInfo, or the
+  filename) is sent with the search, using GCD's own year filter --
+  usually one request instead of paging through dozens of
+  alphabetically-sorted matches. Falls back to no year if that finds
+  nothing. Year is now an editable query field next to Series and
+  Number.
+- **Scene names find their series.** GCD's name search is a plain
+  "contains", so "G.I. Joe - A Real American Hero" never found "G.I.
+  Joe: A Real American Hero". A " - " in the name is now tried as ":"
+  first.
+- **Optional GCD account: Settings > GCD Account...** GCD limits
+  anonymous API use per hour; a free account raises the limit (and GCD
+  has said anonymous access may be switched off). Includes Test Login.
+  The password is stored scrambled in this install's settings file --
+  not hashed, because GCD's login needs the real password.
+- **Hourly limit / rejected login stop the batch** with a clear
+  message; the remaining files are skipped instantly instead of each
+  failing on its own.
+- **GCD lookups record the issue's GCD page** in the Web field.
+
 ## 2026-09-28#05 -- Scene filename parsing, Read Filename Tags, width presets
 
 - **Fixed: online lookups couldn't read `.webp.cbz` names.** Files
