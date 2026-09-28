@@ -32,6 +32,9 @@ def _scan(path: str, page_names: list[str]) -> PageSizeStats:
         return PageSizeStats(unreadable=len(page_names))
 
 
+SCAN_PRIORITY = -1
+
+
 class _Signals(QObject):
     done = pyqtSignal(object, object, object)  # book, source, stats
 
@@ -76,8 +79,12 @@ class PageSizeScanner(QObject):
         if self.get_cached(book, source) is not None or self._in_flight.get(book) == source:
             return
         self._in_flight[book] = source
+        # Below the default priority (0) the table's cover thumbnails use
+        # on the same pool: scanning pages (the credit-page scan decodes
+        # six per book) must never make covers wait.
         QThreadPool.globalInstance().start(
-            _ScanTask(self._scan_fn, book, source, book.path, list(book.page_names), self._signals)
+            _ScanTask(self._scan_fn, book, source, book.path, list(book.page_names), self._signals),
+            SCAN_PRIORITY,
         )
 
     def scan_now(self, book, source) -> PageSizeStats:

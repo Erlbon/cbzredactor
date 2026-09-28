@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-09-28#11 -- Cover thumbnails first
+
+Cover thumbnails in the file list no longer wait behind the Size and
+Credit Pages columns' background scans (a credit-page check decodes six
+pages per file): those scans now run at a lower priority on the shared
+background pool, so covers appear first.
+
 ## 2026-09-28#10 -- Find duplicates, keep the best copy
 
 - **Operations > Find Duplicates...** (selected files, or all): the
