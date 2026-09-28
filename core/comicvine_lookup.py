@@ -139,6 +139,11 @@ class ComicVineIssueDetails:
     locations: str = ""
     story_arc: str = ""
     publisher: str = ""  # filled in separately by fetch_publisher(); "" until then
+    # The issue's Comic Vine page (site_detail_url), written to
+    # ComicInfo's Web field -- a permanent record of exactly which
+    # Comic Vine issue this file was matched to, so a later run (or
+    # another tool) can tell it's already been identified.
+    web: str = ""
 
     def as_dict(self) -> dict:
         """Only the fields that actually came back, keyed to match
@@ -165,6 +170,7 @@ class ComicVineIssueDetails:
             "locations": self.locations,
             "story_arc": self.story_arc,
             "publisher": self.publisher,
+            "web": self.web,
         }
         return {k: v for k, v in raw.items() if v}
 
@@ -414,7 +420,7 @@ def fetch_issue_details(api_key: str, detail_url: str, fetch=None) -> ComicVineI
     included here -- see fetch_publisher()."""
     fetch = fetch or _default_fetch
     field_list = (
-        "name,issue_number,cover_date,deck,description,volume,"
+        "name,issue_number,cover_date,deck,description,volume,site_detail_url,"
         "person_credits,character_credits,team_credits,location_credits,story_arc_credits"
     )
     url = f"{detail_url}?{urlencode({'api_key': api_key, 'format': 'json', 'field_list': field_list}, quote_via=quote)}"
@@ -442,6 +448,7 @@ def fetch_issue_details(api_key: str, detail_url: str, fetch=None) -> ComicVineI
         teams=_names(result.get("team_credits")),
         locations=_names(result.get("location_credits")),
         story_arc=_names(result.get("story_arc_credits")),
+        web=result.get("site_detail_url", "") or "",
     )
 
 

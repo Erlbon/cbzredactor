@@ -366,3 +366,27 @@ def test_download_cover_image_returns_bytes():
     fake_bytes = b"\xff\xd8\xff\xe0fakejpeg"
     result = download_cover_image(candidate, fetch=lambda url: fake_bytes)
     assert result == fake_bytes
+
+
+def test_issue_details_record_the_comic_vine_page_in_web():
+    """The matched issue's Comic Vine page is written to ComicInfo's Web
+    field, so it's permanently recorded which issue the file was matched
+    to (and the field is only present when Comic Vine returned it)."""
+    response = dict(ISSUE_DETAIL_RESPONSE)
+    response["results"] = dict(response["results"], site_detail_url="https://comicvine.gamespot.com/test/4000-111/")
+    details = fetch_issue_details("KEY123", "https://x/issue/4000-111/", fetch=_fetch_returning(response))
+    assert details.as_dict()["web"] == "https://comicvine.gamespot.com/test/4000-111/"
+
+    without = fetch_issue_details("KEY123", "https://x/issue/4000-111/", fetch=_fetch_returning(ISSUE_DETAIL_RESPONSE))
+    assert "web" not in without.as_dict()
+
+
+def test_issue_details_request_asks_for_site_detail_url():
+    seen = []
+
+    def fetch(url):
+        seen.append(url)
+        return _fetch_returning(ISSUE_DETAIL_RESPONSE)(url)
+
+    fetch_issue_details("KEY123", "https://x/issue/4000-111/", fetch=fetch)
+    assert "site_detail_url" in seen[0]

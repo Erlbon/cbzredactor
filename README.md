@@ -149,6 +149,21 @@ understands that this app now supports too).
 - **Ext column**: each file's extension, plus its real format when the
   two disagree -- `CBR → ZIP` for a ZIP someone renamed to .cbr, `CBZ →
   RAR` for the reverse. Sort by it to group what still needs converting.
+- **Import > Read Filename Tags** fills ComicInfo from scene-style
+  filenames with no pattern to type: series, issue number, "3 of 12"
+  counts, `v01` volumes, "001 - Title" issue titles, and years (a year
+  before the issue number, as in `Batman (2016) 045`, is the series'
+  start year, stored in Volume as ComicRack does). Bracketed tags are
+  sorted: scan groups and sources (`Zone-Empire`, `Digital`, `c2c`) go
+  to **ScanInformation**, editions (`TPB`, `One Shot`, `FCBD`) to
+  **Format**, completeness notes (`missing ifc`, `2 covers`) are
+  appended to **Notes**. Only whole bracketed phrases count as tags, so
+  a title word like "Empire" is never stripped. Tags it doesn't
+  recognise are listed afterwards, not guessed at. Handles the
+  `.webp.cbz` ending CbxConverter adds. Goes through the usual
+  per-field review; undoable. The same parser now seeds every online
+  lookup, which previously found no issue number at all for
+  `.webp.cbz` names.
 - `Import > Convert to CBZ` converts CBR/CBT/CB7 and mislabeled files
   (see "Foreign archive formats" below).
 - **Size column**: each book's typical page width, colored **yellow**
@@ -219,8 +234,9 @@ understands that this app now supports too).
   byte-for-byte untouched. Choose to resize files in place or export
   resized copies to a folder (originals untouched); a quality setting
   controls re-save quality for JPEG/WebP pages (PNG pages stay
-  lossless). The default target is **1440px**, which lands a book in
-  the Size column's green band. Options modeled on
+  lossless). Width presets: **Standard 1280px**, **Wide 1440px** (the
+  default, which lands a book in the Size column's green band), **HD
+  1920px** and **UHD 2560px**, or any custom width. Options modeled on
   [CbxConverter](https://github.com/tomek-o/CbxConverter): an optional
   **height limit** (for tall manga/webtoon pages), an optional
   **output format** (JPEG or WebP -- every page is re-encoded and

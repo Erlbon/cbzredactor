@@ -78,6 +78,7 @@ from core.foreign_archive_convert import relabel_mislabeled_cbz
 from core.trash import TrashError, move_to_trash
 from core.page_dimensions import SIZE_LOW, SIZE_OK, SIZE_OVERSIZED, PageSizeStats
 from core.scan_quality_tag import LOW_RES_TAG, add_tag, has_tag, remove_tag
+from core.scene_name import parse_filename, proposed_fields
 from core.version import APP_NAME, APP_REPO_URL, APP_VERSION, RELEASE_LABEL
 from gui import app_settings
 from gui.bedetheque_lookup_dialog import BedethequeLookupDialog
@@ -400,6 +401,7 @@ class MainWindow(QMainWindow):
                     "parse_filename", "&Parse Filename...", self.open_parse_filename_dialog,
                     shortcut=shortcuts.PARSE_FILENAME_TO_METADATA,
                 ),
+                MenuAction("read_filename_tags", "Read Filename &Tags", self.read_filename_tags),
                 MenuAction("convert_foreign", "Convert to CB&Z...", self.convert_foreign_archives_dialog),
                 Separator(),
                 MenuAction("comicvine_lookup", "Look Up via Comic &Vine...", self.open_comicvine_lookup_dialog),
@@ -1492,6 +1494,61 @@ class MainWindow(QMainWindow):
                 page_count_text = f"{book.actual_page_count} page(s)"
                 self._show_book_in_panel(book, page_count_text)
         self._update_status()
+
+    def read_filename_tags(self) -> None:
+        """Import > Read Filename Tags: fills ComicInfo from what a
+        scene-style filename says (core/scene_name.py) -- series,
+        number, count, volume, title, year, plus the bracketed tags:
+        scan group and source into ScanInformation, edition into
+        Format, completeness notes appended to Notes. No pattern to
+        type, unlike Parse Filename. Goes through the usual per-field
+        overwrite review; undoable, written on Save."""
+        self._commit_current_edits()
+        target_books = self._target_books()
+        if not target_books:
+            QMessageBox.information(self, "No Files", "Load some files first (or select the ones to read).")
+            return
+
+        changes: dict[int, dict[str, str]] = {}
+        unknown: dict[str, int] = {}
+        for index, book in enumerate(target_books):
+            parsed = parse_filename(book.path)
+            fields = proposed_fields(parsed, book.metadata.notes)
+            fields = {k: v for k, v in fields.items() if getattr(book.metadata, k, "") != v}
+            if fields:
+                changes[index] = fields
+            for phrase in parsed.unknown:
+                unknown[phrase] = unknown.get(phrase, 0) + 1
+
+        if not changes:
+            QMessageBox.information(self, "Read Filename Tags", "Nothing new to take from these filenames.")
+            return
+        changes = self._resolve_overwrite_conflicts(target_books, changes)
+        if not changes:
+            return
+
+        self._push_undo("Read Filename Tags", target_books)
+        for index, fields in changes.items():
+            book = target_books[index]
+            for attr, value in fields.items():
+                setattr(book.metadata, attr, value)
+            book.dirty = True
+            row = self.books.index(book)
+            self._refresh_table_row(row, book)
+            if self._selected_rows == [row]:
+                self._show_book_in_panel(book, f"{book.actual_page_count} page(s)")
+        self._update_status()
+
+        if unknown:
+            shown = sorted(unknown, key=lambda p: (-unknown[p], p.casefold()))
+            listing = "\n".join(f"  ({p})" + (f"  x{unknown[p]}" if unknown[p] > 1 else "") for p in shown[:15])
+            if len(shown) > 15:
+                listing += f"\n  ...and {len(shown) - 15} more"
+            QMessageBox.information(
+                self, "Unrecognised Tags",
+                "These bracketed tags weren't recognised, so they were left out of "
+                f"ScanInformation, Format and Notes:\n\n{listing}",
+            )
 
     def _on_cell_double_clicked(self, row: int, col: int) -> None:
         if col != self._col_index["filename"]:

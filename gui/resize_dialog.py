@@ -49,6 +49,15 @@ from PyQt6.QtWidgets import (
 
 from core.page_dimensions import OVERSIZED_FROM
 
+# Named target widths (single page). "Wide" is the default -- see
+# gui/app_settings.py's _DEFAULT_RESIZE_MAX_WIDTH.
+WIDTH_PRESETS: list[tuple[str, int]] = [
+    ("Standard", 1280),
+    ("Wide", 1440),
+    ("HD", 1920),
+    ("UHD", 2560),
+]
+
 # (label, output_format) -- None keeps each page's own format.
 OUTPUT_FORMAT_CHOICES: list[tuple[str, Optional[str]]] = [
     ("Keep original format", None),
@@ -104,12 +113,21 @@ class ResizeImagesDialog(QDialog):
         form_box = QGroupBox("Target")
         form = QFormLayout(form_box)
 
+        self.preset_combo = QComboBox()
+        for label, width in WIDTH_PRESETS:
+            self.preset_combo.addItem(f"{label} ({width}px)", width)
+        self.preset_combo.addItem("Custom", None)
+        form.addRow("Preset:", self.preset_combo)
+
         self.max_width_spin = QSpinBox()
         self.max_width_spin.setRange(200, 10000)
         self.max_width_spin.setSingleStep(10)
         self.max_width_spin.setSuffix(" px")
         self.max_width_spin.setValue(default_max_width)
         form.addRow("Max width (single page):", self.max_width_spin)
+        self._sync_preset_to_width(default_max_width)
+        self.preset_combo.activated.connect(self._on_preset_chosen)
+        self.max_width_spin.valueChanged.connect(self._sync_preset_to_width)
 
         height_row = QHBoxLayout()
         self.max_height_check = QCheckBox("Also limit height to")
@@ -201,6 +219,21 @@ class ResizeImagesDialog(QDialog):
         outer.addWidget(buttons)
         self._ok_button = buttons.button(QDialogButtonBox.StandardButton.Ok)
         self._update_ok_enabled()
+
+    def _on_preset_chosen(self, index: int) -> None:
+        width = self.preset_combo.itemData(index)
+        if width is not None:
+            self.max_width_spin.setValue(width)
+
+    def _sync_preset_to_width(self, width: int) -> None:
+        """Shows the preset matching `width`, or "Custom" for any other
+        value typed into the width box."""
+        index = self.preset_combo.findData(width)
+        if index < 0:
+            index = self.preset_combo.count() - 1  # "Custom"
+        self.preset_combo.blockSignals(True)
+        self.preset_combo.setCurrentIndex(index)
+        self.preset_combo.blockSignals(False)
 
     def _choose_folder(self) -> None:
         folder = QFileDialog.getExistingDirectory(self, "Choose Export Folder")

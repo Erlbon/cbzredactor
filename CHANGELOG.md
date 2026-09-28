@@ -1,5 +1,34 @@
 # Changelog
 
+## 2026-09-28#05 -- Scene filename parsing, Read Filename Tags, width presets
+
+- **Fixed: online lookups couldn't read `.webp.cbz` names.** Files
+  converted by CbxConverter end in `.webp.cbz`; the old guesser only
+  stripped the last extension, so every such name came out with no
+  issue number (GCD and Bedetheque can't search without one) and a
+  series full of tags. Lookups now use a proper filename parser.
+- **New filename parser** for scene-style names: series, issue number,
+  "3 of 12" counts, `v01` volumes, "001 - Title" issue titles,
+  `(Chapter 23)` reading-order markers, and which year is which (a year
+  before the number, `Batman (2016) 045`, is the series' start year).
+  Clean-up rules for URL escapes, `+`/`_` for spaces and `[]`/`{}`
+  brackets.
+- **Import > Read Filename Tags**: fills ComicInfo from the filename,
+  no pattern to type. Bracketed tags are sorted: scan groups and
+  sources into ScanInformation, editions into Format, completeness
+  notes appended to Notes. Only whole bracketed phrases count, so title
+  words are never stripped. Unrecognised tags are listed, not guessed.
+  Per-field review, undoable.
+- **Built-in scene-tag dictionary**: pattern rules for the regular
+  group shapes (`-Empire`, `-DCP`, `Minutemen-`, `-Novus`, `N covers`,
+  `NNNNpx`, ...) plus a cleaned list of ~350 irregular tags, seeded from
+  the maintainer's ZenCBR training list.
+- **Comic Vine lookups now record the matched issue's Comic Vine page**
+  in the Web field.
+- **Resize Images width presets**: Standard 1280px, Wide 1440px
+  (default), HD 1920px, UHD 2560px, or custom.
+- Credits: ZenCBR and CbxConverter, as inspiration (no code used).
+
 ## 2026-09-28#04 -- Tag Low-Res Scans
 
 - **Operations > Tag Low-Res Scans**: adds `Low-res scan` to the Tags

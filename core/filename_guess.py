@@ -1,96 +1,46 @@
 """
 core/filename_guess.py
 
-A loose "Series Name 12" / "Series Name #12" filename parser, used by
-the online lookup dialogs (Comic Vine, GCD) to seed a search query
-when a book has no Series set yet. Not a general-purpose comic
-filename parser -- just enough to guess at something worth searching;
-the lookup dialogs let the user review and manually correct the guess
-before searching, so a wrong guess here costs nothing beyond an
-unhelpful default.
+Series/number/year guesses for the online lookup dialogs (Comic Vine,
+GCD, Bedetheque), used to seed a search when a book has no Series set
+yet. The lookup dialogs let the user review and correct the guess
+before searching, so a wrong guess costs nothing beyond an unhelpful
+default.
 
-Real-world filenames (scene/scanlation releases especially) commonly
-trail the issue number with bracketed/parenthesized metadata that
-isn't part of the series name or number at all -- year, release group,
-"Digital", a hash, etc: "Batman 001 (2016) (Digital) (Empire).cbz".
-Those trailing groups are stripped BEFORE looking for the number (see
-_strip_trailing_annotations()); without that, no number is found at
-all (nothing follows it but bracketed junk), which matters far more
-for GCD than Comic Vine -- GCD's search requires both series AND
-number to search at all (see core/gcd_lookup.py), so a filename that
-fails to yield a number there doesn't just get a worse guess, it can't
-search at all.
-
-Pure string logic, no CbzBook/Qt dependency, so it's fully unit-tested
-independent of either.
+Since 2026-09-28 this is a thin layer over core/scene_name.py's full
+filename parser. The old guesser here only stripped the last extension
+and trailing brackets, so every name ending in a converter's
+".webp.cbz" (CbxConverter) came out with no issue number at all -- GCD
+and Bedetheque can't search without one.
 """
 
 from __future__ import annotations
 
-import datetime
-import os
-import re
-
-# One or more trailing "(...)"/"[...]" groups -- year, release group,
-# format tags, etc -- stripped repeatedly from the end before number
-# extraction, since they'd otherwise sit between the number and the
-# end of the string and defeat the end-anchored number pattern below.
-_TRAILING_BRACKET_GROUP_RE = re.compile(r"\s*[\(\[][^\(\)\[\]]*[\)\]]\s*$")
-
-# Series name, then a separator, then the issue number -- optionally
-# prefixed with "#" (issue) or "v"/"vol" (volume, e.g. trade-paperback-
-# collected series like Saga), optionally zero-padded.
-_FILENAME_GUESS_RE = re.compile(r"^(.*?)[\s_.-]+(?:v(?:ol)?\.?|#)?0*(\d+)\s*$", re.IGNORECASE)
-
-
-def _strip_trailing_annotations(stem: str) -> str:
-    while True:
-        stripped = _TRAILING_BRACKET_GROUP_RE.sub("", stem)
-        if stripped == stem:
-            return stem
-        stem = stripped
+from core.scene_name import parse_filename
 
 
 def guess_series_and_number(path: str, existing_series: str = "", existing_number: str = "") -> tuple[str, str]:
     """Returns (series, number) -- `existing_series`/`existing_number`
     (typically a book's already-set ComicInfo.xml fields) win outright
     when Series is non-blank; otherwise falls back to parsing `path`'s
-    filename."""
+    filename. A collected volume with no issue number ("Saga v01")
+    returns the volume number, which is how the lookup sources number
+    collected editions."""
     if existing_series.strip():
         return existing_series.strip(), existing_number.strip()
-
-    stem = os.path.splitext(os.path.basename(path))[0].replace("_", " ")
-    core = _strip_trailing_annotations(stem)
-    match = _FILENAME_GUESS_RE.match(core)
-    if match:
-        return match.group(1).strip(" -_."), match.group(2)
-    return core.strip(" -_."), ""
-
-
-# A 4-digit year inside one of the same trailing bracket/paren groups
-# _strip_trailing_annotations() discards above, e.g. the "(2016)" in
-# "Batman 001 (2016) (Digital) (Empire).cbz" -- that annotation carries
-# real signal (see guess_year()) that guess_series_and_number() throws
-# away entirely today.
-_YEAR_ANNOTATION_RE = re.compile(r"[\(\[](\d{4})[\)\]]")
+    parsed = parse_filename(path)
+    return parsed.series, parsed.number or (parsed.volume if len(parsed.volume) < 4 else "")
 
 
 def guess_year(path: str, existing_year: str = "") -> str:
     """Returns a best-guess 4-digit publication year as a soft ranking
     hint for online lookups (see core/comicvine_lookup.py's scoring) --
-    never written into ComicInfo.xml automatically, since a filename
-    annotation is far less reliable than an actual lookup result.
+    never written into ComicInfo.xml automatically by this function.
     `existing_year` (typically a book's already-set ComicInfo.xml
-    field) wins outright when set; otherwise the filename's own
-    trailing bracket groups are checked for a plausible year, leftmost
-    (closest to the issue number) first."""
+    field) wins outright when set; otherwise the issue's own year from
+    the filename, falling back to the series' start year
+    ("Batman (2016) 045")."""
     if existing_year.strip():
         return existing_year.strip()
-
-    stem = os.path.splitext(os.path.basename(path))[0]
-    max_year = datetime.datetime.now().year + 1
-    for match in _YEAR_ANNOTATION_RE.finditer(stem):
-        year = int(match.group(1))
-        if 1900 <= year <= max_year:
-            return match.group(1)
-    return ""
+    parsed = parse_filename(path)
+    return parsed.year or (parsed.volume if len(parsed.volume) == 4 else "")
