@@ -1,5 +1,29 @@
 # Changelog
 
+## 2026-09-28#02 -- Ext column, convert from the table
+
+- **New Ext column** (shown by default): the file's extension, plus its
+  real format when they disagree -- `CBR → ZIP` (a renamed ZIP), `CBZ →
+  RAR`. The real format is read from the file's first bytes.
+- **Load prompt now has three choices**: Convert Now, **Add
+  Unconverted**, or Skip. "Add Unconverted" lists the files as greyed,
+  read-only rows (Status "Needs conversion"; editing, saving, lookups
+  and resizing skip them). Sort by Ext, select, then right-click >
+  **Convert to CBZ** -- each row is replaced by its .cbz in place.
+  **Import > Convert to CBZ** converts the list's unconverted rows (the
+  selected ones, or all), and only asks for files from disk when there
+  are none.
+- **Safer conversion:**
+  - The method follows the real format: a ZIP named .cbr is simply
+    copied (no unpacking); a .cbz that's really a RAR/7z/tar is renamed
+    to its true extension first, then converted.
+  - Every converted .cbz is checked (opens, passes CRC checks, same
+    number of pages as extracted) before the original can be touched.
+  - An existing .cbz is never overwritten; a failed conversion leaves
+    no half-written file behind.
+  - Originals you choose to remove now go to the **Recycle Bin** (new
+    dependency: `send2trash`) instead of being deleted permanently.
+
 ## 2026-09-28#01 -- Size column, smarter Resize Images
 
 Resize features modeled on CbxConverter (github.com/tomek-o/CbxConverter),

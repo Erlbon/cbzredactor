@@ -146,7 +146,17 @@ understands that this app now supports too).
   byte-for-byte into a fresh archive, so pixel data is never
   re-encoded or reordered -- **except** via the explicit Resize
   Images... action described below, the one deliberate exception.
-- `Import > Convert CBR to CBZ` for RAR-based archives (see below).
+- **Ext column**: each file's extension, plus its real format when the
+  two disagree -- `CBR → ZIP` for a ZIP someone renamed to .cbr, `CBZ →
+  RAR` for the reverse. Sort by it to group what still needs converting.
+- `Import > Convert to CBZ` converts CBR/CBT/CB7 and mislabeled files
+  (see "Foreign archive formats" below).
+- **Size column**: each book's typical page width, colored **yellow**
+  (low-res, under 1000px), **green** (acceptable, 1000-1599px) or
+  **orange** (oversized, 1600px+). Based on the median width of the
+  single pages, so double-page spreads and one oversized cover don't
+  skew it; hover for the width breakdown. Measured from image headers
+  only, in the background. A **File Size** column is available too.
 - `Import > Look Up via Comic Vine...` searches [Comic Vine](https://comicvine.gamespot.com/api/)
   by Series + Number (guessed from the filename when Series is blank)
   and offers to fill in series, issue title, summary, date, full
@@ -200,9 +210,16 @@ understands that this app now supports too).
   crushed down to half the detail. Only ever shrinks, never upscales --
   a page already under its (possibly-doubled) target is left completely
   byte-for-byte untouched. Choose to resize files in place or export
-  resized copies to a folder (originals untouched); a JPEG quality
-  slider controls re-save quality for pages actually saved as JPEG
-  (PNG pages stay lossless). This is the one operation with **no
+  resized copies to a folder (originals untouched); a quality setting
+  controls re-save quality for JPEG/WebP pages (PNG pages stay
+  lossless). The default target is **1440px**, which lands a book in
+  the Size column's green band. Options modeled on
+  [CbxConverter](https://github.com/tomek-o/CbxConverter): an optional
+  **height limit** (for tall manga/webtoon pages), an optional
+  **output format** (JPEG or WebP -- every page is re-encoded and
+  renamed to the new extension, keeping reading order), and **"only
+  files marked Oversized"** to fix a whole list in one go. Pages are
+  processed in parallel. This is the one operation with **no
   Undo** -- unlike a metadata edit, there's no in-memory original to
   restore once pixels are actually re-encoded and written to disk, so
   it only ever runs when you explicitly ask for it, never as a side
@@ -245,11 +262,25 @@ but every comic reader and ComicInfo.xml tool expects a ZIP-based
 container regardless, so there's no reason to special-case it as
 writable).
 
-Loading a `.cbr`/`.cbt`/`.cb7` via **Load Files**/**Load Folder**, or
-picking one via **Import > Convert to CBZ...**, asks once per batch
-whether to convert -- with an opt-in checkbox to also delete the
-original file(s) after a successful conversion (unchecked by default;
-a failed conversion never deletes anything, converted or not).
+A file's real format is read from its first bytes, not trusted from
+its extension. A `.cbr` that's really a ZIP converts by a plain copy
+(no unpacking); a `.cbz` that's really a RAR/7z/tar is first renamed to
+its true extension, then converted normally.
+
+Loading files that need converting via **Load Files**/**Load Folder**
+asks once per batch: **Convert Now**, **Add Unconverted**, or **Skip**.
+"Add Unconverted" lists them as greyed, read-only rows (Status "Needs
+conversion") -- sort by Ext, then select and right-click > **Convert
+to CBZ** (or use **Import > Convert to CBZ**, which converts the
+selected unconverted rows, or all of them). Each row is replaced by
+its converted .cbz in place.
+
+Every conversion is checked before anything else happens: the new
+.cbz must open, pass its CRC checks, and hold as many page images as
+were extracted. An existing .cbz is never overwritten. Originals are
+kept unless you choose to remove them, and then they go to the
+**Recycle Bin** (via `send2trash`), never deleted permanently -- and
+never after a failed conversion.
 
 Per format:
 

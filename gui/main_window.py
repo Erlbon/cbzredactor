@@ -71,7 +71,10 @@ from core.foreign_archive_convert import (
     ForeignArchiveConversionError,
     convert_to_cbz,
 )
-from core.cbz_file import CbzBook, CbzError
+from core.archive_sniff import extension_label
+from core.cbz_file import CbzBook, CbzError, path_needs_conversion
+from core.foreign_archive_convert import relabel_mislabeled_cbz
+from core.trash import TrashError, move_to_trash
 from core.page_dimensions import SIZE_LOW, SIZE_OK, SIZE_OVERSIZED, PageSizeStats
 from core.version import APP_NAME, APP_REPO_URL, APP_VERSION, RELEASE_LABEL
 from gui import app_settings
@@ -137,7 +140,7 @@ _AUTO_NUMBER_NUMERIC_FIELDS: frozenset[str] = frozenset(
 # ComicInfo field); everything else is every field _FIELD_LABELS knows
 # about, i.e. every field the side panel can edit.
 COLUMN_SPECS: list[tuple[str, str]] = (
-    [("filename", "Filename")]
+    [("filename", "Filename"), ("ext", "Ext")]
     + list(_FIELD_LABELS.items())
     + [("pages", "Pages"), ("size", "Size"), ("filesize", "File Size"), ("status", "Status")]
 )
@@ -155,6 +158,18 @@ SIZE_CATEGORY_COLORS = {
     SIZE_OK: QColor("#86efac"),  # green
     SIZE_OVERSIZED: QColor("#fdba74"),  # orange
 }
+
+# Text color for a row that's listed but not editable until converted
+# (see CbzBook.needs_conversion) -- mid grey reads as "inactive" on both
+# light and dark backgrounds.
+UNCONVERTED_TEXT_COLOR = QColor("#8a8a8a")
+NEEDS_CONVERSION_STATUS = "Needs conversion"
+
+# What to do with files needing conversion when they're loaded -- see
+# MainWindow._prompt_convert_foreign_archives().
+FOREIGN_CONVERT = "convert"
+FOREIGN_UNCONVERTED = "unconverted"
+FOREIGN_SKIP = "skip"
 _COLUMN_LABELS: dict[str, str] = dict(COLUMN_SPECS)
 _ALL_COLUMN_KEYS: list[str] = [key for key, _ in COLUMN_SPECS]
 PROTECTED_COLUMNS = frozenset({"filename"})  # the one column you always need to tell rows apart
@@ -167,7 +182,7 @@ PROTECTED_COLUMNS = frozenset({"filename"})  # the one column you always need to
 # has touched column visibility at all (via the header menu or Settings
 # > Add/Remove Columns...), their own saved choice always wins, even if
 # that choice is "show everything".
-_DEFAULT_VISIBLE_COLUMNS = frozenset({"filename", "title", "series", "number", "pages", "size", "status"})
+_DEFAULT_VISIBLE_COLUMNS = frozenset({"filename", "ext", "title", "series", "number", "pages", "size", "status"})
 DEFAULT_HIDDEN_COLUMNS: frozenset[str] = frozenset(_ALL_COLUMN_KEYS) - _DEFAULT_VISIBLE_COLUMNS
 
 # Metadata fields offered as %placeholder% tokens in Rename/Export and
@@ -580,6 +595,14 @@ class MainWindow(QMainWindow):
             # genuine selection, not "there happens to be only N books
             # loaded total".
             items: list = []
+            selected_unconverted = [
+                self.books[r] for r in self._selected_rows if self.books[r].needs_conversion
+            ]
+            if selected_unconverted:
+                items.append(MenuAction(
+                    "convert_selected", f"Convert {len(selected_unconverted)} File(s) to CBZ",
+                    lambda: self.convert_books_to_cbz(selected_unconverted),
+                ))
             # Reuses the actual File-menu QAction (F2) rather than
             # building a fresh one -- same object, so this shows the
             # real shortcut hint and can never drift out of sync with
@@ -589,8 +612,8 @@ class MainWindow(QMainWindow):
             # "Rename / Export Files..." (the pattern-based batch tool).
             if len(self._selected_rows) == 1 and not self.books[self._selected_rows[0]].load_error:
                 items.append(self.actions_["rename_file"])
-            if self._selected_rows:
-                selected_books = [self.books[r] for r in self._selected_rows]
+            if self._editable_selected_rows():
+                selected_books = [self.books[r] for r in self._editable_selected_rows()]
                 items.append(MenuAction(
                     "number_issues", "Number Issues...", lambda: self._quick_number_issues(selected_books)
                 ))
@@ -633,18 +656,19 @@ class MainWindow(QMainWindow):
             return
         self._load_paths(paths)
 
-    def _prompt_convert_foreign_archives(self, paths: list[str]) -> tuple[bool, bool]:
-        """If `paths` contains any CBR/CBT/CB7 files, asks once for the
-        whole batch whether to convert them to CBZ before loading (this
-        app never edits those formats directly -- see
-        core/foreign_archive_convert.py), and whether to also delete
-        each original after a successful conversion. Returns
-        (should_convert, should_delete); should_convert is always True
-        (and should_delete always False) when there's nothing foreign
-        in this batch, since there's nothing to ask about."""
-        foreign = [p for p in paths if p.lower().endswith(FOREIGN_ARCHIVE_EXTENSIONS)]
+    def _prompt_convert_foreign_archives(self, paths: list[str]) -> tuple[str, bool]:
+        """If `paths` contains any file needing conversion (a CBR/CBT/
+        CB7, or a mislabeled archive -- see CbzBook.needs_conversion),
+        asks once for the whole batch what to do with them: convert now,
+        add them to the list unconverted (read-only rows, converted
+        later from the table), or skip them. Returns (choice, delete),
+        choice one of FOREIGN_CONVERT / FOREIGN_UNCONVERTED /
+        FOREIGN_SKIP, delete = move originals to the Recycle Bin after a
+        verified conversion. (FOREIGN_CONVERT, False) when nothing in
+        the batch needs converting, since there's nothing to ask."""
+        foreign = [p for p in paths if path_needs_conversion(p)]
         if not foreign:
-            return True, False
+            return FOREIGN_CONVERT, False
 
         shown = "\n".join(f"  {os.path.basename(p)}" for p in foreign[:10])
         if len(foreign) > 10:
@@ -654,39 +678,64 @@ class MainWindow(QMainWindow):
         box.setWindowTitle("Convert to CBZ?")
         box.setIcon(QMessageBox.Icon.Question)
         box.setText(
-            f"{len(foreign)} file(s) need to be converted to CBZ before "
-            f"they can be loaded -- this app never edits CBR/CBT/CB7 "
-            f"files directly:\n\n{shown}\n\nConvert now?"
+            f"{len(foreign)} file(s) aren't real CBZ files -- this app only "
+            f"edits CBZ (ZIP) archives:\n\n{shown}\n\n"
+            "Convert them now, or add them to the list unconverted and "
+            "convert later from the table (right-click > Convert to CBZ)?"
         )
-        delete_checkbox = QCheckBox("Also delete the original files after a successful conversion")
+        delete_checkbox = QCheckBox("Move the originals to the Recycle Bin after a successful conversion")
         box.setCheckBox(delete_checkbox)
-        box.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
-        box.setDefaultButton(QMessageBox.StandardButton.Yes)
-        result = box.exec()
-        return result == QMessageBox.StandardButton.Yes, delete_checkbox.isChecked()
+        convert_btn = box.addButton("Convert Now", QMessageBox.ButtonRole.AcceptRole)
+        unconverted_btn = box.addButton("Add Unconverted", QMessageBox.ButtonRole.ActionRole)
+        box.addButton("Skip", QMessageBox.ButtonRole.RejectRole)
+        box.setDefaultButton(unconverted_btn)
+        box.exec()
+        clicked = box.clickedButton()
+        if clicked is convert_btn:
+            return FOREIGN_CONVERT, delete_checkbox.isChecked()
+        if clicked is unconverted_btn:
+            return FOREIGN_UNCONVERTED, False
+        return FOREIGN_SKIP, False
+
+    def _convert_path(self, path: str, delete_original: bool, errors: list[str]) -> str | None:
+        """Converts one file to a real .cbz (see core/foreign_archive_convert.py
+        -- the method follows the file's real content, and the result is
+        verified before this returns). A ".cbz" that's really a RAR/7z/tar
+        is first renamed to its true extension, so the converted file can
+        take the .cbz name. With `delete_original`, the source goes to the
+        Recycle Bin afterwards -- never permanently deleted, and never if
+        anything failed. Returns the new path, or None (with the reason
+        appended to `errors`)."""
+        name = os.path.basename(path)
+        source = path
+        try:
+            if os.path.splitext(path)[1].lower() == ".cbz":
+                source = relabel_mislabeled_cbz(path)
+            new_path = convert_to_cbz(source)
+        except ForeignArchiveConversionError as exc:
+            errors.append(f"{name}: {exc}")
+            return None
+        if delete_original:
+            try:
+                move_to_trash(source)
+            except TrashError as exc:
+                errors.append(f"{name}: converted to CBZ successfully, but {exc}")
+        return new_path
 
     def _load_paths(self, paths: list[str]) -> None:
         errors: list[str] = []
-        should_convert, should_delete = self._prompt_convert_foreign_archives(paths)
+        choice, should_delete = self._prompt_convert_foreign_archives(paths)
 
         def _step(path: str, _index: int) -> None:
             resolved_path = path
-            if path.lower().endswith(FOREIGN_ARCHIVE_EXTENSIONS):
-                if not should_convert:
+            if path_needs_conversion(path):
+                if choice == FOREIGN_SKIP:
                     return  # declined for this whole batch -- skip, don't load
-                try:
-                    resolved_path = convert_to_cbz(path)
-                except ForeignArchiveConversionError as exc:
-                    errors.append(f"{os.path.basename(path)}: {exc}")
-                    return
-                if should_delete:
-                    try:
-                        os.remove(path)
-                    except OSError as exc:
-                        errors.append(
-                            f"{os.path.basename(path)}: converted to CBZ successfully, "
-                            f"but couldn't delete the original: {exc}"
-                        )
+                if choice == FOREIGN_CONVERT:
+                    resolved_path = self._convert_path(path, should_delete, errors)
+                    if resolved_path is None:
+                        return
+                # FOREIGN_UNCONVERTED: listed as-is, read-only
             book = CbzBook(resolved_path)
             if book.load_error:
                 errors.append(f"{os.path.basename(resolved_path)}: {book.load_error}")
@@ -719,10 +768,18 @@ class MainWindow(QMainWindow):
         self.table.insertRow(row)
         self._refresh_table_row(row, book)
 
+    @staticmethod
+    def _status_text(book: CbzBook) -> str:
+        if book.load_error:
+            return book.load_error
+        if book.needs_conversion:
+            return NEEDS_CONVERSION_STATUS
+        if book.page_count_mismatch:
+            return "Page count mismatch"
+        return "Modified" if book.dirty else "OK"
+
     def _refresh_table_row(self, row: int, book: CbzBook) -> None:
-        status = book.load_error or ("Modified" if book.dirty else "OK")
-        if book.page_count_mismatch and not book.load_error:
-            status = "Page count mismatch"
+        status = self._status_text(book)
 
         name_item = QTableWidgetItem(os.path.basename(book.path))
         # Only an already-decoded icon here, never a decode request --
@@ -730,7 +787,15 @@ class MainWindow(QMainWindow):
         cached = self._cover_icons.get_cached_icon(book, self._cover_source.get(book))
         name_item.setIcon(cached if cached is not None else QIcon())
         self.table.setItem(row, self._col_index["filename"], name_item)
-        self.table.setItem(row, self._col_index["pages"], QTableWidgetItem(str(book.actual_page_count)))
+        ext_item = QTableWidgetItem(extension_label(book.path, book.container))
+        if book.needs_conversion:
+            ext_item.setToolTip(
+                "Listed read-only: this app only edits real CBZ (ZIP) files. "
+                "Use Convert to CBZ (right-click, or the Import menu)."
+            )
+        self.table.setItem(row, self._col_index["ext"], ext_item)
+        pages_text = "" if book.needs_conversion and not book.page_names else str(book.actual_page_count)
+        self.table.setItem(row, self._col_index["pages"], QTableWidgetItem(pages_text))
         self.table.setItem(row, self._col_index["filesize"], QTableWidgetItem(_format_file_size(book.path)))
         self.table.setItem(row, self._col_index["status"], QTableWidgetItem(status))
         # Only already-measured sizes here, never a scan -- see
@@ -775,6 +840,8 @@ class MainWindow(QMainWindow):
         until now (its Status column was plain text only)."""
         if book.load_error:
             color = ERROR_COLOR
+        elif book.needs_conversion:
+            color = None  # untinted, but greyed text -- see below
         elif book.dirty or book.page_count_mismatch:
             color = DIRTY_COLOR
         else:
@@ -787,6 +854,9 @@ class MainWindow(QMainWindow):
             if color is not None:
                 item.setBackground(color)
                 item.setForeground(HIGHLIGHT_TEXT_COLOR)
+            elif book.needs_conversion and not book.load_error:
+                item.setData(Qt.ItemDataRole.BackgroundRole, None)
+                item.setForeground(UNCONVERTED_TEXT_COLOR)
             else:
                 # Clear any override entirely (pass None, not an empty
                 # QBrush -- QBrush()'s default color is black, which
@@ -801,9 +871,18 @@ class MainWindow(QMainWindow):
     def _on_selection_changed(self) -> None:
         self._commit_current_edits()
         self._selected_rows = sorted(index.row() for index in self.table.selectionModel().selectedRows())
+        editable_rows = self._editable_selected_rows()
 
-        if not self._selected_rows:
+        if not editable_rows:
+            # Nothing selected, or only rows waiting for Convert to CBZ
+            # (read-only -- see CbzBook.needs_conversion).
             self.panel.set_enabled(False)
+            self._update_apply_bulk_edit_action()
+            if self._selected_rows:
+                self.statusBar().showMessage(
+                    "Selected file(s) need converting before they can be edited -- "
+                    "right-click > Convert to CBZ."
+                )
             return
 
         self.panel.set_enabled(True)
@@ -815,11 +894,20 @@ class MainWindow(QMainWindow):
                 page_count_text += f" -- ComicInfo.xml says {book.metadata.page_count}, will be corrected on save"
             self._show_book_in_panel(book, page_count_text)
         else:
-            self.panel.set_bulk_mode(len(self._selected_rows))
+            self.panel.set_bulk_mode(len(editable_rows))
         self._update_apply_bulk_edit_action()
 
+    def _editable_selected_rows(self) -> list[int]:
+        """Selected rows minus any still waiting for Convert to CBZ --
+        what every metadata edit/save acts on. (Remove Files, Rename
+        File and Convert to CBZ itself use the full selection.)"""
+        return [
+            row for row in self._selected_rows
+            if row < len(self.books) and not self.books[row].needs_conversion
+        ]
+
     def _update_apply_bulk_edit_action(self) -> None:
-        count = len(self._selected_rows) if self.panel.bulk_mode else 0
+        count = len(self._editable_selected_rows()) if self.panel.bulk_mode else 0
         self.actions_["apply_bulk_edit"].setText(f"&Apply to {count} Selected File(s)")
         self.actions_["apply_bulk_edit"].setEnabled(self.panel.bulk_mode)
 
@@ -834,7 +922,7 @@ class MainWindow(QMainWindow):
         if len(self._selected_rows) != 1:
             return
         row = self._selected_rows[0]
-        if row >= len(self.books):
+        if row >= len(self.books) or self.books[row].needs_conversion:
             return
         self.panel.apply_to_metadata(self.books[row].metadata)
 
@@ -853,7 +941,7 @@ class MainWindow(QMainWindow):
             QMessageBox.information(self, "Nothing to Apply", "No fields were filled in.")
             return
 
-        target_books = [self.books[row] for row in self._selected_rows]
+        target_books = [self.books[row] for row in self._editable_selected_rows()]
         metadata_changes = {i: dict(changed_fields) for i in range(len(target_books))}
         metadata_changes = self._resolve_overwrite_conflicts(target_books, metadata_changes)
         if metadata_changes is None:
@@ -867,7 +955,7 @@ class MainWindow(QMainWindow):
             book.dirty = True
             self._refresh_table_row(self.books.index(book), book)
 
-        self.panel.set_bulk_mode(len(self._selected_rows))  # clears the fields, ready for another round
+        self.panel.set_bulk_mode(len(target_books))  # clears the fields, ready for another round
         self._update_status()
 
     def _toggle_panel(self) -> None:
@@ -1003,7 +1091,9 @@ class MainWindow(QMainWindow):
         elif key == "filesize":
             raw = _file_size_bytes(book.path)
         elif key == "status":
-            raw = book.load_error or ("Modified" if book.dirty else "OK")
+            raw = self._status_text(book)
+        elif key == "ext":
+            raw = extension_label(book.path, book.container)
         else:
             raw = getattr(book.metadata, key, "")
 
@@ -1211,14 +1301,15 @@ class MainWindow(QMainWindow):
         exactly like before; several selected at once saves all of
         them, matching a normal multi-select "Save" convention."""
         self._commit_current_edits()
-        if not self._selected_rows:
+        rows = self._editable_selected_rows()
+        if not rows:
             return
-        if len(self._selected_rows) == 1:
-            self._save_book(self._selected_rows[0])
+        if len(rows) == 1:
+            self._save_book(rows[0])
             return
 
         errors: list[str] = []
-        for row in self._selected_rows:
+        for row in rows:
             book = self.books[row]
             try:
                 book.save()
@@ -1644,33 +1735,36 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
 
     def convert_foreign_archives_dialog(self) -> None:
+        """Import > Convert to CBZ: converts the list's unconverted rows
+        (the selected ones, or all of them if none are selected) in
+        place. With nothing unconverted in the list, falls back to
+        picking files from disk, as before."""
+        selected = [self.books[r] for r in self._selected_rows if self.books[r].needs_conversion]
+        in_list = selected or [book for book in self.books if book.needs_conversion]
+        if in_list:
+            self.convert_books_to_cbz(in_list)
+            return
+
         paths, _ = QFileDialog.getOpenFileNames(
-            self, "Convert to CBZ", "", "Foreign Comic Archives (*.cbr *.cbt *.cb7)"
+            self, "Convert to CBZ", "", "Comic Archives (*.cbr *.cbt *.cb7 *.cbz)"
         )
         if not paths:
             return
-        should_convert, should_delete = self._prompt_convert_foreign_archives(paths)
-        if not should_convert:
+        paths = [p for p in paths if path_needs_conversion(p)]
+        if not paths:
+            QMessageBox.information(self, "Nothing to Convert", "Those files are already real CBZ files.")
+            return
+        choice, should_delete = self._prompt_convert_foreign_archives(paths)
+        if choice != FOREIGN_CONVERT:
             return
 
         errors: list[str] = []
         converted: list[str] = []
 
         def _step(path: str, _index: int) -> None:
-            try:
-                new_path = convert_to_cbz(path)
-            except ForeignArchiveConversionError as exc:
-                errors.append(f"{os.path.basename(path)}: {exc}")
-                return
-            converted.append(new_path)
-            if should_delete:
-                try:
-                    os.remove(path)
-                except OSError as exc:
-                    errors.append(
-                        f"{os.path.basename(path)}: converted to CBZ successfully, "
-                        f"but couldn't delete the original: {exc}"
-                    )
+            new_path = self._convert_path(path, should_delete, errors)
+            if new_path:
+                converted.append(new_path)
 
         run_with_progress(self, paths, _step, "Converting to CBZ...", threshold=LOAD_PROGRESS_THRESHOLD)
 
@@ -1683,6 +1777,67 @@ class MainWindow(QMainWindow):
             )
             self._load_paths(converted)
 
+    def convert_books_to_cbz(self, books: list[CbzBook]) -> None:
+        """Converts listed-but-unconverted rows in place: each row is
+        replaced by the converted .cbz, keeping its position. Asks
+        whether to move the originals to the Recycle Bin."""
+        books = [book for book in books if book.needs_conversion]
+        if not books:
+            return
+        reply = QMessageBox.question(
+            self, "Convert to CBZ",
+            f"Convert {len(books)} file(s) to CBZ?\n\n"
+            "Each converted file is checked (it opens, and has as many pages "
+            "as the original) before anything else happens.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.Yes,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        self._convert_books(books, self._ask_delete_originals())
+
+    def _ask_delete_originals(self) -> bool:
+        reply = QMessageBox.question(
+            self, "Keep the Originals?",
+            "Move the original files to the Recycle Bin after a successful conversion?\n\n"
+            "(No keeps them next to the new .cbz files.)",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        return reply == QMessageBox.StandardButton.Yes
+
+    def _convert_books(self, books: list[CbzBook], delete_originals: bool) -> None:
+        errors: list[str] = []
+        converted = 0
+
+        def _step(book: CbzBook, _index: int) -> None:
+            nonlocal converted
+            new_path = self._convert_path(book.path, delete_originals, errors)
+            if new_path is None:
+                return
+            try:
+                row = self.books.index(book)
+            except ValueError:
+                return
+            new_book = CbzBook(new_path)
+            if new_book.load_error:
+                errors.append(f"{os.path.basename(new_path)}: {new_book.load_error}")
+            self.books[row] = new_book
+            self._refresh_table_row(row, new_book)
+            converted += 1
+
+        run_with_progress(
+            self, books, _step, "Converting to CBZ...", threshold=1,
+            label_for=lambda book: f"Converting: {os.path.basename(book.path)}",
+        )
+        if errors:
+            from redactor_common.core.error_summary import summarize_errors
+            QMessageBox.warning(self, "Some Files Failed to Convert", summarize_errors(errors))
+        self._visible_rows.schedule()
+        self._on_selection_changed()
+        self._update_status()
+        self.statusBar().showMessage(f"Converted {converted} of {len(books)} file(s) to CBZ.", 8000)
+
     def _target_books(self) -> list[CbzBook]:
         """The selected book(s), or every loaded book if none is
         selected -- same fallback epubredactor's own lookup dialogs
@@ -1690,8 +1845,8 @@ class MainWindow(QMainWindow):
         and "look up everything I loaded" all work without a separate
         mode switch."""
         if self._selected_rows:
-            return [self.books[row] for row in self._selected_rows]
-        return list(self.books)
+            return [self.books[row] for row in self._editable_selected_rows()]
+        return [book for book in self.books if not book.needs_conversion]
 
     def _run_lookup_dialog(self, dialog_class, label: str) -> None:
         """Shared flow for every online lookup dialog (Comic Vine, GCD,
@@ -1877,7 +2032,11 @@ class MainWindow(QMainWindow):
 
     def _update_status(self) -> None:
         changed = sum(1 for book in self.books if book.dirty)
-        self.statusBar().showMessage(f"{len(self.books)} file(s) loaded, {changed} with unsaved changes")
+        message = f"{len(self.books)} file(s) loaded, {changed} with unsaved changes"
+        unconverted = sum(1 for book in self.books if book.needs_conversion)
+        if unconverted:
+            message += f", {unconverted} need converting to CBZ"
+        self.statusBar().showMessage(message)
 
     def closeEvent(self, event) -> None:  # noqa: N802 - Qt override signature
         self._commit_current_edits()

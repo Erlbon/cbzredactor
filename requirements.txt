@@ -8,6 +8,10 @@ pyinstaller>=6.3
 # below.
 Pillow>=10.0
 
+# Moves converted originals to the Recycle Bin/Trash instead of
+# deleting them permanently (core/trash.py). Cross-platform.
+send2trash>=1.8
+
 # Optional: only needed for Import > Convert to CBZ on a .cbr file.
 # Also needs a real unrar/unar/bsdtar-compatible binary on PATH --
 # rarfile itself just shells out to one. See

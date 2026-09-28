@@ -36,6 +36,7 @@ from typing import Optional
 
 from redactor_common.core.save_errors import describe_save_error
 
+from core.archive_sniff import CONTAINER_UNKNOWN, CONTAINER_ZIP, detect_container
 from core.comicinfo import ComicInfoError, ComicInfoMetadata, parse_comicinfo_xml, serialize_comicinfo_xml
 from core.image_resize import OUTPUT_FORMAT_EXTENSIONS, resize_page
 
@@ -108,6 +109,17 @@ def _renamed_for_format(name: str, output_format: str) -> str:
     return posixpath.splitext(name)[0] + OUTPUT_FORMAT_EXTENSIONS[output_format]
 
 
+def _needs_conversion(path: str, container: str) -> bool:
+    is_cbz_name = posixpath.splitext(path)[1].lower() == ".cbz"
+    return not (is_cbz_name and container in (CONTAINER_ZIP, CONTAINER_UNKNOWN))
+
+
+def path_needs_conversion(path: str) -> bool:
+    """CbzBook.needs_conversion for a path not loaded yet (reads only
+    the file's first few hundred bytes)."""
+    return _needs_conversion(path, detect_container(path))
+
+
 def _find_comicinfo_name(names: list[str]) -> Optional[str]:
     """Case-insensitive match at the archive root only -- some writers
     use lowercase comicinfo.xml; a handful nest one in a subfolder,
@@ -133,15 +145,37 @@ class CbzBook:
     load_error: str = ""
     save_error: str = ""
     dirty: bool = False  # set by the GUI layer when a field is edited; cleared on save()
+    # What the file really is (core/archive_sniff.py), whatever its
+    # extension says.
+    container: str = CONTAINER_ZIP
 
     def __post_init__(self) -> None:
         self._load()
+
+    @property
+    def needs_conversion(self) -> bool:
+        """True for anything that isn't a real ZIP named .cbz: a
+        CBR/CB7/CBT, or a mislabeled file (a ".cbr" that's really a ZIP,
+        a ".cbz" that's really a RAR). Such a book is listed read-only
+        until Convert to CBZ -- save() and resize_images() refuse it.
+        A .cbz whose container can't be identified at all is still
+        treated as a (probably broken) CBZ, so it gets a normal load
+        error rather than a conversion offer."""
+        return _needs_conversion(self.path, getattr(self, "container", CONTAINER_ZIP))
 
     # ------------------------------------------------------------------
     # Loading
     # ------------------------------------------------------------------
 
     def _load(self) -> None:
+        self.container = detect_container(self.path)
+        if self.needs_conversion and self.container != CONTAINER_ZIP:
+            # Not a ZIP (or unidentifiable under a foreign extension):
+            # nothing this module can read. Listed with an empty page
+            # list and blank metadata until converted.
+            return
+        # A ZIP under a foreign name is read normally (it IS a CBZ in
+        # all but name), just still flagged needs_conversion.
         try:
             with zipfile.ZipFile(self.path, "r") as zf:
                 names = zf.namelist()
@@ -208,6 +242,8 @@ class CbzBook:
         """
         if self.load_error:
             raise CbzError(f"Cannot save, file failed to load: {self.load_error}")
+        if self.needs_conversion:
+            raise CbzError("Cannot save, this file needs converting to CBZ first (Convert to CBZ)")
 
         self.metadata.page_count = str(self.actual_page_count)
         new_xml_bytes = serialize_comicinfo_xml(self.metadata)
@@ -295,6 +331,8 @@ class CbzBook:
         """
         if self.load_error:
             raise CbzError(f"Cannot resize, file failed to load: {self.load_error}")
+        if self.needs_conversion:
+            raise CbzError("Cannot resize, this file needs converting to CBZ first (Convert to CBZ)")
 
         summary = ResizeSummary()
         target = output_path or self.path
