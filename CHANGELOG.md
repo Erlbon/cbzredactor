@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026-09-29#18 -- Collection Report no longer freezes the window on a big collection
+
+- **The report is analysed on a worker thread** with a progress dialog,
+  instead of blocking the window (about 30 seconds on a synthetic
+  234,000-comic scan).
+- **Big tabs (over 2,000 rows) are filled the first time they are shown**,
+  with the window already up, instead of all at once when the report
+  opens (about 11 seconds of table building before). Small reports open
+  as before.
+
 ## 2026-09-29#17 -- Collection Report: the Fixes tab shows what it will change
 
 - **The "What changes" column is now next to the fix type**, ahead of

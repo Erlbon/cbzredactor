@@ -2407,6 +2407,38 @@ class MainWindow(QMainWindow):
         if answer == QMessageBox.StandardButton.Yes:
             self.open_collection_report()
 
+    def _build_report_in_background(self, build_report, info, rows):
+        """build_report() on a worker thread, with a progress dialog, so the
+        window stays alive while a collection of 100,000+ comics is analysed."""
+        import threading
+        from PyQt6.QtWidgets import QApplication, QProgressDialog
+
+        result: dict = {}
+
+        def work() -> None:
+            try:
+                result["report"] = build_report(info, rows)
+            except BaseException as exc:  # re-raised on the GUI thread below
+                result["error"] = exc
+
+        thread = threading.Thread(target=work, daemon=True)
+        thread.start()
+        dialog = None
+        if len(rows) > 500:
+            dialog = QProgressDialog(f"Analysing {len(rows):,} comics…", None, 0, 0, self)
+            dialog.setWindowTitle("Collection Report")
+            dialog.setWindowModality(Qt.WindowModality.WindowModal)
+            dialog.setMinimumDuration(0)
+            dialog.show()
+        while thread.is_alive():
+            QApplication.processEvents()
+            thread.join(0.05)
+        if dialog is not None:
+            dialog.close()
+        if "error" in result:
+            raise result["error"]
+        return result["report"]
+
     def _ask_cover_mode(self, had_covers: bool) -> str | None:
         """What a scan does about covers: "none", "scan" (fingerprint each
         cover into the scan file) or "store" (also write it into the CBZ,
@@ -2469,11 +2501,7 @@ class MainWindow(QMainWindow):
         except scan.ScanFileError as exc:
             QMessageBox.warning(self, "Collection Report", str(exc))
             return
-        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
-        try:
-            report = build_report(info, rows)
-        finally:
-            QApplication.restoreOverrideCursor()
+        report = self._build_report_in_background(build_report, info, rows)
         dialog = CollectionReportDialog(info, len(rows), report, os.path.isdir(info.root), self)
         if dialog.exec() != dialog.DialogCode.Accepted:
             return

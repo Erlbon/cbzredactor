@@ -722,3 +722,26 @@ def test_a_date_in_the_name_is_not_an_issue_number_mismatch(tmp_path):
                          series="30 dias de noche", number="1")]
     report = build_report(scan.new_info(str(tmp_path), True), rows)
     assert not [m for m in report.mismatches if m.field == "Number"]
+
+
+def test_a_big_report_tab_is_filled_only_when_shown(tmp_path):
+    from PyQt6.QtWidgets import QApplication
+    from PyQt6.QtCore import Qt
+    from gui.collection_report_dialog import CollectionReportDialog
+
+    QApplication.instance() or QApplication([])
+    rows = [scan.ScanRow(f"S/Series {i} 001.cbz", comicinfo="yes", series="Other", number="1") for i in range(2500)]
+    rows += [scan.ScanRow(f"S/x {i}.cbz", container="zip", pages="5", page_count="9", comicinfo="yes") for i in range(2100)]
+    info = scan.new_info(str(tmp_path), True)
+    report = build_report(info, rows)
+    dialog = CollectionReportDialog(info, len(rows), report, True)
+    formats = next(i for i in range(dialog.tabs.count()) if dialog.tabs.tabText(i).startswith("Formats"))
+    table = dialog.tabs.widget(formats).findChild(type(dialog.fixes_table))
+    assert table.rowCount() == 0  # not built yet
+    dialog.tabs.setCurrentIndex(formats)
+    assert table.rowCount() == len(report.formats)
+    dialog.tabs.setCurrentIndex(0)
+    dialog._fill_first_tab()
+    assert dialog.fixes_table.rowCount() == len(report.fixes) and len(report.fixes) > 2000
+    dialog._tick_fixes(Qt.CheckState.Checked, "PageCount")
+    assert len(dialog.ticked_fixes()) == 2100

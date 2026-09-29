@@ -15,8 +15,9 @@ from __future__ import annotations
 
 import csv
 
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtWidgets import (
+    QApplication,
     QAbstractItemView,
     QDialog,
     QDialogButtonBox,
@@ -39,6 +40,7 @@ from core.collection_scan import ScanInfo
 
 _PAIR_ROLE = Qt.ItemDataRole.UserRole + 1
 _FIX_ROLE = Qt.ItemDataRole.UserRole + 2
+_LAZY_ROWS = 2000  # a tab with more rows is filled when first shown; filling 100,000 rows takes seconds
 
 
 def _cells(row: list[str]) -> list[QTableWidgetItem]:
@@ -59,6 +61,7 @@ class CollectionReportDialog(QDialog):
         self.can_apply = can_apply
         self._checkable_tables: list[QTableWidget] = []
         self.fixes_table: QTableWidget | None = None
+        self._pending: dict[QTableWidget, object] = {}
 
         layout = QVBoxLayout(self)
         lines = [f"Scan of <b>{info.root}</b> on {info.computer or '?'}, {info.scanned or '?'}: "
@@ -121,23 +124,27 @@ class CollectionReportDialog(QDialog):
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
         self._update_button()
+        self.tabs.currentChanged.connect(self._fill_pending)
+        QTimer.singleShot(0, self._fill_first_tab)  # once the window is up
 
     def _add_fixes_tab(self, fixes: list[Fix]) -> None:
         # What changes comes before Folder: it is what the user has to see to decide.
         rows = [([f.path.rsplit("/", 1)[-1], f.kind, f.what, f.path.rpartition("/")[0]], None) for f in fixes]
+        def tag_rows(table: QTableWidget) -> None:
+            if not self.can_apply:
+                return
+            for index, fix in enumerate(fixes):
+                item = table.item(index, 0)  # sorting is off until the fill ends, so rows keep their index here
+                item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+                item.setCheckState(Qt.CheckState.Unchecked)
+                item.setData(_FIX_ROLE, fix)
+
         table = self._add_tab("Fixes", ["File", "Fix", "What changes", "Folder"], rows, register=False,
-                              widths=(320, 170, 520))
+                              widths=(320, 170, 520), after_fill=tag_rows, sort_after=True)
         self.fixes_table = table
         if not self.can_apply:
-            table.setSortingEnabled(True)
             return
-        for index, fix in enumerate(fixes):
-            item = table.item(index, 0)  # sorting is off until _add_tab ends, but rows keep their index here
-            item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
-            item.setCheckState(Qt.CheckState.Unchecked)
-            item.setData(_FIX_ROLE, fix)
         table.itemChanged.connect(self._fix_changed)
-        table.setSortingEnabled(True)
         page_layout = self.tabs.widget(self.tabs.count() - 1).layout()
         hint = QLabel("Tick what to change; \"What changes\" says exactly what is written. When a file has two rows "
                       "(set ComicInfo from the name, or rename from ComicInfo), they are alternatives: only one can "
@@ -167,6 +174,21 @@ class CollectionReportDialog(QDialog):
         table.blockSignals(False)
         self._update_button()
 
+    def _fill_first_tab(self) -> None:
+        self._fill_pending(self.tabs.currentIndex())
+
+    def _fill_pending(self, index: int) -> None:
+        """Fills a big tab the first time it is shown."""
+        page = self.tabs.widget(index)
+        for table in [t for t in self._pending if page is not None and page.isAncestorOf(t)]:
+            QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+            try:
+                self._pending.pop(table)()
+            finally:
+                QApplication.restoreOverrideCursor()
+            if hasattr(self, "apply_button"):
+                self._update_button()
+
     def _fix_changed(self, changed: QTableWidgetItem) -> None:
         """Of the two ways to settle a name/ComicInfo disagreement, only one."""
         fix = changed.data(_FIX_ROLE)
@@ -189,27 +211,41 @@ class CollectionReportDialog(QDialog):
                 if table.item(row, 0).data(_FIX_ROLE) and table.item(row, 0).checkState() == Qt.CheckState.Checked]
 
     def _add_tab(self, title: str, headers: list[str], rows: list[tuple[list[str], tuple | None]],
-                 register: bool = True, widths: tuple[int, ...] = ()) -> QTableWidget:
+                 register: bool = True, widths: tuple[int, ...] = (), after_fill=None, sort_after: bool = False) -> QTableWidget:
         page = QWidget()
         page_layout = QVBoxLayout(page)
         page_layout.setContentsMargins(4, 4, 4, 4)
-        table = QTableWidget(len(rows), len(headers))
+        table = QTableWidget(0, len(headers))
         table.setHorizontalHeaderLabels(headers)
         table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         table.verticalHeader().setVisible(False)
         table.setTextElideMode(Qt.TextElideMode.ElideMiddle)  # deep folders: keep the series folder at the end
-        checkable = False
-        for index, (cells, pair) in enumerate(rows):
-            items = _cells(cells)
-            if pair is not None and self.can_apply:
-                items[0].setFlags(items[0].flags() | Qt.ItemFlag.ItemIsUserCheckable)
-                items[0].setCheckState(Qt.CheckState.Unchecked)
-                items[0].setData(_PAIR_ROLE, pair)
-                checkable = True
-            for column, item in enumerate(items):
-                table.setItem(index, column, item)
-        table.setSortingEnabled(register)  # the Fixes tab sorts after its rows are tagged
+        checkable = any(pair is not None for _cells_, pair in rows) and self.can_apply
+
+        def fill() -> None:
+            table.blockSignals(True)  # ticking 100,000 rows must not recount the ticks each time
+            table.setUpdatesEnabled(False)
+            table.setRowCount(len(rows))
+            for index, (cells, pair) in enumerate(rows):
+                items = _cells(cells)
+                if pair is not None and self.can_apply:
+                    items[0].setFlags(items[0].flags() | Qt.ItemFlag.ItemIsUserCheckable)
+                    items[0].setCheckState(Qt.CheckState.Unchecked)
+                    items[0].setData(_PAIR_ROLE, pair)
+                for column, item in enumerate(items):
+                    table.setItem(index, column, item)
+            if after_fill is not None:
+                after_fill(table)
+            table.setSortingEnabled(register or sort_after)  # the Fixes tab sorts after its rows are tagged
+            table.setUpdatesEnabled(True)
+            table.blockSignals(False)
+
+        if len(rows) > _LAZY_ROWS:
+            # A big tab is filled when it is first shown, not while the report opens.
+            self._pending[table] = fill
+        else:
+            fill()
         header = table.horizontalHeader()
         header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
         header.setStretchLastSection(True)
