@@ -1,5 +1,24 @@
 # Changelog
 
+## 2026-09-29#06 -- Collection scan and report
+
+- **Collection > Scan Collection Folder...**: reads every comic under a
+  folder you choose -- path, size, date, format, pages, key ComicInfo
+  fields -- into `collection_scan.zip` (one CSV, zipped) next to the
+  app. Only when you press it; nothing is watched. Reads only each
+  archive's table of contents and ComicInfo.xml, handles paths over 260
+  characters, re-reads only changed files on a rescan, and a stopped
+  scan keeps what it read.
+- **Collection > Collection Report...**: patterns and irregularities in
+  the scan, learned from the collection's own layout (series + "vN"
+  volume, TPBs with their series, spin-offs in their parent's folder):
+  suggested moves, split series, file names breaking their folder's
+  pattern (with the Library Organizer name suggested), duplicates, name
+  vs ComicInfo disagreements, and formats & missing info. Moves and
+  renames are ticked by hand, never overwrite, only run where the
+  scanned folder exists, and File > Undo Last Rename takes them back;
+  Save List... exports every finding as CSV.
+
 ## 2026-09-29#05 -- Validate / Fix Issues
 
 - **Operations > Validate / Fix Issues...**: checks the selected files'

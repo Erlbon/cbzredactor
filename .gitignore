@@ -24,3 +24,6 @@ cbzredactor_credit_pages.json
 # File > Undo Last Rename's log (redactor_common's RenameLog) -- per-user data,
 # next to the settings like cbzredactor_settings.ini.
 cbzredactor_rename_log.json
+
+collection_scan.zip
+collection_scan.zip.tmp

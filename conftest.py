@@ -13,3 +13,12 @@ def _isolated_rename_log(monkeypatch, tmp_path):
 
     log = RenameLog(str(tmp_path / "rename_log.json"))
     monkeypatch.setattr(main_window, "_rename_log", lambda: log)
+
+
+@pytest.fixture(autouse=True)
+def _isolated_collection_scan(monkeypatch, tmp_path):
+    """Collection > Scan Collection Folder... saves next to the settings;
+    tests save into a temporary folder instead."""
+    import gui.main_window as main_window
+
+    monkeypatch.setattr(main_window, "_collection_scan_path", lambda: str(tmp_path / "collection_scan.zip"))

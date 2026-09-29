@@ -135,6 +135,13 @@ def _rename_log() -> RenameLog:
     core/rename_log.py), next to this app's settings."""
     return RenameLog(os.path.join(str(base_dir()), "cbzredactor_rename_log.json"))
 
+def _collection_scan_path() -> str:
+    """Collection > Scan Collection Folder...'s zipped CSV, next to the
+    settings (core/collection_scan.py)."""
+    from core.collection_scan import SCAN_FILE_NAME
+    return os.path.join(str(base_dir()), SCAN_FILE_NAME)
+
+
 def _field_label(attr: str) -> str:
     return _FIELD_LABELS.get(attr, attr.replace("_", " ").title())
 
@@ -466,6 +473,10 @@ class MainWindow(QMainWindow):
                 Separator(),
                 MenuAction("undo", "&Undo", self.undo_last_action, shortcut=shortcuts.UNDO),
                 MenuAction("redo", "&Redo", self.redo_last_action, shortcut=shortcuts.REDO),
+            ],
+            "Collection": [
+                MenuAction("scan_collection", "&Scan Collection Folder...", self.scan_collection_folder),
+                MenuAction("collection_report", "Collection &Report...", self.open_collection_report),
             ],
             "Settings": [
                 MenuAction("comicvine_api_key", "Comic Vine API &Key...", self.change_comicvine_api_key),
@@ -2290,6 +2301,171 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage(
                 f"Cleaned up {cleaned} archive(s). Originals are in the Recycle Bin.", 10000,
             )
+
+    def scan_collection_folder(self) -> None:
+        """Collection > Scan Collection Folder...: reads every comic under
+        the chosen folder into collection_scan.zip next to the settings
+        (core/collection_scan.py) -- only when asked, nothing is watched.
+        Files unchanged since the last scan of the same folder aren't read
+        again; a stopped scan keeps what it read."""
+        from PyQt6.QtWidgets import QApplication, QProgressDialog
+        from core import collection_scan as scan
+
+        zip_path = _collection_scan_path()
+        previous_info, previous_rows = None, []
+        if os.path.exists(zip_path):
+            try:
+                previous_info, previous_rows = scan.read_scan(zip_path)
+            except scan.ScanFileError:
+                pass
+        start = previous_info.root if previous_info and os.path.isdir(previous_info.root) else ""
+        root = QFileDialog.getExistingDirectory(self, "Scan Collection Folder", start)
+        if not root:
+            return
+        root = os.path.abspath(root)
+        same_root = previous_info is not None and os.path.normcase(previous_info.root) == os.path.normcase(root)
+        previous = {row.path: row for row in previous_rows} if same_root else {}
+
+        listing = QProgressDialog("Listing comics…", "Cancel", 0, 0, self)
+        listing.setWindowTitle("Scan Collection Folder")
+        listing.setWindowModality(Qt.WindowModality.WindowModal)
+        listing.setMinimumDuration(0)
+        listing.show()
+        listed = []
+        for item in scan.list_comics(root, listing.wasCanceled):
+            listed.append(item)
+            if len(listed) % 200 == 0:
+                listing.setLabelText(f"Listing comics… {len(listed):,} found")
+                QApplication.processEvents()
+        cancelled = listing.wasCanceled()
+        listing.close()
+        if cancelled:
+            return
+        if not listed:
+            QMessageBox.information(self, "Scan Collection Folder", f"No comics found in:\n{root}")
+            return
+
+        rows: dict[str, scan.ScanRow] = {}
+        to_read = []
+        for item in listed:
+            old = scan.reusable(previous, item)
+            if old is not None:
+                rows[item.path] = old
+            else:
+                to_read.append(item)
+
+        def _read(item, _index: int) -> None:
+            rows[item.path] = scan.read_comic(root, item)
+
+        complete = run_with_progress(
+            self, to_read, _read, "Reading comics…", threshold=1, update_every=5,
+            label_for=lambda item: f"Reading: {item.path.rsplit('/', 1)[-1]}",
+        )
+        read_count = len(to_read) if complete else sum(1 for item in to_read if item.path in rows)
+        if not complete:
+            for item in to_read:  # not reached: keep what the last scan knew
+                if item.path not in rows and item.path in previous:
+                    rows[item.path] = previous[item.path]
+        try:
+            scan.write_scan(zip_path, scan.new_info(root, complete, APP_VERSION), list(rows.values()))
+        except OSError as exc:
+            QMessageBox.warning(self, "Scan Collection Folder", f"Couldn't save the scan:\n{exc}")
+            return
+        summary = (f"{len(listed):,} comic(s) found, {read_count:,} read"
+                   f"{' (the rest unchanged since the last scan)' if read_count < len(listed) else ''}.")
+        if not complete:
+            summary = ("Scan stopped. " + summary + " What was read is saved; scan again to carry on "
+                       "from where it stopped.")
+        answer = QMessageBox.question(
+            self, "Scan Collection Folder",
+            f"{summary}\n\nSaved to {zip_path}\n\nOpen the Collection Report now?",
+        )
+        if answer == QMessageBox.StandardButton.Yes:
+            self.open_collection_report()
+
+    def open_collection_report(self) -> None:
+        """Collection > Collection Report...: patterns and irregularities
+        in the last scan (core/collection_report.py). Ticked moves and
+        renames are applied only where the scanned folder exists, and go
+        in the rename log, so File > Undo Last Rename takes them back."""
+        from PyQt6.QtWidgets import QApplication
+        from core import collection_scan as scan
+        from core.collection_report import build_report
+        from gui.collection_report_dialog import CollectionReportDialog
+
+        zip_path = _collection_scan_path()
+        if not os.path.exists(zip_path):
+            QMessageBox.information(
+                self, "Collection Report",
+                "No collection scan yet. Use Collection > Scan Collection Folder... first -- or copy a "
+                f"{scan.SCAN_FILE_NAME} made on another computer to:\n{os.path.dirname(zip_path)}",
+            )
+            return
+        try:
+            info, rows = scan.read_scan(zip_path)
+        except scan.ScanFileError as exc:
+            QMessageBox.warning(self, "Collection Report", str(exc))
+            return
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        try:
+            report = build_report(info, rows)
+        finally:
+            QApplication.restoreOverrideCursor()
+        dialog = CollectionReportDialog(info, len(rows), report, os.path.isdir(info.root), self)
+        if dialog.exec() != dialog.DialogCode.Accepted:
+            return
+        pairs = dialog.ticked()
+        if pairs:
+            self._apply_collection_moves(zip_path, info, rows, pairs)
+
+    def _apply_collection_moves(self, zip_path: str, info, rows: list, pairs: list[tuple[str, str]]) -> None:
+        from core import collection_scan as scan
+
+        done: list[tuple[str, str]] = []
+        problems: list[str] = []
+        for old_rel, new_rel in pairs:
+            old = scan.full_path(info.root, old_rel)
+            new = scan.full_path(info.root, new_rel)
+            name = old_rel.rsplit("/", 1)[-1]
+            if not os.path.exists(scan.long_path(old)):
+                problems.append(f"{name}: no longer there")
+            elif os.path.exists(scan.long_path(new)):
+                problems.append(f"{name}: {new_rel} already exists")
+            elif not os.path.isdir(scan.long_path(os.path.dirname(new))):
+                problems.append(f"{name}: the folder {os.path.dirname(new_rel)} is gone")
+            else:
+                try:
+                    os.rename(scan.long_path(old), scan.long_path(new))
+                except OSError as exc:
+                    problems.append(f"{name}: {exc}")
+                    continue
+                # The rename log keeps long paths in their "\?\" form, or
+                # Undo Last Rename couldn't reach them.
+                if max(len(old), len(new)) >= scan.WINDOWS_PATH_LIMIT - 10:
+                    done.append((scan.long_path(old), scan.long_path(new)))
+                else:
+                    done.append((old, new))
+                for row in rows:
+                    if row.path == old_rel:
+                        row.path = new_rel
+        if done:
+            _rename_log().record("Collection Report", done)
+            moved = {os.path.normcase(os.path.abspath(o)): n for o, n in done}
+            for book in self.books:
+                target = moved.get(os.path.normcase(os.path.abspath(str(book.path))))
+                if target:
+                    book.path = target
+            self._rebuild_table()
+            try:
+                scan.write_scan(zip_path, info, rows)  # keep the report in step with the files
+            except OSError:
+                pass
+        text = f"{len(done)} file(s) moved or renamed. File > Undo Last Rename takes them back."
+        if problems:
+            text += f"\n\n{len(problems)} skipped:\n" + "\n".join(problems[:15])
+            if len(problems) > 15:
+                text += f"\n… and {len(problems) - 15} more"
+        QMessageBox.information(self, "Collection Report", text)
 
     def open_find_duplicates_dialog(self) -> None:
         """Operations > Find Duplicates...: the same comic loaded more than

@@ -196,6 +196,36 @@ understands that this app now supports too).
   .DS_Store, __MACOSX, and scene extras like .nfo, .sfv, .url, .txt).
   Page bytes, order and ComicInfo.xml are unchanged. Reviewed first,
   per file; originals go to the Recycle Bin.
+- **Collection > Scan Collection Folder...** -- a snapshot of your
+  whole organised collection, taken only when you press it (nothing is
+  watched; cbzredactor stays a tool for incoming files). Every comic
+  under the chosen folder becomes one row of a CSV -- path, size, date,
+  format, pages and the key ComicInfo fields -- saved zipped as
+  `collection_scan.zip` next to the app (a big collection packs to a
+  few MB; the CSV inside opens in Excel). Only each archive's table of
+  contents and ComicInfo.xml are read, never the pages; paths over 260
+  characters are read too. Rescanning re-reads only changed files, and
+  a stopped scan keeps what it read and carries on next time. Run it on
+  the collection's own computer and carry the zip wherever you like.
+- **Collection > Collection Report...** reads that scan (never the
+  files) and learns the folder layout from the collection itself: a
+  series is its name plus its volume ("vN" in the file or folder
+  name), TPBs sit with their series, spin-offs in their parent's folder
+  are left alone. Tabs: **Moves** (a file away from the folder named
+  for its series and volume -- the year picks between volumes when the
+  name has none -- or away from where most of the series lives; several
+  candidates are asked about, never guessed), **Split series**, **File
+  names** that break their folder's pattern (number width, the
+  "(Publisher, year-month)" bracket, extra brackets, the series spelled
+  differently, stray spaces -- with the Library Organizer name
+  `{series} {number3} ({publisher}, {year}-{month2})` suggested from
+  ComicInfo), **Duplicates**, **Name vs ComicInfo** disagreements, and
+  **Formats & missing** (not really a ZIP, PDF, no or unreadable
+  ComicInfo, no pages, PageCount out of step, paths over 260
+  characters). Nothing moves unless you tick it; moves and renames never
+  overwrite, only run where the scanned folder exists, and File > Undo
+  Last Rename takes them back. **Save List...** writes every finding to
+  a CSV.
 - **Page order is numeric**, as comic readers do it: an archive whose
   pages are numbered 1, 2, ... 10 reads 1, 2, ... 10 (plain text
   sorting put 10 before 2 -- found in real archives), and macOS
