@@ -1520,6 +1520,8 @@ class MainWindow(QMainWindow):
             item_noun="file",
             zero_pad_field="number",
             always_pad_fields={"month": 2},
+            ascii_only=app_settings.load_ascii_filenames(),
+            on_ascii_only_changed=app_settings.save_ascii_filenames,
             parent=self,
         )
         if dialog.exec() != dialog.DialogCode.Accepted:

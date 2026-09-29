@@ -426,3 +426,16 @@ def add_custom_language(code: str, name: str) -> None:
 def remove_custom_language(code: str) -> None:
     pairs = managed_list.remove_pair(load_custom_languages(), code)
     _settings().setValue(_CUSTOM_LANGUAGES_KEY, managed_list.encode_pairs(pairs))
+
+
+_ASCII_FILENAMES_KEY = "rename/ascii_only"
+
+
+def load_ascii_filenames() -> bool:
+    """Rename/Export by Pattern's "ASCII-safe filenames" checkbox,
+    remembered between runs (redactor_common's RenamePatternDialog)."""
+    return bool(_settings().value(_ASCII_FILENAMES_KEY, False, type=bool))
+
+
+def save_ascii_filenames(enabled: bool) -> None:
+    _settings().setValue(_ASCII_FILENAMES_KEY, bool(enabled))
