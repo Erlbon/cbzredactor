@@ -1,5 +1,42 @@
 # Changelog
 
+## 2026-09-29#12 -- Collection Report: far fewer false alarms, and a Fixes tab
+
+Tried against a real collection of 234,000 comics, the report listed
+about 77,000 findings, most of them wrong. Now:
+
+- **Moves** 10,345 -> about 550, **split series** 1,702 -> about 25. A
+  file is at home when any folder above it is named for its series
+  ("Kuifje/1972 (52 issues)"); year, era and imprint folders
+  ("DC, New Justice (2018-2021)/Green Lantern" and "DC, All In/Green
+  Lantern") are your layout, not a split; the same title from another
+  publisher, country or language ("Donald Duck" in Dutch and German) is
+  a different series; "v2 Sensational She-Hulk", "Warlands v2 - The Age
+  Of Ice" and "Crossovers/_Spider-Verse" folders are read properly.
+- **Name vs ComicInfo** 46,993 -> about 2,650. Series compare ignoring
+  accents, punctuation, "/" and ":" that a file name can't hold, "vN",
+  brackets and extra words ("Thor v5" = "Thor", "Batman - Superman" =
+  "Batman/Superman"); when a whole series says the same different thing
+  ("Pep" for every "Pep Comics") that's its convention, and only the odd
+  file out is reported. Cover date and release date a month or two apart
+  (even across New Year) no longer disagree; "1982-24", "233-234",
+  "Vol. 10" and Heavy Metal's "200405" agree with ComicInfo's number.
+- **Duplicates**: "Part 1" / "Part 2", "(English)" / "(German)" and other
+  copies told apart by title or brackets are different comics.
+- **Names**: "TPB - v03 - Title", "TPB Vol. 2", "Greg - [Bernard Prince
+  09] - Title" and "(Marvel, 2026-)" are read properly. A suggested name
+  now keeps the title and the file's own publisher and date instead of
+  rewriting them from ComicInfo, and is left out when it would lose an
+  extra bracket.
+- **New: a Fixes tab** with an Apply button for what can be repaired:
+  wrong PageCount, a missing ComicInfo.xml (created from the file name),
+  a .cbr that is really a ZIP (renamed .cbz), and, where a file's name
+  and its ComicInfo disagree, either ComicInfo set from the name or the
+  file renamed from ComicInfo -- tick whichever is right, only one of
+  the two can be ticked. Nothing is ticked for you. Renames go in the
+  rename log (Undo Last Rename); ComicInfo edits rewrite the archive
+  and can't be undone, and you're asked first.
+
 ## 2026-09-29#11 -- Numbered TPBs with titles in the Collection Report
 
 - **Fixed: TPBs named like "Zombie Tramp v3 TPB - v03 - Sleazy Rider

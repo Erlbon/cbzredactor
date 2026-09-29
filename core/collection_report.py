@@ -39,7 +39,11 @@ from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 
 from core.collection_names import (
-    FileName, FolderName, library_name, number_key, parse_file_name, parse_folder_name, series_key,
+    FileName, FolderName, library_name, loose_key, number_key, numbers_agree, parse_file_name, parse_folder_name, series_key,
+)
+from core.collection_fix import (
+    KIND_COMICINFO_FROM_NAME, KIND_EXTENSION, KIND_NEW_COMICINFO, KIND_PAGECOUNT, KIND_RENAME_FROM_COMICINFO,
+    Fix, fields_from_name, name_from_comicinfo,
 )
 from core.collection_scan import WINDOWS_PATH_LIMIT, ScanInfo, ScanRow
 
@@ -113,6 +117,7 @@ class Report:
     duplicates: list[DuplicateGroup] = field(default_factory=list)
     mismatches: list[Mismatch] = field(default_factory=list)
     formats: list[FormatIssue] = field(default_factory=list)
+    fixes: list[Fix] = field(default_factory=list)  # what "Apply" can fix (core/collection_fix.py)
 
 
 @dataclass
@@ -122,6 +127,7 @@ class _Entry:
     folder: str
     key: tuple[str, str]  # (series_key, volume)
     at_home: bool
+    home: str  # the folder (or parent folder) named for its series; else its own folder
 
 
 def _year(text: str) -> int:
@@ -132,24 +138,158 @@ def _describe_key(entry: _Entry) -> str:
     return entry.name.series + (f" v{entry.key[1]}" if entry.key[1] else "")
 
 
+_PUBLISHER_NOISE = re.compile(r"\b(comics?|publishing|publications?|press|entertainment|inc|ltd|llc|verlag|editions?|"
+                              r"ediciones|editorial[e]?|group|studios?|productions?|books?|uitgeverij|s ?l|s ?a)\b")
+
+
+def _publisher_key(publisher: str) -> str:
+    return re.sub(r"[\W_]+", "", _PUBLISHER_NOISE.sub(" ", series_key(publisher)))
+
+
+def _same_publisher(a: str, b: str) -> bool:
+    """Unknown on either side counts as the same; "DC" and "DC Comics"
+    match."""
+    if not a or not b:
+        return True
+    return a.startswith(b) or b.startswith(a)
+
+
+_GENERIC_SERIES = {"vol", "volume", "chapter", "chap", "tome", "band", "issue", "book", "part", "episode", "livre",
+                   "tomo", "numero", "no", "nr"}
+_LANGUAGE_TAG_RE = re.compile(r"\[([A-Za-z]{2,3})\]\s*$")
+
+
+class _Folders:
+    """What each folder of the collection says about itself: its parsed
+    name, its top-level branch ("5973 - US Comics"), the publisher most
+    of its files carry, and the years it covers."""
+
+    def __init__(self, entries_by_folder: dict[str, list]):
+        self.parsed: dict[str, FolderName] = {}
+        self.publisher: dict[str, str] = {}
+        for folder, group in entries_by_folder.items():
+            self.parse(folder)
+            self.publisher[folder] = _majority([_publisher_key(e.name.publisher or e.row.publisher)
+                                                for e in group if e.name.publisher or e.row.publisher], 0.5) or ""
+
+    def parse(self, folder: str) -> FolderName:
+        if folder not in self.parsed:
+            self.parsed[folder] = parse_folder_name(posixpath.basename(folder))
+        return self.parsed[folder]
+
+    @staticmethod
+    def language(folder: str) -> str:
+        """"ES" from "Comix Kiss Comix (1991-2011)(239 issues)[ES]"."""
+        tag = _LANGUAGE_TAG_RE.search(posixpath.basename(folder))
+        return tag.group(1).upper() if tag else ""
+
+    @staticmethod
+    def branch(folder: str) -> str:
+        return folder.split("/", 1)[0]
+
+    def years(self, folder: str) -> tuple[int, int]:
+        """(first, last) years of a folder, or of the nearest folder above
+        it that has them ("3.45 - DC, New Justice (2018-2021)/The Flash");
+        last is 9999 for an open run, (0, 0) when nothing says."""
+        current = folder
+        while current:
+            parsed = self.parse(current)
+            if parsed.first_year:
+                return parsed.first_year, parsed.last_year or 9999
+            current = posixpath.dirname(current)
+        return 0, 0
+
+    def years_overlap(self, a: str, b: str) -> bool:
+        """Two runs share at least a year's span; a relaunch the year the
+        old run ended (Green Hornet 2010-2013, 2013-2014) doesn't count."""
+        (a1, a2), (b1, b2) = self.years(a), self.years(b)
+        if not a1 or not b1:
+            return True
+        if a1 == a2 or b1 == b2:  # a single year
+            return a1 <= b2 and b1 <= a2
+        return min(a2, b2) - max(a1, b1) >= 1
+
+    def same_run(self, a: str, b: str) -> bool:
+        """Could these two folders be one series split in two? Only side by
+        side (or one inside the other): the same name under two eras or
+        imprints ("DC, New Justice/Green Lantern", "DC, All In/Green
+        Lantern") is the collection's own layout. And not from different
+        publishers, languages, or years that don't overlap (Poison Ivy
+        2022-2024 vs 2024-)."""
+        near = (posixpath.dirname(a) == posixpath.dirname(b)
+                or a.startswith(b + "/") or b.startswith(a + "/"))
+        return (near
+                and _same_publisher(self.publisher.get(a, ""), self.publisher.get(b, ""))
+                and self.language(a) == self.language(b)
+                and self.years_overlap(a, b))
+
+    def fits(self, folder: str, entry: _Entry) -> bool:
+        """Could this folder be home to this file?"""
+        publisher = _publisher_key(entry.name.publisher or entry.row.publisher)
+        theirs = self.publisher.get(folder, "")
+        if self.branch(folder) != self.branch(entry.folder):
+            # Another branch of the collection (another country's "Donald
+            # Duck") only when the publisher is known to match -- a file
+            # waiting in an "Incoming" folder still finds its home.
+            if not (publisher and theirs and _same_publisher(theirs, publisher)):
+                return False
+        elif not _same_publisher(theirs, publisher):
+            return False
+        return self.language(folder) == self.language(entry.folder)
+
+    def outside_run(self, folder: str, entry: _Entry) -> bool:
+        """A closed run that ended before (or began after) this issue."""
+        year = _year(entry.name.year or entry.row.year)
+        first, last = self.years(folder)
+        return bool(year and first and not first <= year <= last)
+
+
+def _home(folder: str, key_series: str, volume: str, folders: _Folders) -> tuple[str, str]:
+    """(home folder, its volume): the nearest folder on the path, the file's
+    own first, named for the series -- "Kuifje/1972 (52 issues)/Kuifje
+    197245" is at home in "Kuifje". ("", "") when none is."""
+    current = folder
+    while current:
+        parsed = folders.parse(current)
+        if key_series and key_series in (series_key(parsed.series), series_key(parsed.base_series)) and (
+                not volume or not parsed.volume or parsed.volume == volume):
+            return current, parsed.volume
+        current = posixpath.dirname(current)
+    return "", ""
+
+
+def _grouping_home(folder: str, folders: _Folders) -> str:
+    """A file in a grouping folder ("Le Noveau Pif (1982-1985)/1983 (52
+    issues)") belongs with the folder above it."""
+    while folder and not folders.parse(folder).series and posixpath.dirname(folder):
+        folder = posixpath.dirname(folder)
+    return folder
+
+
 def build_report(info: ScanInfo, rows: list[ScanRow]) -> Report:
     report = Report()
-    folders: dict[str, FolderName] = {}
     entries: list[_Entry] = []
+    by_folder: dict[str, list[_Entry]] = defaultdict(list)
     for row in rows:
-        folder = row.folder
-        if folder not in folders:
-            folders[folder] = parse_folder_name(posixpath.basename(folder))
-        home = folders[folder]
-        name = parse_file_name(row.file)
+        name = parse_file_name(row.file, row.number if row.comicinfo == "yes" else "")
         key_series = series_key(name.series)
-        same_series = bool(key_series) and series_key(home.series) == key_series
-        volume = name.volume or (home.volume if same_series else "")
-        at_home = same_series and (not name.volume or not home.volume or home.volume == name.volume)
-        entries.append(_Entry(row, name, folder, (key_series, volume), at_home))
+        if key_series in _GENERIC_SERIES:  # "Volume 01 - Nana to Kaoru ...": no series to go by
+            key_series = ""
+        entry = _Entry(row, name, row.folder, (key_series, name.volume), False, row.folder)
+        entries.append(entry)
+        by_folder[row.folder].append(entry)
+    folders = _Folders(by_folder)
+    for entry in entries:
+        home, home_volume = _home(entry.folder, entry.key[0], entry.name.volume, folders)
+        if home:
+            entry.at_home, entry.home = True, home
+            entry.key = (entry.key[0], entry.name.volume or home_volume)
+        else:
+            entry.home = _grouping_home(entry.folder, folders)
 
     named: dict[str, list[str]] = defaultdict(list)  # series_key -> folders named for it
-    for folder, parsed in folders.items():
+    for folder in by_folder:
+        parsed = folders.parse(folder)
         if series_key(parsed.series):
             named[series_key(parsed.series)].append(folder)
     by_key: dict[tuple[str, str], list[_Entry]] = defaultdict(list)
@@ -161,9 +301,44 @@ def build_report(info: ScanInfo, rows: list[ScanRow]) -> Report:
     _find_splits(report, folders, named, by_key)
     _find_name_issues(report, entries)
     _find_duplicates(report, by_key)
-    _find_mismatches(report, entries)
+    _find_mismatches(report, by_key)
     _find_format_issues(report, info, rows)
+    _find_fixes(report, entries)
     return report
+
+
+def _find_fixes(report, entries) -> None:
+    by_path = {e.row.path: e for e in entries}
+    taken = {e.row.path for e in entries}
+    for issue in report.formats:
+        entry = by_path[issue.path]
+        row, name = entry.row, entry.name
+        if issue.problem.startswith("PageCount says"):
+            report.fixes.append(Fix(row.path, KIND_PAGECOUNT, f"PageCount {row.page_count} → {row.pages}"))
+        elif issue.problem == "no ComicInfo.xml" and row.container == "zip" and name.series and name.number:
+            fields = fields_from_name(name)
+            report.fixes.append(Fix(row.path, KIND_NEW_COMICINFO,
+                                    "create ComicInfo.xml: " + ", ".join(f"{k} {v}" for k, v in fields.items()), fields))
+        elif issue.problem.startswith("named ") and issue.problem.endswith("but really ZIP"):
+            new_path = posixpath.splitext(row.path)[0] + ".cbz"
+            if new_path not in taken:
+                report.fixes.append(Fix(row.path, KIND_EXTENSION, "rename to .cbz (it is a ZIP)", new_path=new_path))
+    by_file: dict[str, list[Mismatch]] = defaultdict(list)
+    for mismatch in report.mismatches:
+        by_file[mismatch.path].append(mismatch)
+    for path, mismatches in by_file.items():
+        entry = by_path[path]
+        wanted = {m.field for m in mismatches}
+        fields = fields_from_name(entry.name, wanted)
+        if fields:
+            what = "; ".join(f"{m.field}: {m.in_comicinfo} → {m.in_name}" for m in mismatches)
+            report.fixes.append(Fix(path, KIND_COMICINFO_FROM_NAME, "set ComicInfo — " + what, fields, choice=path))
+        new_name = name_from_comicinfo(entry.name, entry.row, wanted)
+        new_path = posixpath.join(posixpath.dirname(path), new_name) if new_name else ""
+        if new_path and new_path != path and new_path not in taken:
+            report.fixes.append(Fix(path, KIND_RENAME_FROM_COMICINFO, f"rename to {new_name}",
+                                    new_path=new_path, choice=path))
+    report.fixes.sort(key=lambda f: (f.path.casefold(), f.kind))
 
 
 LIST_COLUMNS = ["Check", "File", "Folder", "Problem", "Suggestion"]
@@ -197,49 +372,66 @@ def report_list(report: Report) -> list[list[str]]:
     return out
 
 
-def _find_moves(report, entries, folders, named, by_key) -> None:
+def _find_moves(report, entries, folders: _Folders, named, by_key) -> None:
+    homes = {key: Counter(e.home for e in siblings) for key, siblings in by_key.items()}
     for entry in entries:
         if entry.at_home or not entry.key[0]:
             continue
         series, volume = entry.key
-        candidates = [f for f in named.get(series, []) if f != entry.folder]
+        candidates = [f for f in named.get(series, []) if f != entry.folder and folders.fits(f, entry)]
         if volume:
-            candidates = [f for f in candidates if folders[f].volume == volume]
+            candidates = [f for f in candidates if folders.parse(f).volume == volume]
         elif len(candidates) > 1:
             year = _year(entry.name.year or entry.row.year)
             if year:
-                fitting = [f for f in candidates if folders[f].first_year and
-                           folders[f].first_year <= year <= (folders[f].last_year or 9999)]
+                fitting = [f for f in candidates if folders.parse(f).first_year and
+                           folders.parse(f).first_year <= year <= (folders.parse(f).last_year or 9999)]
                 candidates = fitting or candidates
         if len(candidates) == 1:
-            report.moves.append(Move(entry.row.path, candidates[0], "a folder named for this series"))
+            if not folders.outside_run(candidates[0], entry):
+                report.moves.append(Move(entry.row.path, candidates[0], "a folder named for this series"))
             continue
         if len(candidates) > 1:
             listed = "; ".join(sorted(candidates)[:4]) + (" …" if len(candidates) > 4 else "")
             report.moves.append(Move(entry.row.path, "", f"several folders fit — which one? {listed}"))
             continue
-        siblings = by_key[entry.key]
-        counts = Counter(e.folder for e in siblings)
+        counts = Counter({f: n for f, n in homes[entry.key].items() if f == entry.folder or folders.fits(f, entry)})
+        if not counts:
+            continue
         top, top_count = counts.most_common(1)[0]
-        if top != entry.folder and top_count >= 2 and top_count * 2 > len(siblings):
+        if top != entry.home and top_count >= 2 and top_count * 2 > sum(counts.values()):
             report.moves.append(Move(
-                entry.row.path, top, f"{top_count} of the {len(siblings)} files of this series are there",
+                entry.row.path, top, f"{top_count} of the {sum(counts.values())} files of this series are there",
             ))
 
 
-def _find_splits(report, folders, named, by_key) -> None:
+def _find_splits(report, folders: _Folders, named, by_key) -> None:
     moved = {m.path: m.target_folder for m in report.moves if m.target_folder}
     for key, siblings in by_key.items():
-        counts = Counter(moved.get(e.row.path, e.folder) for e in siblings)
-        if len(counts) > 1:
-            report.splits.append(Split(_describe_key(siblings[0]), sorted(counts.items())))
+        counts = Counter(moved.get(e.row.path, e.home) for e in siblings)
+        if len(counts) < 2:
+            continue
+        # Strays are Moves; a split is the series living in two of ITS folders.
+        # (Issues read in crossover folders -- "Realm Of Kings", "War Of
+        # Kings" -- aren't at home anywhere and aren't a split either.)
+        homes = {e.home for e in siblings if e.at_home} | {moved[e.row.path] for e in siblings if e.row.path in moved}
+        counts = Counter({f: n for f, n in counts.items() if f in homes})
+        if len(counts) < 2:
+            continue
+        top = counts.most_common(1)[0][0]
+        together = {f: n for f, n in counts.items() if f == top or folders.same_run(f, top)}
+        if len(together) > 1:
+            report.splits.append(Split(_describe_key(siblings[0]), sorted(together.items())))
     for series, candidates in named.items():
         by_volume: dict[str, list[str]] = defaultdict(list)
         for folder in candidates:
-            by_volume[folders[folder].volume].append(folder)
+            by_volume[folders.parse(folder).volume].append(folder)
         for volume, same in by_volume.items():
-            if len(same) > 1:
-                label = folders[same[0]].series + (f" v{volume}" if volume else "")
+            # A folder inside the series' own folder isn't a second home.
+            same = [f for f in same if not any(g != f and f.startswith(g + "/") for g in same)]
+            same = [f for f in same if any(g != f and folders.same_run(f, g) for g in same)]
+            if len(same) > 1 and not any({f for f, _n in split.folders} == set(same) for split in report.splits):
+                label = folders.parse(same[0]).series + (f" v{volume}" if volume else "")
                 report.splits.append(Split(label, [(f, 0) for f in sorted(same)], "several folders named for it"))
     report.splits.sort(key=lambda s: s.series.casefold())
 
@@ -288,15 +480,33 @@ def _find_name_issues(report, entries) -> None:
                 problems.append("stray spaces")
             if not problems:
                 continue
-            row = entry.row
-            series = usual or name.series
-            suggested = library_name(
-                series, name.number or row.number, row.publisher or name.publisher,
-                row.year or name.year, row.month or name.month, name.volume, name.extensions or ".cbz",
-            )
-            if suggested == row.file:
-                suggested = ""
-            report.names.append(NameIssue(row.path, problems, suggested))
+            report.names.append(NameIssue(entry.row.path, problems, _suggested_name(entry, usual)))
+
+
+def _suggested_name(entry: _Entry, usual_series: str) -> str:
+    """The Library Organizer name for a file, changing only what is wrong
+    with it: the file's own series, number, title, publisher and date are
+    kept, and ComicInfo fills in only what the name lacks. "" when there's
+    no safe rewrite -- a name with extra brackets or a "[Series 07]" (which
+    would be lost), or nothing to build the date from."""
+    name, row = entry.name, entry.row
+    if name.extra_brackets or "[" in row.file:
+        return ""
+    year = name.year or row.year
+    month = name.month
+    if not month and (not name.year or name.year == row.year):
+        month = row.month
+    suggested = library_name(
+        usual_series or name.series, name.number or row.number, name.publisher or row.publisher,
+        year, month, name.volume, name.extensions or ".cbz", name.title,
+    )
+    return "" if suggested == row.file else suggested
+
+
+def _variant(entry: _Entry) -> tuple[str, tuple[str, ...]]:
+    """What tells two copies of one issue apart on purpose: a title
+    ("Part 1" / "Part 2") and extra brackets ("(English)" / "(German)")."""
+    return loose_key(entry.name.title), tuple(sorted(loose_key(b) for b in entry.name.extra_brackets))
 
 
 def _find_duplicates(report, by_key) -> None:
@@ -306,39 +516,106 @@ def _find_duplicates(report, by_key) -> None:
             year = entry.name.year or entry.row.year
             groups[(entry.name.number_key, year)].append(entry)
         undated = {num: g for (num, year), g in groups.items() if not year}
+        found = []
         for (num, year), group in groups.items():
             if year and num in undated:
                 group = group + undated.pop(num)
-            if len(group) > 1:
-                first = group[0]
-                report.duplicates.append(DuplicateGroup(
-                    _describe_key(first), first.name.number or "(one-shot)", [e.row for e in group],
-                ))
-        for num, group in undated.items():
-            if len(group) > 1:
-                report.duplicates.append(DuplicateGroup(
-                    _describe_key(group[0]), group[0].name.number or "(one-shot)", [e.row for e in group],
-                ))
+            found.append(group)
+        found.extend(undated.values())
+        for group in found:
+            for copies in _split_variants(group):
+                if len(copies) > 1:
+                    first = copies[0]
+                    report.duplicates.append(DuplicateGroup(
+                        _describe_key(first), first.name.number or "(one-shot)", [e.row for e in copies],
+                    ))
     report.duplicates.sort(key=lambda d: (d.series.casefold(), d.number))
 
 
-def _find_mismatches(report, entries) -> None:
-    for entry in entries:
-        row, name = entry.row, entry.name
-        if row.comicinfo != "yes":
-            continue
-        if row.series and name.series and series_key(row.series) != entry.key[0]:
-            report.mismatches.append(Mismatch(row.path, "Series", name.series, row.series))
-        if row.number and name.number and not name.is_tpb and number_key(row.number) != name.number_key:
-            report.mismatches.append(Mismatch(row.path, "Number", name.number, row.number))
-        volume = entry.key[1]
-        if volume and row.volume.isdigit() and int(row.volume) < 1000 and int(row.volume) != int(volume):
-            report.mismatches.append(Mismatch(row.path, "Volume", f"v{volume}", row.volume))
-        if name.year and row.year and _year(name.year) != _year(row.year):
-            report.mismatches.append(Mismatch(row.path, "Year", name.year, row.year))
-        if (name.month and row.month and name.month.isdigit() and row.month.isdigit()
-                and int(name.month) != int(row.month)):
-            report.mismatches.append(Mismatch(row.path, "Month", name.month, row.month))
+def _split_variants(group: list[_Entry]) -> list[list[_Entry]]:
+    """Copies whose titles or extra brackets differ are different comics;
+    one without a title or brackets still matches any of them."""
+    variants = {_variant(e) for e in group} - {("", ())}
+    if len(variants) < 2:
+        return [group]
+    plain = [e for e in group if _variant(e) == ("", ())]
+    return [[e for e in group if _variant(e) == v] + plain for v in sorted(variants)]
+
+
+def _months_apart(name: FileName, row: ScanRow) -> int:
+    """Months between the date in the name and in ComicInfo (a year apart
+    at most when either has no month)."""
+    def valid(month: str) -> bool:
+        return month.isdigit() and 1 <= int(month) <= 12
+    if not (valid(name.month) and valid(row.month)):  # only years to go by: a year's grace
+        return max(0, abs(_year(name.year) - _year(row.year)) - 1) * 12
+    return abs(_year(name.year) * 12 + int(name.month) - _year(row.year) * 12 - int(row.month))
+
+
+def _series_agree(name: FileName, in_comicinfo: str) -> bool:
+    """The file name's series and ComicInfo's name the same thing, allowing
+    for the ways a name legitimately differs: a creator or a word more or
+    fewer ("Mari Naomi - I Thought YOU Hated ME", "Sabrina the Teenage
+    Witch" vs "Sabrina"), or ComicInfo folding the title into the series
+    ("The Ride 006 - Mardi Gras 02" vs "The Ride: Mardi Gras")."""
+    ci, ours = loose_key(in_comicinfo), loose_key(name.series)
+    if not ci or not ours or ci == ours:
+        return True
+    ci_words, our_words = ([w for w in series_key(text).split() if not w.isdigit()]
+                           for text in (in_comicinfo, name.series))  # "Venom 055 - License to Kill"
+    if ci_words == our_words:
+        return True
+    shorter, longer = sorted((ci_words, our_words), key=len)
+    if shorter and (longer[:len(shorter)] == shorter or longer[-len(shorter):] == shorter):
+        return True
+    rest = ci[len(ours):] if ci.startswith(ours) else ""
+    return bool(rest) and rest in loose_key(name.title)
+
+
+def _find_mismatches(report, by_key) -> None:
+    for key, siblings in by_key.items():
+        # What ComicInfo consistently says differently for a whole series is
+        # a convention, not a mistake -- "Pep" for every "Pep Comics" file,
+        # Heavy Metal's Number as year+month, cover vs on-sale months -- so
+        # only the files that differ from the rest of their series are
+        # reported.
+        usual = _majority([loose_key(e.row.series) for e in siblings if e.row.comicinfo == "yes" and e.row.series])
+        found: dict[str, list[Mismatch]] = defaultdict(list)
+        checked: Counter = Counter()
+        for entry in siblings:
+            row, name = entry.row, entry.name
+            if row.comicinfo != "yes":
+                continue
+            if row.series and name.series:
+                checked["Series"] += 1
+                if not _series_agree(name, row.series) and loose_key(row.series) != usual:
+                    found["Series"].append(Mismatch(row.path, "Series", name.series, row.series))
+            if row.number and name.number and not name.is_tpb:
+                checked["Number"] += 1
+                if not numbers_agree(name.number, row.number) and \
+                        number_key(row.number) not in re.findall(r"\b\d+\b", entry.row.file.lower().lstrip("0")) and \
+                        number_key(row.number) not in {number_key(n) for n in re.findall(r"\b\d+\b", name.title)}:
+                    found["Number"].append(Mismatch(row.path, "Number", name.number, row.number))
+            volume = entry.key[1]
+            if volume.isdigit() and not name.is_tpb and row.volume.isdigit() and int(row.volume) < 1000:
+                checked["Volume"] += 1
+                if int(row.volume) != int(volume):
+                    found["Volume"].append(Mismatch(row.path, "Volume", f"v{volume}", row.volume))
+            # A cover date and an on-sale date are a month or two apart, even
+            # across New Year: only a bigger gap is a disagreement.
+            if name.year and row.year and _year(name.year) and _year(row.year):
+                checked["Year"] += 1
+                if _months_apart(name, row) > 2 and _year(name.year) != _year(row.year):
+                    found["Year"].append(Mismatch(row.path, "Year", name.year, row.year))
+            if name.month and row.month and name.month.isdigit() and row.month.isdigit():
+                checked["Month"] += 1
+                if _year(name.year) == _year(row.year) and _months_apart(name, row) > 2:
+                    found["Month"].append(Mismatch(row.path, "Month", name.month, row.month))
+        for field_name, mismatches in found.items():
+            if checked[field_name] >= MIN_FOLDER_FILES and len(mismatches) > (1 - PATTERN_SHARE) * checked[field_name]:
+                continue  # most of the series disagrees the same way: its convention
+            report.mismatches.extend(mismatches)
+    report.mismatches.sort(key=lambda m: m.path.casefold())
 
 
 def _find_format_issues(report, info: ScanInfo, rows: list[ScanRow]) -> None:

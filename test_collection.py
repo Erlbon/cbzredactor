@@ -320,3 +320,189 @@ def test_report_elsewhere_is_read_only(library, monkeypatch):
     monkeypatch.setattr(collection_report_dialog.CollectionReportDialog, "exec", look)
     MainWindow().open_collection_report()
     assert seen == {"apply_visible": False, "checkable": False, "moves": 4}
+
+
+# ---------------------------------------------------------------------------
+# False positives found on a real 234,000-comic collection
+# ---------------------------------------------------------------------------
+
+def _rows(paths, tmp_path, **fields):
+    return [scan.ScanRow(p, comicinfo="yes", **fields) for p in paths]
+
+
+def test_grouping_and_era_folders_are_not_moves_or_splits(tmp_path):
+    kuifje = "Belgian/Kuifje"
+    rows = [
+        scan.ScanRow(f"{kuifje}/1972 (52 issues)/Kuifje 1972{n:02d} (Le Lombard, 1972-11).cbz")
+        for n in range(1, 4)
+    ] + [scan.ScanRow(f"{kuifje}/Kuifje 001 (Le Lombard, 1970-01).cbz")]
+    report = build_report(scan.new_info(str(tmp_path), True), rows)
+    assert report.moves == [] and report.splits == []
+
+
+def test_same_name_in_another_branch_or_publisher_is_not_a_stray(tmp_path):
+    rows = [
+        scan.ScanRow("Dutch/DPG/Donald Duck/Donald Duck 001 (DPG Media, 1986-11).cbz"),
+        scan.ScanRow("German/Egmont/Donald Duck/Donald Duck 001 (Egmont, 1980-01).cbz"),
+        scan.ScanRow("Incoming/Donald Duck 002 (DPG Media, 1986-12).cbz"),
+    ]
+    report = build_report(scan.new_info(str(tmp_path), True), rows)
+    assert [(m.path, m.target_folder) for m in report.moves] == \
+        [("Incoming/Donald Duck 002 (DPG Media, 1986-12).cbz", "Dutch/DPG/Donald Duck")]
+    assert report.splits == []
+
+
+def test_an_eras_series_folders_are_the_collections_layout_not_a_split(tmp_path):
+    rows = [
+        scan.ScanRow("DC/New Justice (2018-2021)/Green Lantern/Green Lantern 001 (DC, 2018-01).cbz"),
+        scan.ScanRow("DC/All In (2024-)/Green Lantern/Green Lantern 001 (DC, 2024-01).cbz"),
+    ]
+    assert build_report(scan.new_info(str(tmp_path), True), rows).splits == []
+
+
+def test_series_names_that_differ_only_in_punctuation_or_wording_agree(tmp_path):
+    cases = [
+        ("Batman - Superman 016 (DC, 2015-01).cbz", "Batman/Superman"),
+        ("Gen13 001 (Wildstorm, 1994-03).cbz", "Gen 13"),
+        ("Thor v5 026 (Marvel, 2022-08).cbz", "Thor"),
+        ("Venom 055 - License to Kill 02 (Marvel, 1997-07).cbz", "Venom: License to Kill"),
+        ("Sabrina the Teenage Witch v3 005 (Archie, 2000-05).cbz", "Sabrina"),
+        ("Slaine v08 - The Grail War (2013).cbz", "Sláine: The Grail War"),
+    ]
+    rows = [scan.ScanRow(f"A/{file}", comicinfo="yes", series=series) for file, series in cases]
+    assert build_report(scan.new_info(str(tmp_path), True), rows).mismatches == []
+
+
+def test_a_series_convention_is_not_reported_file_by_file(tmp_path):
+    files = [f"Pep Comics {n:03d} (Archie, 1961-0{n}).cbz" for n in range(1, 6)]
+    rows = [scan.ScanRow(f"A/Pep Comics/{f}", comicinfo="yes", series="Pep", number=str(n), year="1961", month=str(n))
+            for n, f in enumerate(files, 1)]
+    assert build_report(scan.new_info(str(tmp_path), True), rows).mismatches == []
+    rows.append(scan.ScanRow("A/Pep Comics/Pep Comics 006 (Archie, 1961-06).cbz", comicinfo="yes", series="Pep",
+                             number="7", year="1961", month="6"))
+    assert [(m.field, m.in_name, m.in_comicinfo) for m in build_report(scan.new_info(str(tmp_path), True), rows).mismatches] \
+        == [("Number", "006", "7")]
+
+
+def test_cover_date_vs_release_date_is_not_a_mismatch(tmp_path):
+    rows = [
+        scan.ScanRow("A/X/X 001 (Marvel, 1970-12).cbz", comicinfo="yes", series="X", number="1", year="1971", month="2"),
+        scan.ScanRow("A/X/X 002 (Marvel, 1970-06).cbz", comicinfo="yes", series="X", number="2", year="1970", month="9"),
+        scan.ScanRow("A/X/X 003 (Marvel, 2005).cbz", comicinfo="yes", series="X", number="3", year="2017", month="1"),
+    ]
+    found = {(m.path.rsplit("/", 1)[-1], m.field) for m in build_report(scan.new_info(str(tmp_path), True), rows).mismatches}
+    assert found == {("X 002 (Marvel, 1970-06).cbz", "Month"), ("X 003 (Marvel, 2005).cbz", "Year")}
+
+
+def test_year_issue_and_range_numbers_agree_with_comicinfo():
+    from core.collection_names import numbers_agree
+    assert numbers_agree("003", "3") and numbers_agree("1982-24", "24") and numbers_agree("2009-21", "200921")
+    assert numbers_agree("233-234", "233") and numbers_agree("Vol. 10", "10")
+    assert not numbers_agree("006", "7")
+
+
+def test_copies_told_apart_by_title_or_brackets_are_not_duplicates(tmp_path):
+    rows = [
+        scan.ScanRow("A/Hyper Scape/Hyper Scape 003 - Shadow Rising Part 1 (DH, 2020-12).cbz"),
+        scan.ScanRow("A/Hyper Scape/Hyper Scape 003 - Shadow Rising Part 2 (DH, 2020-12).cbz"),
+        scan.ScanRow("A/Sexy Phone/Sexy Phone 01 (English).cbz"),
+        scan.ScanRow("A/Sexy Phone/Sexy Phone 01 (German).cbz"),
+        scan.ScanRow("A/Thanos/Thanos 008 (Marvel, 2004-05).cbz"),
+        scan.ScanRow("B/Thanos/Thanos 008 (Marvel, 2004-05).cbz"),
+    ]
+    report = build_report(scan.new_info(str(tmp_path), True), rows)
+    assert [(d.series, len(d.rows)) for d in report.duplicates] == [("Thanos", 2)]
+
+
+def test_suggested_names_keep_the_title_and_never_rewrite_other_parts(tmp_path):
+    rows = [scan.ScanRow(f"A/Cinebook/Alpha {n:03d} - Title {n} (Cinebook, 2008-0{n}).cbz", comicinfo="yes",
+                         publisher="Cinebook Ltd", year="2009", month="7") for n in (1, 2, 3)]
+    rows.append(scan.ScanRow("A/Cinebook/Alpha 4 - Wolves' Wages (Cinebook, 2009-04).cbz", comicinfo="yes",
+                             publisher="Cinebook Ltd", year="2011", month="7"))
+    report = build_report(scan.new_info(str(tmp_path), True), rows)
+    (issue,) = report.names
+    assert issue.suggested == "Alpha 004 - Wolves' Wages (Cinebook, 2009-04).cbz"  # its own publisher and date
+
+
+# ---------------------------------------------------------------------------
+# Apply: fixes
+# ---------------------------------------------------------------------------
+
+def test_report_offers_fixes_and_applies_them(library, monkeypatch):
+    from core.collection_fix import KIND_COMICINFO_FROM_NAME, KIND_PAGECOUNT, KIND_RENAME_FROM_COMICINFO, KIND_NEW_COMICINFO
+    from gui import collection_report_dialog
+    from gui.main_window import MainWindow, _collection_scan_path
+
+    info, rows = _scan(library)
+    report = build_report(info, rows)
+    kinds = {(f.path.rsplit("/", 1)[-1], f.kind) for f in report.fixes}
+    assert ("The Incredible Hulk 103 (Marvel, 1968-05).cbz", KIND_PAGECOUNT) in kinds
+    assert ("The Incredible Hulk v1 003 (Marvel, 1962-09).cbz", KIND_NEW_COMICINFO) in kinds
+    odd = "3 Guns 003 (Boom, 2013-10).webp.cbz"  # the name says 003, ComicInfo says 4: either way round
+    assert {(odd, KIND_COMICINFO_FROM_NAME), (odd, KIND_RENAME_FROM_COMICINFO)} <= kinds
+
+    monkeypatch.setattr(QFileDialog, "getExistingDirectory", lambda *a, **k: library)
+    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.No)
+    monkeypatch.setattr(QMessageBox, "information", lambda *a, **k: None)
+    window = MainWindow()
+    window.scan_collection_folder()
+    seen = {}
+
+    def tick(dialog):
+        table = dialog.fixes_table
+        Qt = collection_report_dialog.Qt
+        for row in range(table.rowCount()):
+            item = table.item(row, 0)
+            fix = item.data(collection_report_dialog._FIX_ROLE)
+            if fix.kind in (KIND_PAGECOUNT, KIND_NEW_COMICINFO) or (fix.path.endswith(odd) and fix.kind == KIND_COMICINFO_FROM_NAME):
+                item.setCheckState(Qt.CheckState.Checked)
+        for row in range(table.rowCount()):  # ticking the rename alternative unticks the ComicInfo one
+            item = table.item(row, 0)
+            fix = item.data(collection_report_dialog._FIX_ROLE)
+            if fix.path.endswith(odd) and fix.kind == KIND_RENAME_FROM_COMICINFO:
+                item.setCheckState(Qt.CheckState.Checked)
+                break
+        seen["ticked"] = sorted((f.path.rsplit("/", 1)[-1], f.kind) for f in dialog.ticked_fixes())
+        seen["text"] = dialog.apply_button.text()
+        for row in range(table.rowCount()):  # ...and back again: settle it by rewriting ComicInfo
+            item = table.item(row, 0)
+            fix = item.data(collection_report_dialog._FIX_ROLE)
+            if fix.path.endswith(odd) and fix.kind == KIND_COMICINFO_FROM_NAME:
+                item.setCheckState(Qt.CheckState.Checked)
+        return dialog.DialogCode.Accepted
+
+    monkeypatch.setattr(collection_report_dialog.CollectionReportDialog, "exec", tick)
+    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.Yes)
+    window.open_collection_report()
+    assert (odd, KIND_RENAME_FROM_COMICINFO) in seen["ticked"] and (odd, KIND_COMICINFO_FROM_NAME) not in seen["ticked"]
+
+    info2, rows2 = _scan(library)
+    report2 = build_report(info2, rows2)
+    left = {(f.path.rsplit("/", 1)[-1], f.kind) for f in report2.fixes}
+    assert ("The Incredible Hulk 103 (Marvel, 1968-05).cbz", KIND_PAGECOUNT) not in left
+    assert ("The Incredible Hulk v1 003 (Marvel, 1962-09).cbz", KIND_NEW_COMICINFO) not in left
+    assert not [f for f in report2.fixes if f.path.endswith(odd) and f.kind == KIND_COMICINFO_FROM_NAME]
+    hulk = next(r for r in rows2 if r.file == "The Incredible Hulk v1 003 (Marvel, 1962-09).cbz")
+    assert (hulk.comicinfo, hulk.series, hulk.number) == ("yes", "The Incredible Hulk", "3")
+    _saved, saved_rows = scan.read_scan(_collection_scan_path())
+    assert next(r for r in saved_rows if r.file == hulk.file).comicinfo == "yes"  # the saved scan followed the edit
+
+
+def test_fixes_are_read_only_where_the_folder_is_not_present(library, monkeypatch):
+    from gui import collection_report_dialog
+    from gui.main_window import MainWindow, _collection_scan_path
+
+    info, rows = _scan(library)
+    info.root = r"E:\eLib\741.59 - Comic Books" if os.name != "nt" else "/nowhere/741.59 - Comic Books"
+    scan.write_scan(_collection_scan_path(), info, rows)
+    seen = {}
+
+    def look(dialog):
+        item = dialog.fixes_table.item(0, 0)
+        seen["checkable"] = item.data(collection_report_dialog.Qt.ItemDataRole.CheckStateRole) is not None
+        seen["rows"] = dialog.fixes_table.rowCount()
+        return dialog.DialogCode.Rejected
+
+    monkeypatch.setattr(collection_report_dialog.CollectionReportDialog, "exec", look)
+    MainWindow().open_collection_report()
+    assert seen["rows"] > 0 and not seen["checkable"]

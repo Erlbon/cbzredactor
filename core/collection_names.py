@@ -25,6 +25,7 @@ Pure string logic, no Qt.
 from __future__ import annotations
 
 import re
+import unicodedata
 from dataclasses import dataclass, field
 
 from core.scene_name import strip_extensions
@@ -35,13 +36,29 @@ _BRACKET_RE = re.compile(r"\(([^()]*)\)")
 _FILE_RE = re.compile(
     r"^(?P<series>.+?)"
     r"(?:\s+v(?P<vol>\d+))?"
-    r"\s+#?(?P<num>TPB(?:\s+(?:-\s+)?v\d+)?|-?\d+(?:\.\d+)?[a-z]{0,2})"
-    r"(?:\s+-\s+(?P<title>.*))?$",
+    r"\s+#?(?P<num>TPB(?:\s+(?:-\s+)?(?:v|vol\.?\s*)\d+)?"  # "TPB", "TPB v02", "TPB - v03", "TPB Vol. 2"
+    r"|vol\.?\s*\d+"  # "The Unwritten Vol. 10"
+    r"|\d{1,4}-\d{1,4}"  # "El Vibora 233-234", "Fix und Foxi 1982-24" (year-issue)
+    r"|-?\d+(?:\.\d+)?[a-z]{0,2})"
+    r"(?:\s+v\d+\s+\d+)?"  # "Heavy Metal 005 v01 05": whole number, then volume and issue
+    r"(?:\s+-\s*(?P<title>.*))?$",
     re.IGNORECASE,
 )
-_TPB_RE = re.compile(r"^TPB(?:\s+(?:-\s+)?v0*(\d+))?$", re.IGNORECASE)
-_PUB_DATE_RE = re.compile(r"^(?:(?P<pub>[^,]+),\s*)?(?P<year>\d{4})(?:-(?P<month>\d{1,2}))?$")
-_FOLDER_VOL_RE = re.compile(r"^(?P<series>.+?)\s+v(?P<vol>\d+)\b(?P<rest>.*)$", re.IGNORECASE)
+_TPB_RE = re.compile(r"^TPB(?:\s+(?:-\s+)?(?:v|vol\.?\s*)0*(\d+))?$", re.IGNORECASE)
+# "Greg - [Bernard Prince 09] - Guérilla pour un fantôme": creator, [series number], title.
+_BRACKETED_SERIES_RE = re.compile(
+    r"^.*?\[(?P<series>[^\]]+?)\s+#?[A-Z]?(?P<num>\d+)\]\s*(?:-\s*(?P<title>.*))?$")  # "[Asterix T17]"
+_PUB_DATE_RE = re.compile(r"^(?:(?P<pub>[^,]+),\s*)?(?P<year>\d{4})(?:-(?P<month>\d{1,2})?)?$")  # "(Marvel, 2026-)"
+_FOLDER_VOL_RE = re.compile(r"^(?P<series>.+?)\s+v(?P<vol>\d+(?:\.\d+)?)\b(?P<rest>.*)$", re.IGNORECASE)
+# "Warlands v2 - The Age Of Ice (2001-2002)": series "Warlands - The Age Of Ice", v2.
+_FOLDER_SUBTITLE_RE = re.compile(r"^\s+-\s+(?P<sub>[^(\[]+?)\s*(?=[(\[]|$)")
+# Folders that group, rather than hold, a series: "_Spider-Verse", "2019 (52 issues)", "Specials".
+_GROUPING_FOLDER_RE = re.compile(r"^(_|\d{4}\b|\d+\s*-\s*\d+$|specials?$|one[- ]?shots?$|tpbs?$|annuals?$|vol(ume)?\b)",
+                                 re.IGNORECASE)
+# "v2 Sensational She-Hulk (1989-1994)": the volume written first.
+_FOLDER_LEADING_VOL_RE = re.compile(r"^v(?P<vol>\d+)\s+(?P<series>[^(\[]+?)\s*(?P<rest>[(\[].*)?$", re.IGNORECASE)
+# A title ending in a number: "Evil Dead 2 - Dark Ones Rising 001".
+_TITLE_NUMBER_RE = re.compile(r"^(?P<more>.+?)\s+#?(?P<num>-?\d+(?:\.\d+)?[a-z]{0,2})$", re.IGNORECASE)
 _YEARS_RE = re.compile(r"\b(\d{4})\s*-\s*(\d{4})?")
 _YEAR_RE = re.compile(r"\b(\d{4})\b")
 
@@ -72,9 +89,25 @@ class FileName:
 @dataclass
 class FolderName:
     series: str = ""
+    base_series: str = ""  # "Lazarus" for "Lazarus v2 - Risen": files may use either
     volume: str = ""
     first_year: int = 0
     last_year: int = 0  # 0: open-ended or unknown
+
+
+def numbers_agree(in_name: str, in_comicinfo: str) -> bool:
+    """A name's number and ComicInfo's say the same: "003" and "3", but
+    also "1982-24" (year-issue) and "24", "233-234" and "233", "Vol. 10"
+    and "10"."""
+    ci = number_key(in_comicinfo)
+    if number_key(in_name) == ci:
+        return True
+    digits = re.sub(r"\D", "", in_name).lstrip("0")
+    if digits and digits == re.sub(r"\D", "", in_comicinfo).lstrip("0"):  # "2009-21" and "200921"
+        return True
+    parts = re.findall(r"\d+(?:\.\d+)?", in_name)
+    return ((len(parts) > 1 or in_name.lower().startswith("vol"))
+            and ci in {number_key(p) for p in parts})
 
 
 def number_key(number: str) -> str:
@@ -95,7 +128,8 @@ def number_key(number: str) -> str:
 def series_key(name: str) -> str:
     """Spelling-proof comparison key: case, punctuation, "&"/"and" and a
     leading "The" ignored."""
-    text = name.casefold().replace("&", " and ")
+    text = name.casefold().replace("&", " and ").replace("_", " ")  # "Batman_Superman": "/" in a folder name
+    text = re.sub(r"(?<=\w)\.(?=\w)", "", text)  # "U.N.C.L.E" -> "uncle"
     text = re.sub(r"[^\w\s]", " ", text)
     text = re.sub(r"\s+", " ", text).strip()
     if text.startswith("the "):
@@ -103,7 +137,29 @@ def series_key(name: str) -> str:
     return text
 
 
-def parse_file_name(filename: str) -> FileName:
+def loose_key(name: str) -> str:
+    """A looser key for comparing a file name's series with ComicInfo's:
+    also ignores accents, spaces, any "vN" (a volume, which ComicInfo
+    often puts in Series) and a trailing "TPB" -- so "Batman/Superman:
+    World's Finest" matches "BatmanSuperman - World's Finest" (Windows
+    can't name a file with "/" or ":"), "Gen 13" matches "Gen13",
+    "Sláine" matches "Slaine" and "Thor v5" matches "Thor"."""
+    text = re.sub(r"\([^()]*\)", " ", name)  # "Star Wars: Darth Vader (2020-)"
+    text = unicodedata.normalize("NFKD", text)
+    text = "".join(c for c in text if not unicodedata.combining(c))
+    text = series_key(text)
+    text = re.sub(r"\bv\d+\b", " ", text)
+    text = re.sub(r"\s+(tpb|one shot|1 shot)$", "", text.strip())
+    if text.startswith("the "):
+        text = text[4:]
+    return re.sub(r"[\W_]+", "", text)
+
+
+def parse_file_name(filename: str, number_hint: str = "") -> FileName:
+    """`number_hint` (ComicInfo's Number, when known) settles a name
+    like "Evil Dead 2 - Dark Ones Rising 001": read as series "Evil
+    Dead", number 2 unless ComicInfo says 1, then as series "Evil Dead 2
+    - Dark Ones Rising", number 001."""
     stem = strip_extensions(filename)
     result = FileName(extensions=filename[len(stem):] if filename.startswith(stem) else "")
     brackets = _BRACKET_RE.findall(stem)
@@ -119,31 +175,61 @@ def parse_file_name(filename: str) -> FileName:
             result.date_form = f"publisher+{form}" if result.publisher else form
         elif inner:
             result.extra_brackets.append(inner)
+    bracketed = _BRACKETED_SERIES_RE.match(head)
+    if bracketed:
+        result.series, result.number = bracketed.group("series").strip(), bracketed.group("num")
+        result.title = (bracketed.group("title") or "").strip()
+        return result
     match = _FILE_RE.match(head)
     if match:
         result.series = match.group("series").strip()
         result.volume = str(int(match.group("vol"))) if match.group("vol") else ""
         result.number = match.group("num")
         result.title = (match.group("title") or "").strip()
+        in_title = _TITLE_NUMBER_RE.match(result.title) if number_hint and not result.is_tpb else None
+        if (in_title and number_key(number_hint) == number_key(in_title.group("num"))
+                and number_key(number_hint) != number_key(result.number)):
+            result.series = f"{result.series}{' v' + match.group('vol') if match.group('vol') else ''} " \
+                            f"{result.number} - {in_title.group('more')}"
+            result.volume = ""
+            result.number, result.title = in_title.group("num"), ""
     else:
         result.series = head  # a one-shot: no number
         vol = _FOLDER_VOL_RE.match(head)
         if vol and not vol.group("rest").strip():
-            result.series, result.volume = vol.group("series").strip(), str(int(vol.group("vol")))
+            result.series, result.volume = vol.group("series").strip(), _volume(vol.group("vol"))
     return result
+
+
+def _volume(text: str) -> str:
+    """"02" -> "2"; "05.5" -> "5.5" (a collector's in-between volume)."""
+    whole, dot, part = text.partition(".")
+    return f"{int(whole)}{dot}{part}"
 
 
 def parse_folder_name(name: str) -> FolderName:
     result = FolderName()
-    vol = _FOLDER_VOL_RE.match(name)
+    if _GROUPING_FOLDER_RE.match(name.strip()):
+        years = _YEARS_RE.search(name)
+        if years:
+            result.first_year = int(years.group(1))
+            result.last_year = int(years.group(2)) if years.group(2) else 0
+        return result
+    vol = _FOLDER_VOL_RE.match(name) or _FOLDER_LEADING_VOL_RE.match(name)
     if vol:
         result.series = vol.group("series").strip()
-        result.volume = str(int(vol.group("vol")))
-        rest = vol.group("rest")
+        result.volume = _volume(vol.group("vol"))
+        rest = vol.group("rest") or ""
+        subtitle = _FOLDER_SUBTITLE_RE.match(rest)
+        if subtitle:
+            result.base_series = result.series
+            result.series = f"{result.series} - {subtitle.group('sub').strip()}"
+            rest = rest[subtitle.end():]
     else:
         result.series = re.split(r"[(\[]", name, maxsplit=1)[0].strip()
         rest = name[len(result.series):]
-        result.series = re.sub(r"\s+\d{4}(?:\s*-\s*\d{4})?$", "", result.series).strip()
+        # "Series 1975-1999" -- but not "Fantastic Four 2099", a name.
+        result.series = re.sub(r"\s+\d{4}\s*-\s*(?:\d{4})?$", "", result.series).strip()
     years = _YEARS_RE.search(rest) or _YEARS_RE.search(name)
     if years:
         result.first_year = int(years.group(1))
@@ -151,13 +237,16 @@ def parse_folder_name(name: str) -> FolderName:
     else:
         single = _YEAR_RE.search(rest)
         if single:
-            result.first_year = int(single.group(1))
+            # "Carnage (1996)": that one year. An open run is written "(2026-)".
+            result.first_year = result.last_year = int(single.group(1))
     return result
 
 
 def number3(number: str) -> str:
     """ComicRack's {<number3>}: the whole-number part padded to three
     digits ("1" -> "001", "0.5" -> "000.5"); a TPB stays "TPB"."""
+    if re.match(r"^TPB\s+(-|vol)", number, re.IGNORECASE) or re.match(r"^vol", number, re.IGNORECASE):
+        return number  # the collection's own way of writing it, kept as is
     key = number_key(number)
     if key.startswith("TPB"):
         return "TPB" if key == "TPB" else f"TPB v{int(key.split()[1]):02d}"
@@ -168,7 +257,7 @@ def number3(number: str) -> str:
 
 
 def library_name(series: str, number: str, publisher: str, year: str, month: str,
-                 volume: str = "", extensions: str = ".cbz") -> str:
+                 volume: str = "", extensions: str = ".cbz", title: str = "") -> str:
     """The Library Organizer pattern
     {<series>} {<number3>} ({<publisher>}, {<year0>}-{<month#2>}),
     "" when a part is missing."""
@@ -182,4 +271,5 @@ def library_name(series: str, number: str, publisher: str, year: str, month: str
         return ""
     vol = f" v{volume}" if volume else ""
     num = f" {number3(number)}" if number else ""
-    return f"{series}{vol}{num} ({publisher}, {year}-{month_number:02d}){extensions}"
+    suffix = f" - {title}" if title else ""
+    return f"{series}{vol}{num}{suffix} ({publisher}, {year}-{month_number:02d}){extensions}"

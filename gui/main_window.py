@@ -2418,11 +2418,68 @@ class MainWindow(QMainWindow):
         dialog = CollectionReportDialog(info, len(rows), report, os.path.isdir(info.root), self)
         if dialog.exec() != dialog.DialogCode.Accepted:
             return
-        pairs = dialog.ticked()
-        if pairs:
-            self._apply_collection_moves(zip_path, info, rows, pairs)
+        pairs, fixes = dialog.ticked(), dialog.ticked_fixes()
+        if pairs or fixes:
+            self._apply_collection_changes(zip_path, info, rows, pairs, fixes)
 
-    def _apply_collection_moves(self, zip_path: str, info, rows: list, pairs: list[tuple[str, str]]) -> None:
+    def _apply_collection_changes(self, zip_path: str, info, rows: list, pairs: list[tuple[str, str]],
+                                  fixes: list) -> None:
+        """Ticked fixes first (ComicInfo edits inside the archives, one
+        rewrite per file), then every rename -- the report's moves and
+        renames and the fixes that rename -- through the rename log."""
+        from core import collection_scan as scan
+        from core.collection_fix import apply_edits, drop_conflicts, group_edits
+
+        fixes = drop_conflicts(fixes)
+        edits = group_edits(fixes)
+        summary: list[str] = []
+        failed: set[str] = set()
+        if edits:
+            answer = QMessageBox.question(
+                self, "Apply Fixes",
+                f"{len(edits)} archive(s) will be rewritten with the ComicInfo changes ticked in the report "
+                "(each written to a temporary file first). Undo Last Rename can't take these back.\n\nContinue?",
+            )
+            if answer != QMessageBox.StandardButton.Yes:
+                edits, fixes = {}, [f for f in fixes if f.is_rename]
+                if not (pairs or fixes):
+                    return
+        if edits:
+            errors: list[str] = []
+            by_path = {row.path: index for index, row in enumerate(rows)}
+
+            def _edit(item: tuple[str, dict], _index: int) -> None:
+                path, fields = item
+                try:
+                    apply_edits(info.root, path, fields)
+                    full = scan.long_path(scan.full_path(info.root, path))
+                    stat = os.stat(full)
+                    listed = scan.Listed(path, stat.st_size, scan._stamp(stat.st_mtime))
+                    if path in by_path:
+                        rows[by_path[path]] = scan.read_comic(info.root, listed)  # the scan stays in step
+                except (CbzError, OSError) as exc:
+                    failed.add(path)
+                    errors.append(f"{path.rsplit('/', 1)[-1]}: {exc}")
+
+            finished = run_with_progress(self, list(edits.items()), _edit, "Fixing ComicInfo...",
+                                         label_for=lambda item: f"Fixing: {item[0].rsplit('/', 1)[-1]}")
+            summary.append(f"{len(edits) - len(failed)} archive(s) rewritten."
+                           + ("" if finished else " Stopped before the rest."))
+            if errors:
+                summary.append(f"{len(errors)} failed:\n" + "\n".join(errors[:10]))
+            try:
+                scan.write_scan(zip_path, info, rows)
+            except OSError:
+                pass
+        renames, seen = [], set()
+        for old, new in pairs + [(f.path, f.new_path) for f in fixes if f.is_rename]:
+            if old not in seen and old not in failed:
+                seen.add(old)
+                renames.append((old, new))
+        self._apply_collection_moves(zip_path, info, rows, renames, "\n\n".join(summary))
+
+    def _apply_collection_moves(self, zip_path: str, info, rows: list, pairs: list[tuple[str, str]],
+                                intro: str = "") -> None:
         from core import collection_scan as scan
 
         done: list[tuple[str, str]] = []
@@ -2464,7 +2521,9 @@ class MainWindow(QMainWindow):
                 scan.write_scan(zip_path, info, rows)  # keep the report in step with the files
             except OSError:
                 pass
-        text = f"{len(done)} file(s) moved or renamed. File > Undo Last Rename takes them back."
+        text = f"{len(done)} file(s) moved or renamed. File > Undo Last Rename takes them back." if pairs else ""
+        if intro:
+            text = f"{intro}\n\n{text}" if text else intro
         if problems:
             text += f"\n\n{len(problems)} skipped:\n" + "\n".join(problems[:15])
             if len(problems) > 15:
