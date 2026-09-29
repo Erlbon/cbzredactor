@@ -162,6 +162,28 @@ def test_a_cancelled_parallel_read_keeps_what_it_finished(library):
     assert 0 < len(rows) <= len({item.path for item in listed})
     assert all(row.path in {item.path for item in listed} for row in rows.values())
 
+def test_a_damaged_comicinfo_entry_does_not_stop_the_scan(tmp_path):
+    # A corrupt deflate stream raised zlib.error out of read_comic(), and
+    # read_comics() re-raised it: one bad comic ended the whole scan.
+    good, bad = tmp_path / "Good 001.cbz", tmp_path / "Bad 001.cbz"
+    for path in (good, bad):
+        with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as archive:
+            archive.writestr("001.jpg", b"x" * 1000)
+            archive.writestr("ComicInfo.xml", "<ComicInfo><Series>S</Series><Summary>"
+                             + "A long summary. " * 100 + "</Summary></ComicInfo>")
+    data = bytearray(bad.read_bytes())
+    start = data.find(b"ComicInfo.xml") + len(b"ComicInfo.xml") + 5
+    for i in range(start, start + 35):
+        data[i] ^= 0xFF
+    bad.write_bytes(bytes(data))
+
+    listed = list(scan.list_comics(str(tmp_path)))
+    rows, complete = scan.read_comics(str(tmp_path), listed)
+    assert complete
+    assert "can't be opened" in rows["Bad 001.cbz"].error
+    assert rows["Good 001.cbz"].series == "S"
+
+
 def test_a_broken_scan_file_is_reported(tmp_path):
     bad = tmp_path / "collection_scan.zip"
     bad.write_bytes(b"not a zip")

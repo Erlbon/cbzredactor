@@ -40,6 +40,7 @@ import platform
 import posixpath
 import time
 import zipfile
+import zlib
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from dataclasses import asdict, dataclass, fields
 from typing import Callable, Iterator, Optional
@@ -181,7 +182,9 @@ def read_comic(root: str, listed: Listed) -> ScanRow:
                 return row
             info_names.sort(key=lambda n: n.count("/"))  # the one at the top level first
             data = archive.read(info_names[0])
-    except (zipfile.BadZipFile, OSError, RuntimeError, ValueError) as exc:
+    except (zipfile.BadZipFile, OSError, RuntimeError, ValueError, EOFError, zlib.error) as exc:
+        # zlib.error / EOFError: a damaged or cut-off ComicInfo.xml entry.
+        # Raised here, it ended the whole collection scan.
         row.error = f"can't be opened: {exc}"
         return row
     try:

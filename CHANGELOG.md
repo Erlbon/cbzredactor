@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-09-29#10 -- One damaged comic no longer stops a collection scan
+
+- **Fixed: Scan Collection Folder... could stop partway with an error**
+  when one comic's ComicInfo.xml was damaged inside the archive (a
+  corrupt or cut-off entry). That comic is now listed as "can't be
+  opened" in the scan and report, and the rest of the collection is
+  read as normal.
+
 ## 2026-09-29#09 -- Faster collection scan
 
 - **Scan Collection Folder... is about 8x faster** on a first scan. It
