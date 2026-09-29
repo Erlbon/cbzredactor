@@ -1,6 +1,6 @@
 # Changelog
 
-## 2026-09-29#14 -- A scan of another folder no longer replaces the first
+## 2026-09-29#15 -- A scan of another folder no longer replaces the first
 
 - **Each folder keeps its own scan.** Scanning a second folder used to
   overwrite `collection_scan.zip`, so switching folders meant scanning the
