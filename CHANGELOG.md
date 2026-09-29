@@ -1,5 +1,22 @@
 # Changelog
 
+## 2026-09-29#05 -- Validate / Fix Issues
+
+- **Operations > Validate / Fix Issues...**: checks the selected files'
+  (or all) ComicInfo.xml and proposes a fix per problem -- PageCount out
+  of step with the archive, impossible dates (Year, Month, a Day that
+  month doesn't have), scene tags or file extensions left in Series or
+  Title (whole bracketed phrases only, as Read Filename Tags, so title
+  words are safe), "[nn]" / "#007" in Number, stray spaces, "EN" or
+  "en-US" in LanguageISO, Black & White and Manga suggestions from the
+  tags; Count lower than Number is reported. Untick anything, Apply:
+  one Undo step, written on Save.
+- **Fixed: edits to the one selected file could be silently undone.**
+  After Search/Replace, Case Conversion, Auto-Numbering or Number
+  Issues changed the file shown in the side panel, the panel kept the
+  old values -- and clicking another file wrote them back over the
+  edit. The panel now reloads after such edits.
+
 ## 2026-09-29#04 -- Undo Last Rename
 
 - **File > Undo Last Rename...**: renames are now logged (Rename/Export by Pattern, a filename Search/Replace, Rename File) and the newest one can be taken back -- even after restarting the app. It shows what will be renamed back first, and never overwrites: a file that has moved since, or whose old name is taken again, is skipped and reported. The in-app Undo still covers metadata edits only.

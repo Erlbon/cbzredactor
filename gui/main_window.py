@@ -454,6 +454,7 @@ class MainWindow(QMainWindow):
                 ),
                 MenuAction("case_conversion", "&Case Conversion...", self.open_case_conversion_dialog),
                 MenuAction("auto_numbering", "Auto-&Numbering...", self.open_auto_numbering_dialog),
+                MenuAction("validate", "&Validate / Fix Issues...", self.open_validate_fix_dialog),
                 Separator(),
                 MenuAction("resize_images", "Resi&ze Images...", self.open_resize_images_dialog),
                 MenuAction("tag_low_res", "&Tag Low-Res Scans", self.tag_low_res_scans),
@@ -860,6 +861,19 @@ class MainWindow(QMainWindow):
         if book.page_count_mismatch:
             return "Page count mismatch"
         return "Modified" if book.dirty else "OK"
+
+    def _refresh_edited_row(self, book: CbzBook) -> None:
+        """After an edit that changed `book`'s metadata behind the panel's
+        back (Search/Replace, Case Conversion, numbering, Validate & Fix):
+        refresh its row and, if it's the one file selected, reload the
+        panel -- otherwise the panel keeps the old values and the next
+        row change writes them back over the edit (_commit_current_edits
+        writes every field). Found 2026-09-29: a single-file
+        Search/Replace was silently undone that way."""
+        row = self.books.index(book)
+        self._refresh_table_row(row, book)
+        if self._selected_rows == [row]:
+            self._show_book_in_panel(book, f"{book.actual_page_count} page(s)")
 
     def _refresh_table_row(self, row: int, book: CbzBook) -> None:
         status = self._status_text(book)
@@ -1758,7 +1772,7 @@ class MainWindow(QMainWindow):
             else:
                 setattr(book.metadata, field_key, new_value)
                 book.dirty = True
-            self._refresh_table_row(self.books.index(book), book)
+            self._refresh_edited_row(book)
         _rename_log().record("Search/Replace (filename)", renamed)
 
         if errors:
@@ -1794,7 +1808,7 @@ class MainWindow(QMainWindow):
             book = target_books[index]
             setattr(book.metadata, field_key, new_value)
             book.dirty = True
-            self._refresh_table_row(self.books.index(book), book)
+            self._refresh_edited_row(book)
         self._update_status()
 
     def open_auto_numbering_dialog(self) -> None:
@@ -1826,7 +1840,7 @@ class MainWindow(QMainWindow):
             book = target_books[index]
             setattr(book.metadata, field_key, new_value)
             book.dirty = True
-            self._refresh_table_row(self.books.index(book), book)
+            self._refresh_edited_row(book)
         self._update_status()
 
     def _quick_number_issues(self, books: list[CbzBook]) -> None:
@@ -1846,7 +1860,7 @@ class MainWindow(QMainWindow):
         for book, new_value in zip(books, values):
             book.metadata.number = new_value
             book.dirty = True
-            self._refresh_table_row(self.books.index(book), book)
+            self._refresh_edited_row(book)
         self._update_status()
 
     def open_resize_images_dialog(self) -> None:
@@ -2175,6 +2189,43 @@ class MainWindow(QMainWindow):
             if finished is False:
                 for _book, _source, future in futures:
                     future.cancel()
+
+    def open_validate_fix_dialog(self) -> None:
+        """Operations > Validate / Fix Issues...: ComicInfo mistakes in the
+        selected files (or all) -- see core/comicinfo_check.py -- reviewed,
+        then applied as ordinary edits: one Undo step, written on Save."""
+        from core.comicinfo_check import check_book
+        from gui.validate_fix_dialog import ValidateFixDialog
+
+        self._commit_current_edits()
+        target_books = [b for b in self._target_books() if not b.load_error and not b.needs_conversion]
+        found: list = []
+
+        def _check(book: CbzBook, _index: int) -> None:
+            found.extend((book, finding) for finding in check_book(book))
+
+        run_with_progress(self, target_books, _check, "Checking metadata...",
+                          threshold=LOAD_PROGRESS_THRESHOLD, update_every=20)
+        if not found:
+            QMessageBox.information(self, "Validate / Fix Issues", f"No issues found in {len(target_books)} file(s).")
+            return
+        dialog = ValidateFixDialog(found, parent=self)
+        if dialog.exec() != dialog.DialogCode.Accepted:
+            return
+        chosen = dialog.ticked()
+        if not chosen:
+            return
+        books = list({id(book): book for book, _finding in chosen}.values())
+        self._push_undo("Validate & Fix", books)
+        for book, finding in chosen:
+            setattr(book.metadata, finding.field, finding.fix)
+            book.dirty = True
+        for book in books:
+            self._refresh_edited_row(book)
+        self._update_status()
+        self.statusBar().showMessage(
+            f"Applied {len(chosen)} fix(es) to {len(books)} file(s) -- Save to write them.", 10000,
+        )
 
     def open_clean_contents_dialog(self) -> None:
         """Operations > Clean Up Archive Contents...: plain numbered page

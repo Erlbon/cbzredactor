@@ -179,6 +179,14 @@ understands that this app now supports too).
   epubredactor's Junk Cover flag. From then on the **Credit Pages**
   column flags every file containing that page, and **Operations >
   Remove Credit Pages...** removes them all after a thumbnail review.
+- **Operations > Validate / Fix Issues...** (selected files, or all)
+  checks each ComicInfo.xml and proposes a fix per problem: PageCount
+  out of step with the archive, impossible dates, scene tags or file
+  extensions left in Series/Title ("Batman (Zone-Empire).webp"), GCD's
+  "[nn]" marker or "#007" in Number, stray spaces, "EN"/"en-US" in
+  LanguageISO, and Black & White / Manga suggestions from the tags.
+  Count lower than Number is reported. Reviewed per finding; the ticked
+  fixes are ordinary edits -- one Undo step, written on Save.
 - **Operations > Clean Up Archive Contents...** (selected files, or
   all) tidies the names *inside* each archive -- where release groups
   put their name too ("Zone-Empire/Batman 045 (2018) (Zone-Empire)
