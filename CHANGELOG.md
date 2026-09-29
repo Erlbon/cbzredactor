@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026-09-29#07 -- Quitting while a cover loads
+
+- **Fixed: the app could stay running after you closed it.** Quitting (or closing the window) while the selected comic's cover preview was still loading left the process hung forever in the background. It now exits as soon as that load finishes.
+- redactor_common 2026-09-29-04 (from 2026-09-29-03).
+
 ## 2026-09-29#06 -- Collection scan and report
 
 - **Collection > Scan Collection Folder...**: reads every comic under a
