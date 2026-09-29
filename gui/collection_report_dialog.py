@@ -123,8 +123,10 @@ class CollectionReportDialog(QDialog):
         self._update_button()
 
     def _add_fixes_tab(self, fixes: list[Fix]) -> None:
-        rows = [([f.path.rsplit("/", 1)[-1], f.path.rpartition("/")[0], f.kind, f.what], None) for f in fixes]
-        table = self._add_tab("Fixes", ["File", "Folder", "Fix", "What changes"], rows, register=False)
+        # What changes comes before Folder: it is what the user has to see to decide.
+        rows = [([f.path.rsplit("/", 1)[-1], f.kind, f.what, f.path.rpartition("/")[0]], None) for f in fixes]
+        table = self._add_tab("Fixes", ["File", "Fix", "What changes", "Folder"], rows, register=False,
+                              widths=(320, 170, 520))
         self.fixes_table = table
         if not self.can_apply:
             table.setSortingEnabled(True)
@@ -137,6 +139,11 @@ class CollectionReportDialog(QDialog):
         table.itemChanged.connect(self._fix_changed)
         table.setSortingEnabled(True)
         page_layout = self.tabs.widget(self.tabs.count() - 1).layout()
+        hint = QLabel("Tick what to change; \"What changes\" says exactly what is written. When a file has two rows "
+                      "(set ComicInfo from the name, or rename from ComicInfo), they are alternatives: only one can "
+                      "be ticked. Nothing changes until you press Apply.")
+        hint.setWordWrap(True)
+        page_layout.insertWidget(0, hint)
         row = QHBoxLayout()
         for text, state, kind in (("Tick All PageCount", Qt.CheckState.Checked, "PageCount"),
                                   ("Tick All New ComicInfo", Qt.CheckState.Checked, "New ComicInfo"),
@@ -182,7 +189,7 @@ class CollectionReportDialog(QDialog):
                 if table.item(row, 0).data(_FIX_ROLE) and table.item(row, 0).checkState() == Qt.CheckState.Checked]
 
     def _add_tab(self, title: str, headers: list[str], rows: list[tuple[list[str], tuple | None]],
-                 register: bool = True) -> QTableWidget:
+                 register: bool = True, widths: tuple[int, ...] = ()) -> QTableWidget:
         page = QWidget()
         page_layout = QVBoxLayout(page)
         page_layout.setContentsMargins(4, 4, 4, 4)
@@ -207,7 +214,7 @@ class CollectionReportDialog(QDialog):
         header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
         header.setStretchLastSection(True)
         for column in range(len(headers) - 1):
-            table.setColumnWidth(column, 300 if column in (0, 1) else 220)
+            table.setColumnWidth(column, widths[column] if column < len(widths) else 300 if column in (0, 1) else 220)
         page_layout.addWidget(table)
         if checkable and register:
             self._checkable_tables.append(table)

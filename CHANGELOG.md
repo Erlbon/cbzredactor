@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-09-29#17 -- Collection Report: the Fixes tab shows what it will change
+
+- **The "What changes" column is now next to the fix type**, ahead of
+  Folder. It used to sit off-screen to the right, so the tab showed which
+  file and which kind of fix but not what would be written.
+- A short note above the table explains that two rows for one file
+  (set ComicInfo from the name / rename from ComicInfo) are alternatives.
+
 ## 2026-09-29#16 -- Collection Report: fewer false duplicates
 
 - **Files with no readable issue number are no longer "duplicates" of each
