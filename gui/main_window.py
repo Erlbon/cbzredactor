@@ -62,6 +62,9 @@ from redactor_common.gui.menu_builder import MenuAction, Separator, build_menu_b
 from redactor_common.gui.overwrite_review_dialog import resolve_overwrite_conflicts
 from redactor_common.gui.parse_filename_dialog import ParseFilenameDialog
 from redactor_common.gui.progress import run_with_progress
+from redactor_common.core.rename_log import RenameLog
+from redactor_common.gui.rename_undo import undo_last_rename
+from core.app_paths import base_dir
 from redactor_common.gui.rename_pattern_dialog import RenamePatternDialog
 from redactor_common.gui.rename_single_file import rename_single_file as prompt_rename_single_file
 from redactor_common.gui.search_replace_dialog import FILENAME_FIELD_KEY, SearchReplaceDialog
@@ -125,6 +128,12 @@ _FIELD_LABELS.update(
     }
 )
 
+
+
+def _rename_log() -> RenameLog:
+    """The persistent log behind File > Undo Last Rename (redactor_common's
+    core/rename_log.py), next to this app's settings."""
+    return RenameLog(os.path.join(str(base_dir()), "cbzredactor_rename_log.json"))
 
 def _field_label(attr: str) -> str:
     return _FIELD_LABELS.get(attr, attr.replace("_", " ").title())
@@ -397,6 +406,7 @@ class MainWindow(QMainWindow):
                     "rename_file", "&Rename File...", self.rename_selected_file,
                     shortcut=shortcuts.RENAME_SINGLE_FILE,
                 ),
+                MenuAction("undo_rename", "&Undo Last Rename...", self.undo_last_rename),
                 MenuAction(
                     "rename_files", "Rename / &Export Files...", self.open_rename_dialog,
                     shortcut=shortcuts.RENAME_EXPORT_BY_PATTERN,
@@ -1532,6 +1542,7 @@ class MainWindow(QMainWindow):
         app_settings.save_pattern_used(dialog.pattern_edit.text())
         export_mode = dialog.is_export_mode()
         errors: list[str] = []
+        renamed: list[tuple[str, str]] = []
         for book, old_path, new_path in dialog.planned_renames():
             try:
                 if export_mode:
@@ -1539,8 +1550,10 @@ class MainWindow(QMainWindow):
                 else:
                     os.rename(old_path, new_path)
                     book.path = new_path
+                    renamed.append((old_path, new_path))
             except OSError as exc:
                 errors.append(f"{os.path.basename(old_path)}: {exc}")
+        _rename_log().record("Rename by Pattern", renamed)
 
         for book in target_books:
             self._refresh_table_row(self.books.index(book), book)
@@ -1670,8 +1683,22 @@ class MainWindow(QMainWindow):
         redactor_common.gui.rename_single_file (imported above as
         prompt_rename_single_file to avoid shadowing this method's own
         name)."""
-        if prompt_rename_single_file(self, book.path, lambda p: setattr(book, "path", p)):
+        if prompt_rename_single_file(self, book.path, lambda p: setattr(book, "path", p), log=_rename_log()):
             self._refresh_table_row(self.books.index(book), book)
+
+    def undo_last_rename(self) -> None:
+        """File > Undo Last Rename...: renames the newest logged rename back
+        (redactor_common's rename log -- renames aren't on the Undo stack,
+        which covers metadata edits only)."""
+        def restored(new_path: str, old_path: str) -> None:
+            wanted = os.path.normcase(os.path.abspath(new_path))
+            for item in self.books:
+                if os.path.normcase(os.path.abspath(str(item.path))) == wanted:
+                    item.path = str(old_path)
+
+        if undo_last_rename(self, _rename_log(), restored):
+            self._rebuild_table()
+            self._update_status()
 
     def rename_selected_file(self) -> None:
         """F2 entry point (Explorer convention: select one item, press
@@ -1715,6 +1742,7 @@ class MainWindow(QMainWindow):
 
         self._push_undo("Search & Replace", target_books)
         errors: list[str] = []
+        renamed: list[tuple[str, str]] = []
         for index, new_value in changes.items():
             book = target_books[index]
             if field_key == FILENAME_FIELD_KEY:
@@ -1724,12 +1752,14 @@ class MainWindow(QMainWindow):
                 try:
                     os.rename(old_path, new_path)
                     book.path = new_path
+                    renamed.append((old_path, new_path))
                 except OSError as exc:
                     errors.append(f"{os.path.basename(old_path)}: {exc}")
             else:
                 setattr(book.metadata, field_key, new_value)
                 book.dirty = True
             self._refresh_table_row(self.books.index(book), book)
+        _rename_log().record("Search/Replace (filename)", renamed)
 
         if errors:
             from redactor_common.core.error_summary import summarize_errors
