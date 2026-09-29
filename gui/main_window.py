@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import copy
 import os
+import posixpath
 import zipfile
 import shutil
 
@@ -2432,6 +2433,7 @@ class MainWindow(QMainWindow):
 
         fixes = drop_conflicts(fixes)
         edits = group_edits(fixes)
+        conversions = [f for f in fixes if f.convert]
         summary: list[str] = []
         failed: set[str] = set()
         if edits:
@@ -2441,7 +2443,7 @@ class MainWindow(QMainWindow):
                 "(each written to a temporary file first). Undo Last Rename can't take these back.\n\nContinue?",
             )
             if answer != QMessageBox.StandardButton.Yes:
-                edits, fixes = {}, [f for f in fixes if f.is_rename]
+                edits, fixes = {}, [f for f in fixes if f.is_rename or f.convert]
                 if not (pairs or fixes):
                     return
         if edits:
@@ -2471,12 +2473,52 @@ class MainWindow(QMainWindow):
                 scan.write_scan(zip_path, info, rows)
             except OSError:
                 pass
+        if conversions:
+            self._convert_collection_files(zip_path, info, rows, conversions, summary, failed)
         renames, seen = [], set()
         for old, new in pairs + [(f.path, f.new_path) for f in fixes if f.is_rename]:
             if old not in seen and old not in failed:
                 seen.add(old)
                 renames.append((old, new))
         self._apply_collection_moves(zip_path, info, rows, renames, "\n\n".join(summary))
+
+    def _convert_collection_files(self, zip_path: str, info, rows: list, conversions: list, summary: list[str],
+                                  failed: set[str]) -> None:
+        """Convert to CBZ for the ticked CBR/CB7/CBT rows: converted and
+        verified by _convert_path() (a mislabeled .cbz is relabeled first),
+        original to the Recycle Bin, and the scan row swapped for the new
+        file's. A file whose .cbz name is taken is skipped and reported."""
+        from core import collection_scan as scan
+
+        errors: list[str] = []
+        converted = 0
+        index = {row.path: i for i, row in enumerate(rows)}
+
+        def _convert(fix, _index: int) -> None:
+            nonlocal converted
+            source = scan.full_path(info.root, fix.path)
+            new_path = self._convert_path(scan.long_path(source), True, errors)
+            if new_path is None:
+                failed.add(fix.path)
+                return
+            converted += 1
+            new_rel = posixpath.splitext(fix.path)[0] + ".cbz"
+            stat = os.stat(new_path)
+            row = scan.read_comic(info.root, scan.Listed(new_rel, stat.st_size, scan._stamp(stat.st_mtime)))
+            if fix.path in index:
+                rows[index[fix.path]] = row
+                index[new_rel] = index.pop(fix.path)
+
+        finished = run_with_progress(self, conversions, _convert, "Converting to CBZ...",
+                                     label_for=lambda fix: f"Converting: {fix.path.rsplit('/', 1)[-1]}")
+        summary.append(f"{converted} file(s) converted to CBZ; originals are in the Recycle Bin."
+                       + ("" if finished else " Stopped before the rest."))
+        if errors:
+            summary.append(f"{len(errors)} not converted:\n" + "\n".join(errors[:10]))
+        try:
+            scan.write_scan(zip_path, info, rows)
+        except OSError:
+            pass
 
     def _apply_collection_moves(self, zip_path: str, info, rows: list, pairs: list[tuple[str, str]],
                                 intro: str = "") -> None:

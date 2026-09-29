@@ -69,7 +69,7 @@ class CollectionReportDialog(QDialog):
         if can_apply:
             lines.append("Tick the moves, renames and fixes you want, then Apply. Nothing is overwritten, and "
                          "File &gt; Undo Last Rename takes renames back; <b>Fixes that change ComicInfo "
-                         "rewrite the archive and can't be undone</b>. Where a file's name and ComicInfo "
+                         "rewrite the archive and can't be undone</b>; a conversion sends the original to the Recycle Bin. Where a file's name and ComicInfo "
                          "disagree, tick which one is right -- only one of the two can be ticked.")
         else:
             lines.append("The scanned folder isn't on this computer, so moves and renames can't be applied "
@@ -141,6 +141,7 @@ class CollectionReportDialog(QDialog):
         for text, state, kind in (("Tick All PageCount", Qt.CheckState.Checked, "PageCount"),
                                   ("Tick All New ComicInfo", Qt.CheckState.Checked, "New ComicInfo"),
                                   ("Tick All Extension", Qt.CheckState.Checked, "Extension"),
+                                  ("Tick All Convert", Qt.CheckState.Checked, "Convert to CBZ"),
                                   ("Untick All", Qt.CheckState.Unchecked, "")):
             button = QPushButton(text)
             button.clicked.connect(lambda _=False, s=state, k=kind: self._tick_fixes(s, k))

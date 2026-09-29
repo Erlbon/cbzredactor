@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-09-29#13 -- Convert to CBZ in the report's Fixes
+
+- **Collection Report > Fixes now converts CBR, CB7 and CBT files to
+  CBZ.** Each one gets a "Convert to CBZ" row (unticked, with Tick All
+  Convert). The new file is verified before the original goes to the
+  Recycle Bin, and one whose .cbz name is already taken is skipped and
+  listed. The scan and report follow the change.
+
 ## 2026-09-29#12 -- Collection Report: far fewer false alarms, and a Fixes tab
 
 Tried against a real collection of 234,000 comics, the report listed

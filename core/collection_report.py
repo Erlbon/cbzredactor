@@ -42,7 +42,7 @@ from core.collection_names import (
     FileName, FolderName, library_name, loose_key, number_key, numbers_agree, parse_file_name, parse_folder_name, series_key,
 )
 from core.collection_fix import (
-    KIND_COMICINFO_FROM_NAME, KIND_EXTENSION, KIND_NEW_COMICINFO, KIND_PAGECOUNT, KIND_RENAME_FROM_COMICINFO,
+    KIND_COMICINFO_FROM_NAME, KIND_CONVERT, KIND_EXTENSION, KIND_NEW_COMICINFO, KIND_PAGECOUNT, KIND_RENAME_FROM_COMICINFO,
     Fix, fields_from_name, name_from_comicinfo,
 )
 from core.collection_scan import WINDOWS_PATH_LIMIT, ScanInfo, ScanRow
@@ -319,6 +319,9 @@ def _find_fixes(report, entries) -> None:
             fields = fields_from_name(name)
             report.fixes.append(Fix(row.path, KIND_NEW_COMICINFO,
                                     "create ComicInfo.xml: " + ", ".join(f"{k} {v}" for k, v in fields.items()), fields))
+        elif "not a ZIP" in issue.problem and row.container in ("rar", "7z", "tar"):
+            report.fixes.append(Fix(row.path, KIND_CONVERT, f"convert {row.format} to a .cbz; original to the Recycle Bin",
+                                    convert=True))
         elif issue.problem.startswith("named ") and issue.problem.endswith("but really ZIP"):
             new_path = posixpath.splitext(row.path)[0] + ".cbz"
             if new_path not in taken:

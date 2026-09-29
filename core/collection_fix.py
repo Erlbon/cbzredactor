@@ -10,6 +10,8 @@ Two kinds, applied in this order:
   Number / Volume / Year / Month set to what the file name says. Written
   through CbzBook.save() (temp file, then swap), so a crash can't leave
   half an archive. These can't be undone from File > Undo Last Rename.
+- conversions (`convert`): CBR/CB7/CBT to a verified CBZ; the original goes
+  to the Recycle Bin, never deleted outright.
 - renames (`new_path`): a mislabeled .cbr that is really a ZIP renamed to
   .cbz, or a file renamed to match its ComicInfo. These go through the
   same path as the report's moves, so Undo Last Rename takes them back.
@@ -34,6 +36,7 @@ KIND_NEW_COMICINFO = "New ComicInfo"
 KIND_COMICINFO_FROM_NAME = "ComicInfo from name"
 KIND_RENAME_FROM_COMICINFO = "Rename from ComicInfo"
 KIND_EXTENSION = "Extension"
+KIND_CONVERT = "Convert to CBZ"
 
 # ScanRow / Mismatch field -> ComicInfoMetadata attribute
 _ATTRIBUTE = {"Series": "series", "Number": "number", "Volume": "volume", "Year": "year", "Month": "month"}
@@ -47,6 +50,7 @@ class Fix:
     fields: dict = field(default_factory=dict)  # ComicInfoMetadata attribute -> new value; {} when pagecount only
     new_path: str = ""  # a rename instead of an edit
     choice: str = ""  # fixes sharing a choice are alternatives: only one may be applied
+    convert: bool = False  # a CBR/CB7/CBT to convert to CBZ (the original goes to the Recycle Bin)
 
     @property
     def is_rename(self) -> bool:
@@ -118,7 +122,7 @@ def group_edits(fixes: list[Fix]) -> dict[str, dict]:
     """The in-archive fixes by file, merged: one rewrite per archive."""
     merged: dict[str, dict] = {}
     for fix in fixes:
-        if not fix.is_rename:
+        if not fix.is_rename and not fix.convert:
             merged.setdefault(fix.path, {}).update(fix.fields)
     return merged
 

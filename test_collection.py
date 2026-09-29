@@ -506,3 +506,42 @@ def test_fixes_are_read_only_where_the_folder_is_not_present(library, monkeypatc
     monkeypatch.setattr(collection_report_dialog.CollectionReportDialog, "exec", look)
     MainWindow().open_collection_report()
     assert seen["rows"] > 0 and not seen["checkable"]
+
+
+def test_a_cbt_in_the_collection_is_converted_from_the_fixes_tab(library, monkeypatch):
+    import io
+    import tarfile
+
+    from core.collection_fix import KIND_CONVERT
+    from gui import collection_report_dialog
+    from gui.main_window import MainWindow
+
+    cbt = scan.long_path(os.path.join(library, "Incoming", "Tar Comic 001 (Boom, 2020-03).cbt"))
+    with tarfile.open(cbt, "w") as archive:
+        for page in ("001.jpg", "002.jpg"):
+            entry = tarfile.TarInfo(page)
+            entry.size = 4
+            archive.addfile(entry, io.BytesIO(b"jpeg"))
+    trashed = []
+    monkeypatch.setattr("gui.main_window.move_to_trash", lambda path: (trashed.append(path), os.remove(path)))
+    monkeypatch.setattr(QFileDialog, "getExistingDirectory", lambda *a, **k: library)
+    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.No)
+    monkeypatch.setattr(QMessageBox, "information", lambda *a, **k: None)
+    window = MainWindow()
+    window.scan_collection_folder()
+
+    def tick_convert(dialog):
+        table = dialog.fixes_table
+        for row in range(table.rowCount()):
+            item = table.item(row, 0)
+            if item.data(collection_report_dialog._FIX_ROLE).kind == KIND_CONVERT:
+                item.setCheckState(collection_report_dialog.Qt.CheckState.Checked)
+        assert [f.path.rsplit("/", 1)[-1] for f in dialog.ticked_fixes()] == ["Tar Comic 001 (Boom, 2020-03).cbt"]
+        return dialog.DialogCode.Accepted
+
+    monkeypatch.setattr(collection_report_dialog.CollectionReportDialog, "exec", tick_convert)
+    window.open_collection_report()
+    assert _exists(library, "Incoming", "Tar Comic 001 (Boom, 2020-03).cbz") and not _exists(cbt)
+    assert len(trashed) == 1
+    _info, rows = _scan(library)
+    assert next(r for r in rows if r.file == "Tar Comic 001 (Boom, 2020-03).cbz").pages == "2"
