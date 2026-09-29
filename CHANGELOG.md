@@ -1,5 +1,14 @@
 # Changelog
 
+## 2026-09-29#08 -- The Collection menu, for real this time
+
+- **Fixed: the Collection menu was missing.** Scan Collection Folder...
+  and Collection Report... (new in 2026-09-29#06) were never actually
+  shown in the menu bar. They are now in their own **Collection** menu,
+  between Operations and Settings.
+- redactor_common 2026-09-29-05 (from 2026-09-29-04): a menu defined the
+  wrong way now stops the app at startup instead of silently vanishing.
+
 ## 2026-09-29#07 -- Quitting while a cover loads
 
 - **Fixed: the app could stay running after you closed it.** Quitting (or closing the window) while the selected comic's cover preview was still loading left the process hung forever in the background. It now exits as soon as that load finishes.

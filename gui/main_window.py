@@ -474,10 +474,6 @@ class MainWindow(QMainWindow):
                 MenuAction("undo", "&Undo", self.undo_last_action, shortcut=shortcuts.UNDO),
                 MenuAction("redo", "&Redo", self.redo_last_action, shortcut=shortcuts.REDO),
             ],
-            "Collection": [
-                MenuAction("scan_collection", "&Scan Collection Folder...", self.scan_collection_folder),
-                MenuAction("collection_report", "Collection &Report...", self.open_collection_report),
-            ],
             "Settings": [
                 MenuAction("comicvine_api_key", "Comic Vine API &Key...", self.change_comicvine_api_key),
                 MenuAction("known_credit_pages", "Known C&redit Pages...", self.open_known_credit_pages_dialog),
@@ -498,7 +494,14 @@ class MainWindow(QMainWindow):
                 MenuAction("credits", "View C&redits", self.open_credits_dialog),
             ],
         }
-        self.actions_ = build_menu_bar(self, specs)
+        # Not a key in `specs`: build_menu_bar() only builds the five
+        # standard menus from it, and before redactor_common 2026-09-29#05
+        # silently dropped any other key -- which hid this whole menu.
+        collection = [
+            MenuAction("scan_collection", "&Scan Collection Folder...", self.scan_collection_folder),
+            MenuAction("collection_report", "Collection &Report...", self.open_collection_report),
+        ]
+        self.actions_ = build_menu_bar(self, specs, extra_menus=[("Collection", 3, collection)])
         self.actions_["apply_bulk_edit"].setEnabled(False)
         self.actions_["undo"].setEnabled(False)
         self.actions_["redo"].setEnabled(False)
