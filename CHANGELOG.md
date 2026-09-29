@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-09-29#11 -- Numbered TPBs with titles in the Collection Report
+
+- **Fixed: TPBs named like "Zombie Tramp v3 TPB - v03 - Sleazy Rider
+  (...)" were all read as the same TPB**, so Collection Report listed
+  every TPB from the same year as a duplicate. The "v03" after
+  "TPB - " is now read as the TPB's number (the third TPB of Zombie
+  Tramp v3) and the rest as its title.
+
 ## 2026-09-29#10 -- One damaged comic no longer stops a collection scan
 
 - **Fixed: Scan Collection Folder... could stop partway with an error**

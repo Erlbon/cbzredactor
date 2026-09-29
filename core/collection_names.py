@@ -9,6 +9,7 @@ scene names new downloads arrive with (that's core/scene_name.py):
               3 Guns 001 (Boom, 2013-08).webp.cbz
               3 Guns TPB (Boom, 2014-10).webp.cbz      -- a TPB, in the series' folder
               3 Guns TPB v02 (Boom, 2015-10).cbz       -- the second TPB
+              Zombie Tramp v3 TPB - v03 - Sleazy Rider (ALE, 2015-05).cbz  -- also the third TPB
               The Incredible Hulk v2 102 (Marvel, 1968-04).cbz  -- "vN" when needed
               From the World of Minor Threats - The Brood TPB (Dark Horse Comics, 2025-07).cbz
     folders:  The Incredible Hulk v2 (1975-1999) (issues 102-474)
@@ -34,11 +35,11 @@ _BRACKET_RE = re.compile(r"\(([^()]*)\)")
 _FILE_RE = re.compile(
     r"^(?P<series>.+?)"
     r"(?:\s+v(?P<vol>\d+))?"
-    r"\s+#?(?P<num>TPB(?:\s+v\d+)?|-?\d+(?:\.\d+)?[a-z]{0,2})"
+    r"\s+#?(?P<num>TPB(?:\s+(?:-\s+)?v\d+)?|-?\d+(?:\.\d+)?[a-z]{0,2})"
     r"(?:\s+-\s+(?P<title>.*))?$",
     re.IGNORECASE,
 )
-_TPB_RE = re.compile(r"^TPB(?:\s+v0*(\d+))?$", re.IGNORECASE)
+_TPB_RE = re.compile(r"^TPB(?:\s+(?:-\s+)?v0*(\d+))?$", re.IGNORECASE)
 _PUB_DATE_RE = re.compile(r"^(?:(?P<pub>[^,]+),\s*)?(?P<year>\d{4})(?:-(?P<month>\d{1,2}))?$")
 _FOLDER_VOL_RE = re.compile(r"^(?P<series>.+?)\s+v(?P<vol>\d+)\b(?P<rest>.*)$", re.IGNORECASE)
 _YEARS_RE = re.compile(r"\b(\d{4})\s*-\s*(\d{4})?")
@@ -49,7 +50,7 @@ _YEAR_RE = re.compile(r"\b(\d{4})\b")
 class FileName:
     series: str = ""  # as spelled in the name
     volume: str = ""  # "2" from "v2", "" when the name has none
-    number: str = ""  # "001", "TPB", "TPB v02" -- as written
+    number: str = ""  # "001", "TPB", "TPB v02", "TPB - v03" -- as written
     title: str = ""
     publisher: str = ""
     year: str = ""

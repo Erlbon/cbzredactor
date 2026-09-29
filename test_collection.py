@@ -230,6 +230,26 @@ def test_report_finds_what_is_out_of_place(library):
     assert {row[0] for row in listed} >= {"Move", "File name", "Duplicate", "Name vs ComicInfo", "Format / missing"}
 
 
+def test_numbered_tpbs_with_titles_are_not_duplicates(tmp_path):
+    # "TPB - v03 - Title": v03 is the third TPB of Zombie Tramp v3, not a
+    # volume. It used to be read as a bare "TPB" with title "v03 - ...",
+    # so every TPB of the same year was reported as a duplicate.
+    folder = "Action Lab/Zombie Tramp v3 (2014-2019)"
+    files = [
+        "Zombie Tramp v3 TPB - v03 - Sleazy Rider (ALE, 2015-02).cbz",
+        "Zombie Tramp v3 TPB - v04 - Sleazy Rider (ALE, 2015-05).cbz",
+        "Zombie Tramp v3 TPB - v05 - Breaking Bath (ALE, 2015-07).cbz",
+        "Zombie Tramp v3 TPB - v06 - Unholy Tales of the Dirty South (ALE, 2015-12).cbz",
+        "Zombie Tramp v3 TPB - v12 - Voodoo Vixen Death Match 001 (ALE, 2017-12).cbz",
+    ]
+    name = parse_file_name(files[4])
+    assert (name.series, name.volume, name.number_key, name.title) == \
+        ("Zombie Tramp", "3", "TPB 12", "Voodoo Vixen Death Match 001")
+    rows = [scan.ScanRow(f"{folder}/{f}", comicinfo="yes", series="Zombie Tramp", volume="3") for f in files]
+    report = build_report(scan.new_info(str(tmp_path), True), rows)
+    assert (report.duplicates, report.moves, report.splits, report.names, report.mismatches) == ([], [], [], [], [])
+
+
 def test_several_fitting_folders_are_a_question_not_a_guess(library):
     _cbz(library, "Incoming/The Incredible Hulk 200 (Marvel, 2030-01).cbz")  # no volume, no fitting year
     _cbz(library, f"{MARVEL}/The Incredible Hulk v3 (1999-2008)/The Incredible Hulk 001 (Marvel, 1999-12).cbz")
