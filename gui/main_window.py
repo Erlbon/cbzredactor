@@ -76,7 +76,7 @@ from core.foreign_archive_convert import (
 from core.archive_sniff import extension_label
 from core.cbz_file import CbzBook, CbzError, path_needs_conversion
 from core.foreign_archive_convert import relabel_mislabeled_cbz
-from core.trash import TrashError, move_to_trash
+from redactor_common.core.trash import TrashError, move_to_trash
 from core.page_dimensions import SIZE_LOW, SIZE_OK, SIZE_OVERSIZED, PageSizeStats
 from core.scan_quality_tag import LOW_RES_TAG, add_tag, has_tag, remove_tag
 from core.scene_name import parse_filename, proposed_fields
