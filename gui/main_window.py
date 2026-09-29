@@ -2329,6 +2329,10 @@ class MainWindow(QMainWindow):
         root = os.path.abspath(root)
         same_root = previous_info is not None and os.path.normcase(previous_info.root) == os.path.normcase(root)
         previous = {row.path: row for row in previous_rows} if same_root else {}
+        mode = self._ask_cover_mode(any(row.cover for row in previous.values()))
+        if mode is None:
+            return
+        covers, stamp = mode != "none", mode == "store"
 
         listing = QProgressDialog("Listing comics…", "Cancel", 0, 0, self)
         listing.setWindowTitle("Scan Collection Folder")
@@ -2352,19 +2356,21 @@ class MainWindow(QMainWindow):
         rows: dict[str, scan.ScanRow] = {}
         to_read = []
         for item in listed:
-            old = scan.reusable(previous, item)
+            old = scan.reusable(previous, item, covers)
             if old is not None:
                 rows[item.path] = old
             else:
                 to_read.append(item)
 
+        known_covers = {r.cover_key: r.cover for r in previous_rows if r.cover_key and r.cover} if covers else None
         with ProgressReporter(self, len(to_read), "Reading comics…", threshold=1,
                               title="Scan Collection Folder") as reporter:
             def _progress(done: int, total: int) -> None:
                 reporter.set_label(f"Reading comics… {done:,} of {total:,}")
                 reporter.set_value(done)
 
-            read, complete = scan.read_comics(root, to_read, _progress, reporter.should_cancel)
+            read, complete = scan.read_comics(root, to_read, _progress, reporter.should_cancel, cover=covers,
+                                             known_covers=known_covers, stamp=stamp)
         rows.update(read)
         read_count = len(read)
         if not complete:
@@ -2387,6 +2393,28 @@ class MainWindow(QMainWindow):
         )
         if answer == QMessageBox.StandardButton.Yes:
             self.open_collection_report()
+
+    def _ask_cover_mode(self, had_covers: bool) -> str | None:
+        """What a scan does about covers: "none", "scan" (fingerprint each
+        cover into the scan file) or "store" (also write it into the CBZ,
+        as its ZIP comment -- core/cover_stamp.py). None: cancelled."""
+        from PyQt6.QtWidgets import QInputDialog
+
+        choices = {
+            "Don't fingerprint covers": "none",
+            "Fingerprint covers (kept in the scan file)": "scan",
+            "Fingerprint covers and store them in the CBZ files (ZIP comment)": "store",
+        }
+        labels = list(choices)
+        choice, ok = QInputDialog.getItem(
+            self, "Scan Collection Folder",
+            "Fingerprinting decodes each comic's first page, so a first scan takes longer. The Collection "
+            "Report uses it to confirm duplicates by their covers and to find copies of one issue filed "
+            "under different names.\n\nStoring it in the CBZ changes each file (only the end of the archive; "
+            "no file is added) so the fingerprint stays with the comic if it is moved or renamed.",
+            labels, 1 if had_covers else 0, False,
+        )
+        return choices[choice] if ok else None
 
     def open_collection_report(self) -> None:
         """Collection > Collection Report...: patterns and irregularities

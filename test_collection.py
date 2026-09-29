@@ -277,6 +277,7 @@ def test_scan_report_apply_and_undo(library, monkeypatch):
     monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.No)
     monkeypatch.setattr(QMessageBox, "information", lambda *a, **k: None)
     window = MainWindow()
+    monkeypatch.setattr(MainWindow, "_ask_cover_mode", lambda self, had: "none")
     window.scan_collection_folder()
     assert os.path.exists(_collection_scan_path())
 
@@ -445,6 +446,7 @@ def test_report_offers_fixes_and_applies_them(library, monkeypatch):
     monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.No)
     monkeypatch.setattr(QMessageBox, "information", lambda *a, **k: None)
     window = MainWindow()
+    monkeypatch.setattr(MainWindow, "_ask_cover_mode", lambda self, had: "none")
     window.scan_collection_folder()
     seen = {}
 
@@ -528,6 +530,7 @@ def test_a_cbt_in_the_collection_is_converted_from_the_fixes_tab(library, monkey
     monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.No)
     monkeypatch.setattr(QMessageBox, "information", lambda *a, **k: None)
     window = MainWindow()
+    monkeypatch.setattr(MainWindow, "_ask_cover_mode", lambda self, had: "none")
     window.scan_collection_folder()
 
     def tick_convert(dialog):
@@ -545,3 +548,107 @@ def test_a_cbt_in_the_collection_is_converted_from_the_fixes_tab(library, monkey
     assert len(trashed) == 1
     _info, rows = _scan(library)
     assert next(r for r in rows if r.file == "Tar Comic 001 (Boom, 2020-03).cbz").pages == "2"
+
+
+# ---------------------------------------------------------------------------
+# Cover fingerprints
+# ---------------------------------------------------------------------------
+
+def _jpeg(seed: int) -> bytes:
+    import io
+    import random
+
+    from PIL import Image
+    rng = random.Random(seed)
+    image = Image.new("L", (32, 32))
+    image.putdata([rng.randrange(256) for _ in range(32 * 32)])
+    out = io.BytesIO()
+    image.convert("RGB").save(out, "PNG")
+    return out.getvalue()
+
+
+def _cover_cbz(root, rel, seed):
+    path = scan.long_path(os.path.join(root, *rel.split("/")))
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with zipfile.ZipFile(path, "w") as archive:
+        archive.writestr("001.png", _jpeg(seed))
+        archive.writestr("002.png", _jpeg(seed + 1))
+    return path
+
+
+def test_cover_fingerprints_confirm_duplicates_and_find_renamed_copies(tmp_path):
+    root = str(tmp_path / "lib")
+    _cover_cbz(root, "A/Thanos/Thanos 008 (Marvel, 2004-05).cbz", 1)
+    _cover_cbz(root, "B/Thanos/Thanos 008 (Marvel, 2004-05).cbz", 1)
+    _cover_cbz(root, "A/Rocket/Rocket 003 (Marvel, 2005-01).cbz", 5)
+    _cover_cbz(root, "B/Rocket/Rocket 003 (Marvel, 2005-01).cbz", 9)  # same name, a different cover
+    _cover_cbz(root, "A/Alpha Flight/Alpha Flight 012 (Marvel, 2010-03).cbz", 20)
+    _cover_cbz(root, "B/Alpha Flt/Alpha Flt 012 (Marvel, 2010-03).cbz", 20)  # renamed copy, same cover
+
+    listed = list(scan.list_comics(root))
+    plain = {i.path: scan.read_comic(root, i) for i in listed}
+    assert all(row.cover == "" for row in plain.values())  # off unless asked for
+    rows = [scan.read_comic(root, i, cover=True) for i in listed]
+    assert all(len(row.cover) == 16 and row.cover_key for row in rows)
+
+    report = build_report(scan.new_info(root, True), rows)
+    verdicts = {d.series: d.covers for d in report.duplicates}
+    assert verdicts["Thanos"] == "same cover" and verdicts["Rocket"] == "covers differ"
+    assert "same cover, different names" in verdicts.values()
+
+    # the fingerprint follows a comic that was moved: no decoding when its cover's key is known
+    known = {row.cover_key: row.cover for row in rows}
+    moved = scan.read_comic(root, listed[0], cover=True, known_covers={rows[0].cover_key: "feedfacefeedface"})
+    assert moved.cover == "feedfacefeedface" and known[rows[0].cover_key] == rows[0].cover
+
+    info_zip = str(tmp_path / "scan.zip")
+    scan.write_scan(info_zip, scan.new_info(root, True), rows)
+    assert {r.path: r.cover for r in scan.read_scan(info_zip)[1]} == {r.path: r.cover for r in rows}
+
+
+def test_cover_stamp_lives_in_the_zip_comment_and_nothing_else_changes(tmp_path):
+    from core.cover_stamp import make_stamp, read_stamp, write_comment
+
+    root = str(tmp_path / "lib")
+    path = _cover_cbz(root, "A/Thanos/Thanos 008 (Marvel, 2004-05).cbz", 1)
+    with zipfile.ZipFile(path) as archive:
+        before = [(i.filename, i.CRC, i.file_size) for i in archive.infolist()]
+    listed = list(scan.list_comics(root))
+    row = scan.read_comic(root, listed[0], cover=True, stamp=True)
+    with zipfile.ZipFile(path) as archive:
+        assert archive.testzip() is None
+        assert [(i.filename, i.CRC, i.file_size) for i in archive.infolist()] == before  # no entry added or changed
+        assert read_stamp(archive.comment) == (row.cover, row.cover_key)
+    assert row.size == os.path.getsize(path)  # the row follows the file's new size
+    assert sorted(os.listdir(os.path.dirname(path))) == ["Thanos 008 (Marvel, 2004-05).cbz"]  # no sidecar
+
+    # a later scan reads the stamp instead of decoding the cover
+    again = scan.read_comic(root, list(scan.list_comics(root))[0], cover=True)
+    assert again.cover == row.cover
+    # ...unless the cover page has been replaced since: the key no longer matches
+    other = _cover_cbz(root, "A/Thanos/Other 001 (Marvel, 2004-05).cbz", 7)
+    write_comment(other, make_stamp(row.cover, row.cover_key))  # someone else's stamp on a different cover
+    changed = scan.read_comic(root, [i for i in scan.list_comics(root) if "Other" in i.path][0], cover=True)
+    assert changed.cover != row.cover
+
+    # a comment that isn't ours is left alone
+    mine = _cover_cbz(root, "A/Thanos/Mine 001 (Marvel, 2004-05).cbz", 3)
+    with zipfile.ZipFile(mine, "a") as archive:
+        archive.comment = b"scanned by someone"
+    scan.read_comic(root, [i for i in scan.list_comics(root) if "Mine" in i.path][0], cover=True, stamp=True)
+    with zipfile.ZipFile(mine) as archive:
+        assert archive.comment == b"scanned by someone"
+
+
+def test_saving_a_cbz_keeps_its_cover_stamp(tmp_path):
+    from core.cbz_file import CbzBook
+    from core.cover_stamp import make_stamp, read_stamp, write_comment
+
+    root = str(tmp_path / "lib")
+    path = _cover_cbz(root, "A/X/X 001 (Marvel, 2004-05).cbz", 4)
+    write_comment(path, make_stamp("0123456789abcdef", "deadbeef-1"))
+    book = CbzBook(path)
+    book.metadata.series = "X"
+    book.save()
+    with zipfile.ZipFile(path) as archive:
+        assert read_stamp(archive.comment) == ("0123456789abcdef", "deadbeef-1")

@@ -298,6 +298,7 @@ class CbzBook:
                 infos = {info.filename: info for info in src.infolist()}
 
                 with zipfile.ZipFile(tmp_path, "w") as dst:
+                    dst.comment = src.comment  # e.g. the cover fingerprint stamp (core/cover_stamp.py)
                     for name in names:
                         if name == self.comicinfo_name:
                             continue  # rewritten below with updated bytes
@@ -367,6 +368,7 @@ class CbzBook:
         tmp_path = self.path + ".tmp_pages"
         try:
             with zipfile.ZipFile(self.path, "r") as src, zipfile.ZipFile(tmp_path, "w") as dst:
+                dst.comment = src.comment
                 for info in src.infolist():
                     if info.filename in remove:
                         continue
@@ -426,6 +428,7 @@ class CbzBook:
         tmp_path = self.path + ".tmp_clean"
         try:
             with zipfile.ZipFile(self.path, "r") as src, zipfile.ZipFile(tmp_path, "w") as dst:
+                dst.comment = src.comment
                 infos = {info.filename: info for info in src.infolist()}
                 # Stored in reading order too (pages, then ComicInfo.xml,
                 # then anything else kept), not just named in it.

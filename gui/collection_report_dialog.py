@@ -100,8 +100,8 @@ class CollectionReportDialog(QDialog):
         for group in report.duplicates:
             for row in group.rows:
                 dupes.append(([f"{group.series} {group.number}", row.file, row.folder,
-                               f"{row.size / 1048576:.1f}", row.pages or "?"], None))
-        self._add_tab("Duplicates", ["Comic", "File", "Folder", "MB", "Pages"], dupes)
+                               f"{row.size / 1048576:.1f}", row.pages or "?", group.covers], None))
+        self._add_tab("Duplicates", ["Comic", "File", "Folder", "MB", "Pages", "Covers"], dupes)
         self._add_tab(
             "Name vs ComicInfo", ["File", "Folder", "Field", "In the name", "In ComicInfo"],
             [([m.path.rsplit("/", 1)[-1], m.path.rpartition("/")[0], m.field, m.in_name, m.in_comicinfo], None)

@@ -45,6 +45,7 @@ from core.collection_fix import (
     KIND_COMICINFO_FROM_NAME, KIND_CONVERT, KIND_EXTENSION, KIND_NEW_COMICINFO, KIND_PAGECOUNT, KIND_RENAME_FROM_COMICINFO,
     Fix, fields_from_name, name_from_comicinfo,
 )
+from core.credit_pages import MATCH_DISTANCE, hamming
 from core.collection_scan import WINDOWS_PATH_LIMIT, ScanInfo, ScanRow
 
 MIN_FOLDER_FILES = 3  # a folder needs this many files before it has a "pattern"
@@ -93,6 +94,7 @@ class DuplicateGroup:
     series: str
     number: str
     rows: list[ScanRow]
+    covers: str = ""  # "" without fingerprints; "same cover" / "covers differ" / "same cover, different names"
 
 
 @dataclass
@@ -365,7 +367,8 @@ def report_list(report: Report) -> list[list[str]]:
         add("File name", issue.path, "; ".join(issue.problems), issue.suggested)
     for group in report.duplicates:
         for row in group.rows:
-            add("Duplicate", row.path, f"{group.series} {group.number}: {len(group.rows)} copies",
+            add("Duplicate", row.path,
+                f"{group.series} {group.number}: {len(group.rows)} copies" + (f" ({group.covers})" if group.covers else ""),
                 f"{row.size / 1048576:.1f} MB, {row.pages or '?'} pages")
     for mismatch in report.mismatches:
         add("Name vs ComicInfo", mismatch.path,
@@ -531,8 +534,57 @@ def _find_duplicates(report, by_key) -> None:
                     first = copies[0]
                     report.duplicates.append(DuplicateGroup(
                         _describe_key(first), first.name.number or "(one-shot)", [e.row for e in copies],
+                        _cover_verdict([e.row for e in copies]),
                     ))
+    if any(e.row.cover for siblings in by_key.values() for e in siblings):
+        _find_renamed_copies(report, by_key)
     report.duplicates.sort(key=lambda d: (d.series.casefold(), d.number))
+
+
+def _cover_hash(row: ScanRow) -> int | None:
+    return int(row.cover, 16) if row.cover else None
+
+
+def _cover_verdict(rows: list[ScanRow]) -> str:
+    """"same cover" when every fingerprinted copy's cover matches the first
+    one's, "covers differ" when one doesn't (a variant cover, or two issues
+    that share a name); "" when fewer than two have a fingerprint."""
+    hashes = [h for h in map(_cover_hash, rows) if h is not None]
+    if len(hashes) < 2:
+        return ""
+    return "same cover" if all(hamming(hashes[0], h) <= MATCH_DISTANCE for h in hashes[1:]) else "covers differ"
+
+
+def _find_renamed_copies(report, by_key) -> None:
+    """Copies of one issue filed under different series names: the same
+    number and year, and a matching cover. (A cover alone proves nothing --
+    a TPB reuses issue #1's -- so it needs the number and year too.) Not
+    reported when the names already put them in one group above."""
+    grouped = {row.path for d in report.duplicates for row in d.rows}
+    buckets: dict[tuple[str, str], list[_Entry]] = defaultdict(list)
+    for siblings in by_key.values():
+        for entry in siblings:
+            year = entry.name.year or entry.row.year
+            if entry.row.cover and year and entry.name.number and not entry.name.is_tpb:
+                buckets[(entry.name.number_key, year)].append(entry)
+    for members in buckets.values():
+        if len(members) < 2:
+            continue
+        seen: set[int] = set()
+        for i, first in enumerate(members):
+            if i in seen:
+                continue
+            cluster = [first]
+            for j in range(i + 1, len(members)):
+                other = members[j]
+                if j not in seen and other.key != first.key and \
+                        hamming(_cover_hash(first.row), _cover_hash(other.row)) <= MATCH_DISTANCE:
+                    cluster.append(other)
+                    seen.add(j)
+            if len(cluster) > 1 and not all(e.row.path in grouped for e in cluster):
+                report.duplicates.append(DuplicateGroup(
+                    _describe_key(first), first.name.number, [e.row for e in cluster], "same cover, different names",
+                ))
 
 
 def _split_variants(group: list[_Entry]) -> list[list[_Entry]]:

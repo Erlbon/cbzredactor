@@ -1,5 +1,24 @@
 # Changelog
 
+## 2026-09-29#14 -- Cover fingerprints in the collection scan
+
+- **Scan Collection Folder... can fingerprint every cover.** You're asked
+  at the start: no fingerprints, fingerprints kept in the scan file, or
+  fingerprints also stored in the CBZ files. The Collection Report then
+  shows, for duplicates, whether the covers match ("same cover" /
+  "covers differ") and lists copies of one issue filed under different
+  names (same number, same year, same cover). A cover on its own never
+  makes two comics duplicates -- a TPB reuses issue 1's.
+- **Stored in the CBZ** means the archive's ZIP comment: no file is
+  added to the archive or the folder, no page or ComicInfo.xml changes,
+  and other comic programs don't show it. Only the last bytes of the
+  file are patched (not a rewrite); a comment that isn't ours is never
+  touched; and it stays with the comic when it is moved or renamed.
+  Saving, removing pages and cleaning up the archive keep it; a stamp
+  whose cover page has since changed is ignored.
+- Fingerprints are also remembered by the cover's checksum, so a comic
+  that was moved or renamed isn't decoded again on a rescan.
+
 ## 2026-09-29#13 -- Convert to CBZ in the report's Fixes
 
 - **Collection Report > Fixes now converts CBR, CB7 and CBT files to

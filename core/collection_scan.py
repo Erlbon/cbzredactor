@@ -46,8 +46,9 @@ from dataclasses import asdict, dataclass, fields
 from typing import Callable, Iterator, Optional
 
 from core.archive_sniff import CONTAINER_ZIP, detect_container, extension_label
-from core.cbz_file import _is_image
+from core.cbz_file import _is_image, page_sort_key
 from core.comicinfo import ComicInfoError, parse_comicinfo_xml
+from core.cover_stamp import make_stamp, read_stamp, write_comment
 
 SCAN_FILE_NAME = "collection_scan.zip"
 CSV_NAME = "collection_scan.csv"
@@ -78,6 +79,8 @@ class ScanRow:
     ci_format: str = ""
     page_count: str = ""
     error: str = ""
+    cover: str = ""  # the cover's visual fingerprint (16 hex digits); "" when not taken, or a blank cover
+    cover_key: str = ""  # the cover entry's CRC32 and size (free from the ZIP): the same image, wherever the file goes
 
     @property
     def folder(self) -> str:
@@ -160,7 +163,58 @@ def list_comics(root: str, cancelled: Callable[[], bool] = lambda: False) -> Ite
             yield Listed(child_rel, stat.st_size, _stamp(stat.st_mtime))
 
 
-def read_comic(root: str, listed: Listed) -> ScanRow:
+def cover_fingerprint(archive: zipfile.ZipFile, names: list[str],
+                      known: Optional[dict[str, str]] = None) -> tuple[str, str]:
+    """(fingerprint, key) of the first page. The fingerprint is its dHash
+    (core/credit_pages.py, robust to resizing and re-encoding) as 16 hex
+    digits, "" when there is no readable, non-blank first page. The key is
+    the entry's CRC32 and size; a cover whose key is in `known` (key ->
+    fingerprint, from earlier scans) isn't decoded again -- a file that was
+    moved, renamed or had its ComicInfo edited keeps its fingerprint."""
+    from PIL import UnidentifiedImageError
+
+    from core.credit_pages import dhash, is_plain, open_page_image
+
+    pages = sorted((n for n in names if _is_image(n)), key=page_sort_key)
+    if not pages:
+        return "", ""
+    info = archive.getinfo(pages[0])
+    key = f"{info.CRC:08x}-{info.file_size}"
+    stamp = read_stamp(archive.comment)  # written into the file by an earlier scan
+    if stamp and stamp[1] == key:
+        return stamp[0], key
+    if known and key in known:
+        return known[key], key
+    try:
+        image = open_page_image(archive.read(pages[0]))
+        return ("" if is_plain(image) else f"{dhash(image):016x}"), key
+    except (KeyError, OSError, UnidentifiedImageError, zlib.error, ValueError, zipfile.BadZipFile,
+            EOFError, RuntimeError):
+        return "", key
+
+
+def read_comic(root: str, listed: Listed, cover: bool = False,
+               known_covers: Optional[dict[str, str]] = None, stamp: bool = False) -> ScanRow:
+    """_read_comic(), then -- with `stamp` -- the cover fingerprint written
+    into the CBZ itself (core/cover_stamp.py) when it isn't there yet.
+    Only an archive with no comment at all is touched."""
+    row = _read_comic(root, listed, cover, known_covers)
+    if stamp and row.cover and row.cover_key and not row.error and row.container == CONTAINER_ZIP:
+        path = long_path(full_path(root, listed.path))
+        try:
+            with zipfile.ZipFile(path) as archive:
+                empty = not archive.comment
+            if empty:
+                write_comment(path, make_stamp(row.cover, row.cover_key))
+                status = os.stat(path)
+                row.size, row.modified = status.st_size, _stamp(status.st_mtime)
+        except (OSError, zipfile.BadZipFile):
+            pass  # not stamped; the scan still has its fingerprint
+    return row
+
+
+def _read_comic(root: str, listed: Listed, cover: bool = False,
+                known_covers: Optional[dict[str, str]] = None) -> ScanRow:
     """One comic's row: format, and for a ZIP its page count and the
     key ComicInfo fields. Problems end up in `error`, never raised."""
     row = ScanRow(listed.path, listed.size, listed.modified)
@@ -176,6 +230,8 @@ def read_comic(root: str, listed: Listed) -> ScanRow:
         with zipfile.ZipFile(path) as archive:
             names = archive.namelist()
             row.pages = str(sum(1 for n in names if _is_image(n)))
+            if cover:
+                row.cover, row.cover_key = cover_fingerprint(archive, names, known_covers)
             info_names = [n for n in names if posixpath.basename(n).lower() == "comicinfo.xml"]
             if not info_names:
                 row.comicinfo = "no"
@@ -206,6 +262,9 @@ def read_comics(
     progress: Callable[[int, int], None] = lambda done, total: None,
     should_cancel: Callable[[], bool] = lambda: False,
     workers: int = READ_WORKERS,
+    cover: bool = False,
+    known_covers: Optional[dict[str, str]] = None,
+    stamp: bool = False,
 ) -> tuple[dict[str, ScanRow], bool]:
     """read_comic() for every item, `workers` at a time. Returns the rows
     by path and whether every item was read -- after a cancel, only the
@@ -223,7 +282,7 @@ def read_comics(
                 item = next(queue, None)
                 if item is None:
                     return
-                running.add(pool.submit(read_comic, root, item))
+                running.add(pool.submit(read_comic, root, item, cover, known_covers, stamp))
 
         top_up()
         while running:
@@ -241,10 +300,14 @@ def read_comics(
             top_up()
     return rows, done == len(items)
 
-def reusable(previous: dict[str, ScanRow], listed: Listed) -> Optional[ScanRow]:
-    """The previous scan's row for this file, if it hasn't changed."""
+def reusable(previous: dict[str, ScanRow], listed: Listed, need_cover: bool = False) -> Optional[ScanRow]:
+    """The previous scan's row for this file, if it hasn't changed -- and,
+    when covers are wanted, already has one (or has no cover to take: not
+    a ZIP, or no pages)."""
     old = previous.get(listed.path)
     if old is not None and old.size == listed.size and old.modified == listed.modified:
+        if need_cover and not old.cover and old.container == CONTAINER_ZIP and old.pages != "0":
+            return None
         return old
     return None
 
