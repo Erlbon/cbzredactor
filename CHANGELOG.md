@@ -1,5 +1,16 @@
 # Changelog
 
+## 2026-09-29#16 -- Collection Report: fewer false duplicates
+
+- **Files with no readable issue number are no longer "duplicates" of each
+  other.** A folder of specials or unnumbered issues (Nathan Never "Fuori
+  serie", "Daredevil #192 ...") was reported as one big duplicate group.
+  They are copies only when the whole file names match ("x.zip" and
+  "x.cbz").
+- **Each duplicate group is listed once**, not twice.
+- **A date in the name ("2005-09") is no longer compared with ComicInfo's
+  Number**, so it no longer offers to write the date into Number.
+
 ## 2026-09-29#15 -- A scan of another folder no longer replaces the first
 
 - **Each folder keeps its own scan.** Scanning a second folder used to

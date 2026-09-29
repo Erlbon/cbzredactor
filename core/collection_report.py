@@ -515,11 +515,22 @@ def _variant(entry: _Entry) -> tuple[str, tuple[str, ...]]:
     return loose_key(entry.name.title), tuple(sorted(loose_key(b) for b in entry.name.extra_brackets))
 
 
+_DATE_LIKE_RE = re.compile(r"^(19|20)\d\d[-.]\d{1,2}$")  # "2005-09" in a name is a date, not an issue number
+_STEM_EXTENSIONS_RE = re.compile(r"(\.(webp|jpe?g|png))?\.(cbz|zip|cbr|rar|cb7|7z|cbt|pdf)$", re.IGNORECASE)
+
+
 def _find_duplicates(report, by_key) -> None:
     for key, siblings in by_key.items():
         groups: dict[tuple[str, str], list[_Entry]] = defaultdict(list)
+        unnumbered: dict[str, list[_Entry]] = defaultdict(list)
         for entry in siblings:
             year = entry.name.year or entry.row.year
+            if not entry.name.number_key:
+                # No number to tell issues apart by: two files are only the
+                # same comic when their whole names match ("x.zip" and
+                # "x.cbz"), not when they merely share a series.
+                unnumbered[loose_key(_STEM_EXTENSIONS_RE.sub("", entry.row.file))].append(entry)
+                continue
             groups[(entry.name.number_key, year)].append(entry)
         undated = {num: g for (num, year), g in groups.items() if not year}
         found = []
@@ -528,6 +539,7 @@ def _find_duplicates(report, by_key) -> None:
                 group = group + undated.pop(num)
             found.append(group)
         found.extend(undated.values())
+        found.extend(copies for copies in unnumbered.values() if len(copies) > 1)
         for group in found:
             for copies in _split_variants(group):
                 if len(copies) > 1:
@@ -538,6 +550,14 @@ def _find_duplicates(report, by_key) -> None:
                     ))
     if any(e.row.cover for siblings in by_key.values() for e in siblings):
         _find_renamed_copies(report, by_key)
+    seen_groups: set[frozenset[str]] = set()
+    unique = []
+    for group in report.duplicates:
+        paths = frozenset(row.path for row in group.rows)
+        if paths not in seen_groups:
+            seen_groups.add(paths)
+            unique.append(group)
+    report.duplicates[:] = unique
     report.duplicates.sort(key=lambda d: (d.series.casefold(), d.number))
 
 
@@ -645,7 +665,7 @@ def _find_mismatches(report, by_key) -> None:
                 checked["Series"] += 1
                 if not _series_agree(name, row.series) and loose_key(row.series) != usual:
                     found["Series"].append(Mismatch(row.path, "Series", name.series, row.series))
-            if row.number and name.number and not name.is_tpb:
+            if row.number and name.number and not name.is_tpb and not _DATE_LIKE_RE.match(name.number):
                 checked["Number"] += 1
                 if not numbers_agree(name.number, row.number) and \
                         number_key(row.number) not in re.findall(r"\b\d+\b", entry.row.file.lower().lstrip("0")) and \

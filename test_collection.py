@@ -693,3 +693,32 @@ def _walk_cbz(root):
         for name in files:
             if name.lower().endswith(".cbz"):
                 yield os.path.join(folder, name)
+
+
+def test_files_without_a_readable_number_are_not_duplicates_of_each_other(tmp_path):
+    """Nathan Never's "Fuori serie" specials have titles but no numbers; they
+    are different comics, not copies. Only files with the same whole name
+    ("x.zip" and "x.cbz") are."""
+    folder = "IT/Nathan Never/Fuori Serie"
+    rows = [scan.ScanRow(f"{folder}/Nathan Never (Fuori serie) - {title}.webp.cbz", comicinfo="no")
+            for title in ("Ariminum", "Klonz", "La sfida")]
+    rows += [scan.ScanRow(f"{folder}/Nathan Never (Fuori serie) - Klonz.zip", comicinfo="no")]
+    report = build_report(scan.new_info(str(tmp_path), True), rows)
+    assert [sorted(r.file for r in d.rows) for d in report.duplicates] == [
+        ["Nathan Never (Fuori serie) - Klonz.webp.cbz", "Nathan Never (Fuori serie) - Klonz.zip"]]
+
+
+def test_a_duplicate_group_is_reported_once(tmp_path):
+    folder = "NL/Superhelden"
+    rows = [scan.ScanRow(f"{folder}/Superhelden Strip-Paperback #3 (Vrijbuiter 1978){ext}", comicinfo="no")
+            for ext in (".webp.cbz", ".zip")]
+    report = build_report(scan.new_info(str(tmp_path), True), rows)
+    assert len(report.duplicates) == 1
+
+
+def test_a_date_in_the_name_is_not_an_issue_number_mismatch(tmp_path):
+    folder = "ES"
+    rows = [scan.ScanRow(f"{folder}/30 dias de noche 2005-09.webp.cbz", comicinfo="yes",
+                         series="30 dias de noche", number="1")]
+    report = build_report(scan.new_info(str(tmp_path), True), rows)
+    assert not [m for m in report.mismatches if m.field == "Number"]
