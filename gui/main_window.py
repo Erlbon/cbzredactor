@@ -61,7 +61,7 @@ from redactor_common.gui.manage_list_dialog import ManageListDialog
 from redactor_common.gui.menu_builder import MenuAction, Separator, build_menu_bar
 from redactor_common.gui.overwrite_review_dialog import resolve_overwrite_conflicts
 from redactor_common.gui.parse_filename_dialog import ParseFilenameDialog
-from redactor_common.gui.progress import run_with_progress
+from redactor_common.gui.progress import ProgressReporter, run_with_progress
 from redactor_common.core.rename_log import RenameLog
 from redactor_common.gui.rename_undo import undo_last_rename
 from core.app_paths import base_dir
@@ -2357,14 +2357,15 @@ class MainWindow(QMainWindow):
             else:
                 to_read.append(item)
 
-        def _read(item, _index: int) -> None:
-            rows[item.path] = scan.read_comic(root, item)
+        with ProgressReporter(self, len(to_read), "Reading comics…", threshold=1,
+                              title="Scan Collection Folder") as reporter:
+            def _progress(done: int, total: int) -> None:
+                reporter.set_label(f"Reading comics… {done:,} of {total:,}")
+                reporter.set_value(done)
 
-        complete = run_with_progress(
-            self, to_read, _read, "Reading comics…", threshold=1, update_every=5,
-            label_for=lambda item: f"Reading: {item.path.rsplit('/', 1)[-1]}",
-        )
-        read_count = len(to_read) if complete else sum(1 for item in to_read if item.path in rows)
+            read, complete = scan.read_comics(root, to_read, _progress, reporter.should_cancel)
+        rows.update(read)
+        read_count = len(read)
         if not complete:
             for item in to_read:  # not reached: keep what the last scan knew
                 if item.path not in rows and item.path in previous:

@@ -137,6 +137,31 @@ def test_rescan_reuses_unchanged_files(library):
     assert stale == ["Incoming/3 Guns 005 (Boom, 2013-12).webp.cbz"]
 
 
+def test_reading_in_parallel_gives_the_same_rows(library):
+    # Several at once: one at a time spent ~1 s per file waiting on the
+    # virus scanner during a user's first scan of a big collection.
+    listed = list(scan.list_comics(library))
+    one_by_one = {item.path: scan.read_comic(library, item) for item in listed}
+    seen = []
+    rows, complete = scan.read_comics(library, listed, progress=lambda done, total: seen.append((done, total)))
+    assert complete
+    assert rows == one_by_one
+    assert seen[-1] == (len(listed), len(listed))
+
+
+def test_a_cancelled_parallel_read_keeps_what_it_finished(library):
+    listed = list(scan.list_comics(library)) * 20  # enough that a cancel lands mid-way
+    calls = []
+
+    def cancel_after_first_batch():
+        calls.append(1)
+        return len(calls) > 1
+
+    rows, complete = scan.read_comics(library, listed, should_cancel=cancel_after_first_batch, workers=1)
+    assert not complete
+    assert 0 < len(rows) <= len({item.path for item in listed})
+    assert all(row.path in {item.path for item in listed} for row in rows.values())
+
 def test_a_broken_scan_file_is_reported(tmp_path):
     bad = tmp_path / "collection_scan.zip"
     bad.write_bytes(b"not a zip")

@@ -1,5 +1,14 @@
 # Changelog
 
+## 2026-09-29#09 -- Faster collection scan
+
+- **Scan Collection Folder... is about 8x faster** on a first scan. It
+  now reads several comics at once instead of one after another. Most
+  of the time went on waiting -- on Windows, for the virus scanner to
+  check each archive the first time it's opened -- and those waits now
+  overlap. A rescan is as quick as before (unchanged files aren't
+  opened at all).
+
 ## 2026-09-29#08 -- The Collection menu, for real this time
 
 - **Fixed: the Collection menu was missing.** Scan Collection Folder...
