@@ -179,6 +179,19 @@ understands that this app now supports too).
   epubredactor's Junk Cover flag. From then on the **Credit Pages**
   column flags every file containing that page, and **Operations >
   Remove Credit Pages...** removes them all after a thumbnail review.
+- **Operations > Clean Up Archive Contents...** (selected files, or
+  all) tidies the names *inside* each archive -- where release groups
+  put their name too ("Zone-Empire/Batman 045 (2018) (Zone-Empire)
+  p1.jpg"), and nested folders make paths too long once extracted.
+  Pages are renamed to plain numbers in reading order (001.webp,
+  002.webp, ...) and taken out of folders; junk is removed (Thumbs.db,
+  .DS_Store, __MACOSX, and scene extras like .nfo, .sfv, .url, .txt).
+  Page bytes, order and ComicInfo.xml are unchanged. Reviewed first,
+  per file; originals go to the Recycle Bin.
+- **Page order is numeric**, as comic readers do it: an archive whose
+  pages are numbered 1, 2, ... 10 reads 1, 2, ... 10 (plain text
+  sorting put 10 before 2 -- found in real archives), and macOS
+  "__MACOSX/._name.jpg" leftovers are no longer counted as pages.
   Matching is visual (a small image fingerprint), so the same tag page
   is recognised after resizing or re-encoding -- CbxConverter's
   renamed, resized WebP pages included. Unlearned candidates get hints
@@ -275,6 +288,8 @@ understands that this app now supports too).
   The site sits behind Cloudflare, so this needs the optional
   `cloudscraper` package installed (`pip install cloudscraper`) --
   you'll get a clear message if it's missing rather than a crash.
+  The album's Bedetheque page is recorded in **Web**, as the Comic
+  Vine and GCD lookups record theirs.
 - **All three lookup dialogs show the file's own "Current" cover side
   by side with the "Found" one** (not a cramped in-table icon) for
   whichever row is currently selected -- so you can actually see

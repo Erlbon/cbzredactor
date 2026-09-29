@@ -140,6 +140,7 @@ class BedethequeIssueDetails:
     publisher: str = ""
     language_iso: str = "fr"
     cover_image_url: str = ""
+    web: str = ""  # the album's own Bedetheque page, e.g. https://www.bedetheque.com/BD-...-12345.html
 
     def as_dict(self) -> dict:
         """Only the fields that actually came back, keyed to match
@@ -158,6 +159,7 @@ class BedethequeIssueDetails:
             "letterer": self.letterer,
             "publisher": self.publisher,
             "language_iso": self.language_iso,
+            "web": self.web,
         }
         return {k: v for k, v in raw.items() if v}
 
@@ -386,6 +388,7 @@ def fetch_issue_details(detail_url: str, fetch=None) -> BedethequeIssueDetails:
         letterer=_credit_text(["lettrage"], block_lis),
         publisher=info.get("editeur", ""),
         cover_image_url=(og_image[0].strip() if og_image else ""),
+        web=detail_url,
     )
 
 

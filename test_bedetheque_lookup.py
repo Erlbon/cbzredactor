@@ -174,6 +174,9 @@ def test_fetch_issue_details_reads_the_first_edition_block():
     assert "detective" in details.summary.lower() or "Blacksad" in details.summary
     assert details.cover_image_url == "https://www.bedetheque.com/media/Couvertures/Couv_15161.jpg"
     assert details.language_iso == "fr"
+    # The album's own page becomes ComicInfo's Web link, as for Comic Vine and GCD.
+    page = "https://www.bedetheque.com/BD-Blacksad-Tome-1-Quelque-part-entre-les-ombres-15161.html"
+    assert details.web == page and details.as_dict()["web"] == page
 
 
 def test_fetch_issue_details_does_not_blend_the_two_editions():

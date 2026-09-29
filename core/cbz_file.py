@@ -28,6 +28,7 @@ from __future__ import annotations
 import copy
 import os
 import posixpath
+import re
 import shutil
 import zipfile
 import zlib
@@ -74,8 +75,26 @@ class ResizeSummary:
     new_bytes: int = 0
 
 
+_DIGITS_RE = re.compile(r"(\d+)")
+
+
+def page_sort_key(name: str) -> list:
+    """Reading order of page entries: numbers compared as numbers
+    ("2.webp" before "10.webp"), case ignored -- as comic readers do.
+    Plain text sorting put "10" before "2", and real archives number
+    pages unpadded (seen 2026-09-29: "1.webp", "2.webp", "10.webp")."""
+    return [int(part) if part.isdigit() else part.casefold() for part in _DIGITS_RE.split(name)]
+
+
 def _is_image(name: str) -> bool:
-    return posixpath.splitext(name)[1].lower() in IMAGE_EXTENSIONS
+    """A page: an image file -- but not macOS's "__MACOSX/._name.jpg"
+    resource-fork leftovers, which end in .jpg without being images (they
+    were counted as broken extra pages)."""
+    if posixpath.splitext(name)[1].lower() not in IMAGE_EXTENSIONS:
+        return False
+    lowered = name.lower()
+    return not (lowered.startswith("__macosx/") or "/__macosx/" in lowered
+                or posixpath.basename(lowered).startswith("._"))
 
 
 def _renamable_pages(names: list[str], output_format: Optional[str]) -> set[str]:
@@ -199,7 +218,7 @@ class CbzBook:
         try:
             with zipfile.ZipFile(self.path, "r") as zf:
                 names = zf.namelist()
-                self.page_names = sorted(n for n in names if _is_image(n))
+                self.page_names = sorted((n for n in names if _is_image(n)), key=page_sort_key)
                 self.comicinfo_name = _find_comicinfo_name(names)
                 if self.comicinfo_name:
                     self.metadata = parse_comicinfo_xml(zf.read(self.comicinfo_name))
@@ -376,6 +395,69 @@ class CbzBook:
         return len(removed_positions)
 
     # ------------------------------------------------------------------
+    # Cleaning up the archive's contents (core/archive_contents.py)
+    # ------------------------------------------------------------------
+
+    def cleanup_plan(self):
+        """What Clean Up Archive Contents would change (nothing written)."""
+        from core.archive_contents import plan_cleanup
+
+        with zipfile.ZipFile(self.path, "r") as zf:
+            return plan_cleanup(zf.namelist(), self.page_names, self.comicinfo_name)
+
+    def clean_contents(self, dispose_original: Optional[Callable[[str], None]] = None):
+        """Rewrites the archive with plain numbered page names, no page
+        folders and no junk files (core/archive_contents.py); the pages'
+        bytes, their order and ComicInfo.xml's content are unchanged.
+        Returns the plan that was applied (plan.needed False: nothing
+        to do, nothing written). `dispose_original` and the refusal of
+        unsaved edits work as in remove_pages()."""
+        if self.load_error:
+            raise CbzError(f"Cannot clean up, file failed to load: {self.load_error}")
+        if self.needs_conversion:
+            raise CbzError("Cannot clean up, this file needs converting to CBZ first (Convert to CBZ)")
+        if self.dirty:
+            raise CbzError("Save or undo this file's unsaved changes first")
+        plan = self.cleanup_plan()
+        if not plan.needed:
+            return plan
+
+        drop = set(plan.removals)
+        tmp_path = self.path + ".tmp_clean"
+        try:
+            with zipfile.ZipFile(self.path, "r") as src, zipfile.ZipFile(tmp_path, "w") as dst:
+                infos = {info.filename: info for info in src.infolist()}
+                # Stored in reading order too (pages, then ComicInfo.xml,
+                # then anything else kept), not just named in it.
+                first = [*self.page_names, *([self.comicinfo_name] if self.comicinfo_name else [])]
+                seen = set(first)
+                ordered = first + [name for name in infos if name not in seen]
+                for name in ordered:
+                    info = infos[name]
+                    if name in drop or (plan.drop_folder_entries and name.endswith("/")):
+                        continue
+                    new_info = zipfile.ZipInfo(plan.renames.get(name, name), date_time=info.date_time)
+                    new_info.compress_type = info.compress_type
+                    new_info.external_attr = info.external_attr
+                    dst.writestr(new_info, src.read(name))
+            if dispose_original is not None:
+                dispose_original(self.path)
+            os.replace(tmp_path, self.path)
+        except Exception as exc:
+            try:
+                os.remove(tmp_path)
+            except OSError:
+                pass
+            if isinstance(exc, (zipfile.BadZipFile, KeyError, OSError, zlib.error)):
+                raise CbzError(f"Could not clean up the archive: {describe_save_error(exc)}") from exc
+            raise
+
+        self.page_names = [plan.renames.get(name, name) for name in self.page_names]
+        if self.comicinfo_name:
+            self.comicinfo_name = plan.renames.get(self.comicinfo_name, self.comicinfo_name)
+        return plan
+
+    # ------------------------------------------------------------------
     # Resizing (Operations > Resize Images...)
     # ------------------------------------------------------------------
 
@@ -485,6 +567,6 @@ class CbzBook:
                 # re-read the page list rather than guess at it.
                 # comicinfo_name/metadata are unchanged.
                 with zipfile.ZipFile(self.path, "r") as zf:
-                    self.page_names = sorted(n for n in zf.namelist() if _is_image(n))
+                    self.page_names = sorted((n for n in zf.namelist() if _is_image(n)), key=page_sort_key)
 
         return summary

@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import copy
 import os
+import zipfile
 import shutil
 
 from PyQt6.QtCore import QSize, Qt
@@ -447,6 +448,7 @@ class MainWindow(QMainWindow):
                 MenuAction("resize_images", "Resi&ze Images...", self.open_resize_images_dialog),
                 MenuAction("tag_low_res", "&Tag Low-Res Scans", self.tag_low_res_scans),
                 MenuAction("remove_credit_pages", "Remove Credit &Pages...", self.open_remove_credit_pages_dialog),
+                MenuAction("clean_contents", "Clean Up Archive C&ontents...", self.open_clean_contents_dialog),
                 MenuAction("find_duplicates", "Find &Duplicates...", self.open_find_duplicates_dialog),
                 Separator(),
                 MenuAction("save_all", "Save &All Changed", self.save_all_changed, shortcut=shortcuts.SAVE_ALL),
@@ -2143,6 +2145,70 @@ class MainWindow(QMainWindow):
             if finished is False:
                 for _book, _source, future in futures:
                     future.cancel()
+
+    def open_clean_contents_dialog(self) -> None:
+        """Operations > Clean Up Archive Contents...: plain numbered page
+        names, no page folders, no junk files inside the selected
+        archives (or all) -- see core/archive_contents.py -- reviewed
+        first, originals to the Recycle Bin."""
+        from gui.archive_cleanup_dialog import ArchiveCleanupDialog
+
+        self._commit_current_edits()
+        target_books = [b for b in self._target_books() if not b.load_error and not b.needs_conversion]
+        unsaved = [b for b in target_books if b.dirty]
+        target_books = [b for b in target_books if not b.dirty]
+        work, errors = [], []
+
+        def _plan(book: CbzBook, _index: int) -> None:
+            try:
+                plan = book.cleanup_plan()
+            except (zipfile.BadZipFile, OSError) as exc:
+                errors.append(f"{os.path.basename(book.path)}: {exc}")
+                return
+            if plan.needed:
+                work.append((book, plan))
+
+        run_with_progress(self, target_books, _plan, "Checking archive contents...",
+                          threshold=LOAD_PROGRESS_THRESHOLD,
+                          label_for=lambda b: f"Checking: {os.path.basename(b.path)}")
+        skipped = f"{len(unsaved)} file(s) with unsaved changes were skipped -- save them first." if unsaved else ""
+        if not work:
+            QMessageBox.information(
+                self, "Clean Up Archive Contents",
+                f"Nothing to clean up in {len(target_books)} file(s)." + (f"\n\n{skipped}" if skipped else ""),
+            )
+            return
+        dialog = ArchiveCleanupDialog(work, skipped, self)
+        if dialog.exec() != dialog.DialogCode.Accepted:
+            return
+        chosen = dialog.ticked()
+        cleaned = 0
+
+        def _clean(book: CbzBook, _index: int) -> None:
+            nonlocal cleaned
+            try:
+                book.clean_contents(dispose_original=move_to_trash)
+            except (CbzError, TrashError) as exc:
+                errors.append(f"{os.path.basename(book.path)}: {exc}")
+                return
+            cleaned += 1
+            self._size_source.pop(book)  # page names changed: rescan Size/Credit Pages
+            row = self.books.index(book)
+            self._refresh_table_row(row, book)
+            if self._selected_rows == [row]:
+                self._show_book_in_panel(book, f"{book.actual_page_count} page(s)")
+
+        run_with_progress(self, chosen, _clean, "Cleaning up archives...", threshold=1,
+                          label_for=lambda b: f"Rewriting: {os.path.basename(b.path)}")
+        if errors:
+            from redactor_common.core.error_summary import summarize_errors
+            QMessageBox.warning(self, "Some Files Failed", summarize_errors(errors))
+        self._visible_rows.schedule()
+        self._update_status()
+        if cleaned:
+            self.statusBar().showMessage(
+                f"Cleaned up {cleaned} archive(s). Originals are in the Recycle Bin.", 10000,
+            )
 
     def open_find_duplicates_dialog(self) -> None:
         """Operations > Find Duplicates...: the same comic loaded more than

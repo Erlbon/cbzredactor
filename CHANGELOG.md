@@ -1,5 +1,25 @@
 # Changelog
 
+## 2026-09-29#03 -- Clean up archive contents; Bedetheque Web link
+
+- **Operations > Clean Up Archive Contents...**: tidies the names inside
+  each archive -- pages renamed to plain numbers in reading order
+  (001.webp, 002.webp, ...) and taken out of folders, which removes
+  release-group names ("Zone-Empire/... (Zone-Empire) p1.jpg") and
+  over-long paths; junk removed (Thumbs.db, .DS_Store, __MACOSX, .nfo,
+  .sfv, .url, .txt ...). Page bytes, their order and ComicInfo.xml are
+  unchanged. A review lists what changes per file (untick any); each
+  original goes to the Recycle Bin; files with unsaved edits are
+  skipped.
+- **Fixed: page order.** Pages are now ordered numerically, as comic
+  readers do -- an archive numbered 1, 2, ... 10 no longer reads 1, 10,
+  2 (the cover, the credit-page check and page positions all use this
+  order). All 49 sample archives had unpadded numbers or folders.
+- **Fixed:** macOS "__MACOSX/._name.jpg" leftovers were counted as
+  (broken) extra pages.
+- **Look Up via Bedetheque** now records the album's Bedetheque page in
+  Web, like the Comic Vine and GCD lookups.
+
 ## 2026-09-29#02 -- Small fixes
 
 - Message boxes with several wide buttons keep their text next to the icon (on Linux the text could end up in a narrow strip far to the right).
