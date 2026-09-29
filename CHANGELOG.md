@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026-09-29#14 -- A scan of another folder no longer replaces the first
+
+- **Each folder keeps its own scan.** Scanning a second folder used to
+  overwrite `collection_scan.zip`, so switching folders meant scanning the
+  first one all over again. The old scan is now set aside next to it, and
+  scanning that folder again picks it up: unchanged comics aren't read
+  again.
+- **Collection Report asks which folder's scan to open** when more than
+  one is kept.
+
 ## 2026-09-29#14 -- Cover fingerprints in the collection scan
 
 - **Scan Collection Folder... can fingerprint every cover.** You're asked

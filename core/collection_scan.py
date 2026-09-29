@@ -33,6 +33,8 @@ that needs outside tools, and the report flags them anyway.
 from __future__ import annotations
 
 import csv
+import glob
+import hashlib
 import io
 import json
 import os
@@ -332,6 +334,35 @@ def write_scan(zip_path: str, info: ScanInfo, rows: list[ScanRow]) -> None:
         archive.writestr(CSV_NAME, "﻿" + text.getvalue())
         archive.comment = json.dumps(asdict(info)).encode("utf-8")
     os.replace(temp, zip_path)
+
+
+def stash_path(zip_path: str, root: str) -> str:
+    """Where the scan of `root` is kept while another folder's scan is the
+    current one: next to `zip_path`, named after the folder."""
+    key = hashlib.sha1(os.path.normcase(os.path.abspath(root)).encode("utf-8")).hexdigest()[:10]
+    base, ext = os.path.splitext(zip_path)
+    return f"{base}_{key}{ext}"
+
+
+def stash_current(zip_path: str, info: ScanInfo) -> None:
+    """Sets the current scan (of info.root) aside under its own name, so a
+    scan of another folder doesn't overwrite it."""
+    os.replace(zip_path, stash_path(zip_path, info.root))
+
+
+def stashed_scans(zip_path: str) -> list[tuple[str, ScanInfo]]:
+    """(path, info) of every set-aside scan, newest first."""
+    base, ext = os.path.splitext(zip_path)
+    found = []
+    for path in glob.glob(f"{glob.escape(base)}_*{ext}"):
+        try:
+            with zipfile.ZipFile(path) as archive:
+                raw = json.loads(archive.comment.decode("utf-8") or "{}")
+            info = ScanInfo(**{k: v for k, v in raw.items() if k in ScanInfo.__dataclass_fields__})
+        except (OSError, zipfile.BadZipFile, ValueError, TypeError):
+            continue
+        found.append((path, info))
+    return sorted(found, key=lambda item: item[1].scanned, reverse=True)
 
 
 def read_scan(zip_path: str) -> tuple[ScanInfo, list[ScanRow]]:

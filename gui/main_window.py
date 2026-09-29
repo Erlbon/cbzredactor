@@ -2329,6 +2329,15 @@ class MainWindow(QMainWindow):
         root = os.path.abspath(root)
         same_root = previous_info is not None and os.path.normcase(previous_info.root) == os.path.normcase(root)
         previous = {row.path: row for row in previous_rows} if same_root else {}
+        stashed = scan.stash_path(zip_path, root)
+        if not same_root and os.path.exists(stashed):
+            # This folder was scanned before, then another one replaced it as the current scan.
+            try:
+                _old_info, old_rows = scan.read_scan(stashed)
+                previous = {row.path: row for row in old_rows}
+                previous_rows = old_rows
+            except scan.ScanFileError:
+                pass
         mode = self._ask_cover_mode(any(row.cover for row in previous.values()))
         if mode is None:
             return
@@ -2378,7 +2387,11 @@ class MainWindow(QMainWindow):
                 if item.path not in rows and item.path in previous:
                     rows[item.path] = previous[item.path]
         try:
+            if previous_info is not None and not same_root and os.path.exists(zip_path):
+                scan.stash_current(zip_path, previous_info)  # the other folder's scan is kept, not overwritten
             scan.write_scan(zip_path, scan.new_info(root, complete, APP_VERSION), list(rows.values()))
+            if os.path.exists(stashed):
+                os.remove(stashed)  # now the current scan
         except OSError as exc:
             QMessageBox.warning(self, "Scan Collection Folder", f"Couldn't save the scan:\n{exc}")
             return
@@ -2427,6 +2440,23 @@ class MainWindow(QMainWindow):
         from gui.collection_report_dialog import CollectionReportDialog
 
         zip_path = _collection_scan_path()
+        others = scan.stashed_scans(zip_path)
+        if others and os.path.exists(zip_path):
+            from PyQt6.QtWidgets import QInputDialog
+            try:
+                current_info = scan.read_scan(zip_path)[0]
+            except scan.ScanFileError:
+                current_info = None
+            options = {}
+            if current_info is not None:
+                options[f"{current_info.root}  (last scanned {current_info.scanned})"] = zip_path
+            for path, info in others:
+                options[f"{info.root}  (scanned {info.scanned})"] = path
+            choice, ok = QInputDialog.getItem(self, "Collection Report", "Which folder's scan?",
+                                              list(options), 0, False)
+            if not ok:
+                return
+            zip_path = options[choice]
         if not os.path.exists(zip_path):
             QMessageBox.information(
                 self, "Collection Report",

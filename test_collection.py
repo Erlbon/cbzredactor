@@ -4,6 +4,7 @@ core/collection_report.py, gui/collection_report_dialog.py) -- on a
 small made-up library laid out like the user's real one."""
 
 import os
+import shutil
 import sys
 import zipfile
 
@@ -652,3 +653,43 @@ def test_saving_a_cbz_keeps_its_cover_stamp(tmp_path):
     book.save()
     with zipfile.ZipFile(path) as archive:
         assert read_stamp(archive.comment) == ("0123456789abcdef", "deadbeef-1")
+
+
+def test_scanning_another_folder_keeps_the_first_scan(library, tmp_path, monkeypatch):
+    """A scan of a second folder doesn't overwrite the first: the report
+    can open either, and rescanning the first reuses its rows."""
+    from core import collection_scan as scan
+    from gui.main_window import MainWindow, _collection_scan_path
+
+    other = tmp_path / "Nasty"
+    other.mkdir()
+    shutil.copy(next(p for p in _walk_cbz(library)), other / "unknown.cbz")
+    folder = {"now": library}
+    monkeypatch.setattr(QFileDialog, "getExistingDirectory", lambda *a, **k: folder["now"])
+    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.No)
+    monkeypatch.setattr(QMessageBox, "information", lambda *a, **k: None)
+    monkeypatch.setattr(MainWindow, "_ask_cover_mode", lambda self, had: "none")
+    window = MainWindow()
+    window.scan_collection_folder()
+    first_rows = scan.read_scan(_collection_scan_path())[1]
+
+    folder["now"] = str(other)
+    window.scan_collection_folder()
+    info, rows = scan.read_scan(_collection_scan_path())
+    assert os.path.normcase(info.root) == os.path.normcase(str(other)) and len(rows) == 1
+    kept = scan.stashed_scans(_collection_scan_path())
+    assert len(kept) == 1 and os.path.normcase(kept[0][1].root) == os.path.normcase(os.path.abspath(library))
+    assert len(scan.read_scan(kept[0][0])[1]) == len(first_rows)
+
+    folder["now"] = library  # back: the first scan returns as the current one, the other is kept
+    window.scan_collection_folder()
+    assert len(scan.read_scan(_collection_scan_path())[1]) == len(first_rows)
+    assert [os.path.normcase(i.root) for _p, i in scan.stashed_scans(_collection_scan_path())] == [
+        os.path.normcase(str(other))]
+
+
+def _walk_cbz(root):
+    for folder, _dirs, files in os.walk(root):
+        for name in files:
+            if name.lower().endswith(".cbz"):
+                yield os.path.join(folder, name)
