@@ -1,5 +1,21 @@
 # Changelog
 
+## 2026-09-30#14 -- Redact keeps the patterns it was saved with
+
+- The Redact recipe editor now shows a **pattern trail** for the four pattern
+  steps (Rename, Move into folders, folder path, filename): the pattern in
+  effect and where it comes from, a dropdown of your recent Rename / Export /
+  Parse Filename patterns, a preview on the first loaded file (or a built-in
+  sample), and a **Use fallback** button.
+- A saved recipe **keeps the pattern it was saved with**. Changing the Rename /
+  Export pattern later no longer steers Redact, and nothing has to be
+  recreated. The first time you open Edit Redact Recipe (before any save) each
+  pattern is pre-filled with today's pattern, so pressing OK pins it. A blank
+  pattern still follows the newest saved one; Use fallback clears it back to that.
+- Redact's step that reads the filename uses the pattern stored in the recipe
+  as is; blank still tries your saved patterns newest first.
+- Needs redactor_common 2026-09-30-12.
+
 ## 2026-09-30#13 -- Read metadata from the folder path
 
 - **Parse Filename** now understands folders. A pattern with a "/" such as

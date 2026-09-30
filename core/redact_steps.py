@@ -47,7 +47,7 @@ from dataclasses import dataclass, field
 from typing import Callable
 
 from redactor_common.core.filename_parser import parse_filename as parse_pattern_filename
-from redactor_common.core.move_plan import execute_move, plan_moves
+from redactor_common.core.move_plan import execute_move, plan_moves, render_relative_path
 from redactor_common.core.os_utils import rename_no_clobber
 from redactor_common.core.path_parser import parse_path_detailed
 from redactor_common.core.pipeline import (
@@ -57,6 +57,7 @@ from redactor_common.core.pipeline import (
     Step,
     StepResult,
     commit_in_place,
+    effective_option_source,
 )
 from redactor_common.core.rename_pattern import render_filename, unique_path, zero_pad_numeric_value
 from redactor_common.core.trash import move_to_trash
@@ -120,6 +121,7 @@ class RedactEnv:
     comicvine_key: str = ""
     local_databases: list[str] = field(default_factory=list)  # GCD dump, ComicRack library; in this order
     known_credits: KnownCreditPages | None = None
+    sample_values: dict[str, str] = field(default_factory=dict)  # the first loaded book's fields, for pattern previews
     open_database: Callable[[str], object] = open_database
     comicvine_down: bool = False  # set by the first network failure, skips the rest of the run
 
@@ -140,6 +142,54 @@ class RedactEnv:
     def move_pattern(self) -> str:
         """The newest saved pattern with a "/" -- one meant for Move into folders."""
         return self._newest(True)
+
+    def suggestions(self) -> list[str]:
+        """The pattern trail's recent patterns: the shared history, newest first, filename
+        patterns before path patterns (the editor de-duplicates and groups the same way)."""
+        plain = [p for p in self.pattern_history if p.strip() and "/" not in p and "\\" not in p]
+        paths = [p for p in self.pattern_history if p.strip() and ("/" in p or "\\" in p)]
+        return plain + paths
+
+    def preview_values(self) -> dict[str, str]:
+        """Field values a pattern preview renders: the first loaded book's, else a built-in sample."""
+        return dict(self.sample_values) if any(self.sample_values.values()) else dict(BUILTIN_SAMPLE)
+
+
+# Used by the pattern previews when no book is loaded.
+BUILTIN_SAMPLE = {
+    "series": "Series", "number": "001", "title": "Title", "publisher": "Publisher", "year": "2020",
+    "writer": "Writer", "volume": "1",
+}
+
+
+def _pattern_option(env: "RedactEnv | None", *, label: str, tooltip: str, kind: str, fallback: Callable[[], str],
+                    fallback_label: str) -> OptionSpec:
+    """The "pattern" OptionSpec shared by the four pattern steps: stored value wins, an empty one
+    follows `fallback`, and the editor shows the pattern trail (recent patterns, in effect + source,
+    a preview rendered with the same renderer the step uses: kind "name" or "path")."""
+    env = env or RedactEnv()
+
+    def preview(pattern: str) -> str:
+        if not pattern.strip():
+            return "(nothing: no pattern)"
+        try:
+            values = env.preview_values()
+            if kind == "path":
+                return "/".join(render_relative_path(values, pattern, ascii_only=env.ascii_filenames))
+            return render_filename(values, pattern, fallback="", ascii_only=env.ascii_filenames) or "(empty)"
+        except Exception:
+            return ""
+
+    return OptionSpec(
+        "pattern", label, "str", "", max_length=200, tooltip=tooltip,
+        suggestions=env.suggestions, fallback=fallback, fallback_label=fallback_label, preview=preview,
+    )
+
+
+def _resolve_pattern(step: Step, ctx) -> tuple[str, str]:
+    """(pattern in effect, source) for a step's pattern option, resolved at run time."""
+    spec = step.options[0]
+    return effective_option_source(spec, step.options_for(ctx)["pattern"].strip())
 
 
 # --- per-file context --------------------------------------------------------
@@ -459,10 +509,13 @@ class PathTagsStep(Step):
         "Does nothing until a library root is set and the file is inside it. Existing values are never replaced; "
         "it runs before the filename and lookup steps, which fill only what is still empty."
     )
-    options = (
-        OptionSpec("pattern", "Path pattern (blank = newest saved with '/')", "str", "", max_length=200,
-                   tooltip=f"e.g. {DEFAULT_PATH_PATTERN}"),
-    )
+    def __init__(self, env: "RedactEnv | None" = None):
+        super().__init__()
+        self.options = (_pattern_option(
+            env, label="Path pattern", tooltip=f"e.g. {DEFAULT_PATH_PATTERN}", kind="path",
+            fallback=lambda: (env.move_pattern() if env else "") or DEFAULT_PATH_PATTERN,
+            fallback_label="the newest saved pattern with '/' (else the built-in one)",
+        ),)
 
     def run(self, ctx: CbzCtx) -> StepResult:
         if (missing := ctx.need_work()) is not None:
@@ -475,7 +528,8 @@ class PathTagsStep(Step):
             )
         if not _under_root(ctx.book.path, root):
             return StepResult.nothing("path tags skipped: the file is outside the library root")
-        pattern = self.options_for(ctx)["pattern"].strip() or ctx.env.move_pattern() or DEFAULT_PATH_PATTERN
+        pattern, _source = _resolve_pattern(self, ctx)
+        pattern = pattern or DEFAULT_PATH_PATTERN
         parsed = parse_path_detailed(
             ctx.book.path, pattern, root, set(FILENAME_FIELD_KEYS), set(NUMERIC_FILENAME_FIELDS),
             strip_leading_zeros_fields={"number"},
@@ -509,17 +563,21 @@ class FilenameTagsStep(Step):
         f"matching pattern the scene-name reader is tried ({SCENE_CONFIDENCE:.0%}). Below the threshold the "
         "result is listed under Needs review. Existing values are never replaced."
     )
-    options = (
-        OptionSpec("pattern", "Pattern (blank = saved patterns)", "str", "", max_length=200,
-                   tooltip="e.g. %series% %number% - %title%"),
-    )
+    def __init__(self, env: "RedactEnv | None" = None):
+        super().__init__()
+        self.options = (_pattern_option(
+            env, label="Pattern", tooltip="e.g. %series% %number% - %title%", kind="name",
+            fallback=lambda: env.rename_pattern() if env else "",
+            fallback_label="the saved Rename / Parse Filename patterns (the newest that fits; else the scene-name reader)",
+        ),)
 
     def run(self, ctx: CbzCtx) -> StepResult:
         if (missing := ctx.need_work()) is not None:
             return missing
         stem = os.path.splitext(os.path.basename(ctx.original))[0]
-        named = self.options_for(ctx)["pattern"].strip()
-        candidates = [(named, PATTERN_CONFIDENCE)] if named else [
+        named, source = _resolve_pattern(self, ctx)
+        # A pattern stored in the recipe is used as is; following the fallback tries the history newest first.
+        candidates = [(named, PATTERN_CONFIDENCE)] if source == "set in this recipe" else [
             (p, HISTORY_PATTERN_CONFIDENCE) for p in ctx.env.pattern_history if p.strip()
         ]
         for pattern, confidence in candidates:
@@ -737,18 +795,18 @@ class RenameStep(Step):
         "Rename. Leave the pattern blank to use the newest saved Rename / Export pattern without a '/'. It "
         "runs after the file is saved and before Move into folders. On only once such a pattern exists."
     )
-    options = (
-        OptionSpec("pattern", "Pattern (blank = newest saved)", "str", "", max_length=200,
-                   tooltip="e.g. %series% %number% - %title%"),
-    )
-
     def __init__(self, env: RedactEnv | None = None):
         super().__init__(default_enabled=bool(env and env.rename_pattern()))
+        self.options = (_pattern_option(
+            env, label="Pattern", tooltip="e.g. %series% %number% - %title%", kind="name",
+            fallback=lambda: env.rename_pattern() if env else "",
+            fallback_label="the newest saved Rename / Export pattern (none saved yet: the step is skipped)",
+        ),)
 
     def run(self, ctx: CbzCtx) -> StepResult:
         if (missing := ctx.need_work()) is not None:
             return missing
-        pattern = self.options_for(ctx)["pattern"].strip() or ctx.env.rename_pattern()
+        pattern, _source = _resolve_pattern(self, ctx)
         if not pattern:
             return StepResult.nothing("rename skipped: no rename pattern saved yet (use File > Rename / Export once)")
         planned = ctx.target_path
@@ -772,16 +830,19 @@ class MoveIntoFoldersStep(Step):
         "'/'. Needs a library root chosen in that dialog. Never overwrites; logged for File > Undo Last Rename. "
         "Off by default."
     )
-    options = (
-        OptionSpec("pattern", "Pattern (blank = newest saved with '/')", "str", "", max_length=200,
-                   tooltip="e.g. %publisher%/%series%/%series% %number%"),
-    )
+    def __init__(self, env: RedactEnv | None = None):
+        super().__init__()
+        self.options = (_pattern_option(
+            env, label="Pattern", tooltip="e.g. %publisher%/%series%/%series% %number%", kind="path",
+            fallback=lambda: env.move_pattern() if env else "",
+            fallback_label="the newest saved pattern with '/' (none saved yet: the step is skipped)",
+        ),)
 
     def run(self, ctx: CbzCtx) -> StepResult:
         if (missing := ctx.need_work()) is not None:
             return missing
         env = ctx.env
-        pattern = self.options_for(ctx)["pattern"].strip() or env.move_pattern()
+        pattern, _source = _resolve_pattern(self, ctx)
         if not pattern:
             return StepResult.nothing("move skipped: no folder pattern saved yet (use 'Move into folders' in Rename / Export)")
         if not env.library_root or not os.path.isdir(env.library_root):
@@ -943,13 +1004,13 @@ def build_catalogue(env: RedactEnv | None = None) -> list[Step]:
         CleanContentsStep(),
         RemoveCreditPagesStep(),
         ResizeImagesStep(),
-        PathTagsStep(),
-        FilenameTagsStep(),
+        PathTagsStep(env),
+        FilenameTagsStep(env),
         LookupStep(),
         ValidateFixStep(),
         TagLowResStep(),
         RenameStep(env),
-        MoveIntoFoldersStep(),
+        MoveIntoFoldersStep(env),
     ]
 
 
@@ -970,6 +1031,21 @@ def recipe_for_run(recipe: Recipe) -> Recipe:
         options={k: dict(v) for k, v in recipe.options.items()},
         confidence_threshold=recipe.confidence_threshold,
     )
+
+
+def pin_patterns(recipe: Recipe, catalogue: list[Step]) -> Recipe:
+    """First-save pinning: writes each pattern option's CURRENT effective value into a recipe that has
+    never been saved, so pressing OK in the editor keeps today's Rename/Export patterns instead of
+    following later changes. Only empty values are filled (a stored pattern is never touched)."""
+    for step in catalogue:
+        for spec in step.options:
+            if spec.kind != "str" or spec.fallback is None:
+                continue
+            opts = recipe.options.setdefault(step.key, {})
+            if not str(opts.get(spec.key, "") or "").strip():
+                value, _source = effective_option_source(spec, "")
+                opts[spec.key] = value
+    return recipe
 
 
 def recipe_to_setting(recipe: Recipe) -> str:

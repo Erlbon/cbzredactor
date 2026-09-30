@@ -146,3 +146,62 @@ def test_recipe_is_stored_as_json_in_the_settings_file(window, monkeypatch, tmp_
     window.redact_files()
     with zipfile.ZipFile(path) as zf:
         assert "Thumbs.db" not in zf.namelist()
+
+
+# --- pattern trail in the editor -------------------------------------------------------
+
+
+def _accept_editor(monkeypatch):
+    from PyQt6.QtWidgets import QDialog
+
+    monkeypatch.setattr(RecipeEditorDialog, "exec", lambda self: QDialog.DialogCode.Accepted)
+
+
+def test_first_save_pins_the_current_patterns(window, monkeypatch):
+    from core.redact_steps import recipe_from_setting
+
+    app_settings.save_pattern_used("%series% %number%")
+    _accept_editor(monkeypatch)
+    window.edit_redact_recipe()
+    saved = recipe_from_setting(app_settings.load_redact_recipe())
+    assert saved.options["rename"]["pattern"] == "%series% %number%"
+    app_settings.save_pattern_used("%title%")  # a later Rename / Export must not steer Redact
+    from core.redact_steps import RedactEnv, build_catalogue
+    from redactor_common.core.pipeline import effective_option_source
+
+    spec = next(s for s in build_catalogue(window._redact_env()) if s.key == "rename").options[0]
+    assert effective_option_source(spec, saved.options["rename"]["pattern"]) == ("%series% %number%", "set in this recipe")
+    # opening and accepting again keeps what was stored as typed
+    window.edit_redact_recipe()
+    assert recipe_from_setting(app_settings.load_redact_recipe()).options["rename"]["pattern"] == "%series% %number%"
+
+
+def test_saved_empty_pattern_stays_following(window, monkeypatch):
+    from core.redact_steps import recipe_from_setting, recipe_to_setting
+
+    app_settings.save_pattern_used("%series% %number%")
+    recipe = recipe_from_setting("")
+    recipe.options["rename"] = {"pattern": ""}
+    app_settings.save_redact_recipe(recipe_to_setting(recipe))
+    _accept_editor(monkeypatch)
+    window.edit_redact_recipe()
+    assert recipe_from_setting(app_settings.load_redact_recipe()).options["rename"]["pattern"] == ""
+
+
+def test_editor_shows_the_trail(window):
+    from PyQt6.QtWidgets import QComboBox, QLabel
+    from core.redact_steps import build_catalogue, recipe_from_setting
+
+    app_settings.save_pattern_used("%series%/%number%")
+    app_settings.save_pattern_used("%series% %number%")
+    dialog = RecipeEditorDialog(build_catalogue(window._redact_env()), recipe_from_setting(""))
+    for row in range(dialog.list.count()):
+        if dialog.list.item(row).data(Qt.ItemDataRole.UserRole) == "rename":
+            dialog.list.setCurrentRow(row)
+    combo = dialog.findChild(QComboBox)
+    assert [combo.itemText(i) for i in range(combo.count())] == ["%series% %number%", "%series%/%number%"]
+    caption = dialog.findChild(QLabel, "pattern_caption").text()
+    assert "%series% %number%" in caption and "follows:" in caption
+    assert "Series 001" in dialog.findChild(QLabel, "pattern_preview").text()
+    combo.setCurrentText("%title%")
+    assert "set in this recipe" in dialog.findChild(QLabel, "pattern_caption").text()

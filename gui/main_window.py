@@ -96,10 +96,12 @@ from core.page_dimensions import SIZE_LOW, SIZE_OK, SIZE_OVERSIZED, PageSizeStat
 from core.scan_quality_tag import LOW_RES_TAG, add_tag, has_tag, remove_tag
 from core.scene_name import parse_filename, proposed_fields
 from core.redact_steps import (
+    FILENAME_FIELD_KEYS,
     FINALIZE_LABEL,
     CbzCtx,
     RedactEnv,
     build_catalogue,
+    pin_patterns,
     recipe_for_run,
     recipe_from_setting,
     recipe_to_setting,
@@ -2461,14 +2463,28 @@ class MainWindow(QMainWindow):
                 path for path in (app_settings.load_gcd_local_database(), app_settings.load_comicrack_database()) if path
             ],
             known_credits=self._known_credits,
+            sample_values=self._redact_sample_values(),
         )
+
+    def _redact_sample_values(self) -> dict[str, str]:
+        """The first loaded book's fields, for the recipe editor's pattern previews ({} = built-in sample)."""
+        if not self.books:
+            return {}
+        metadata = getattr(self.books[0], "metadata", None)
+        return {attr: str(getattr(metadata, attr, "") or "") for attr in FILENAME_FIELD_KEYS}
 
     def edit_redact_recipe(self) -> None:
         """Operations > Edit Redact Recipe...: the shared recipe editor over
         this app's steps; the result (order, on/off, options, threshold --
         never a secret) is stored as JSON in the settings file."""
-        recipe = recipe_from_setting(app_settings.load_redact_recipe())
-        dialog = RecipeEditorDialog(build_catalogue(self._redact_env()), recipe, self)
+        catalogue = build_catalogue(self._redact_env())
+        saved = app_settings.load_redact_recipe()
+        recipe = recipe_from_setting(saved)
+        if not saved:
+            # First save: start from today's effective patterns so OK pins them; later Rename / Export
+            # changes then never steer Redact. "Use fallback" (empty) un-pins a pattern again.
+            recipe = pin_patterns(recipe, catalogue)
+        dialog = RecipeEditorDialog(catalogue, recipe, self)
         if dialog.exec() == QDialog.DialogCode.Accepted:
             app_settings.save_redact_recipe(recipe_to_setting(dialog.recipe()))
 

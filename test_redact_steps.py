@@ -637,3 +637,78 @@ def test_recipe_round_trip_keeps_the_path_step(env):
     assert again.options["path_tags"]["pattern"] == "%series%/%series% %number%"
     assert again.enabled["path_tags"] is False
     assert "path_tags" not in [s.key for s, _ in again.resolve(run_catalogue(env))]
+
+
+# --- pattern trail: stored wins, empty follows the fallback -------------------------
+
+
+def _step(env, key):
+    return next(s for s in build_catalogue(env) if s.key == key)
+
+
+def test_pattern_options_carry_the_trail(env):
+    env.pattern_history = ["%series%/%number%", "%series% %number%", "%title%", "%publisher%/%series%"]
+    for key in ("rename", "move_into_folders", "path_tags", "filename_tags"):
+        spec = _step(env, key).options[0]
+        # filename patterns first, then path patterns, each newest first
+        assert spec.suggestions() == ["%series% %number%", "%title%", "%series%/%number%", "%publisher%/%series%"]
+        assert spec.fallback is not None and spec.fallback_label and spec.preview is not None
+    assert _step(env, "rename").options[0].fallback() == "%series% %number%"
+    assert _step(env, "filename_tags").options[0].fallback() == "%series% %number%"
+    assert _step(env, "move_into_folders").options[0].fallback() == "%series%/%number%"
+    assert _step(env, "path_tags").options[0].fallback() == "%series%/%number%"
+    env.pattern_history = []
+    assert _step(env, "path_tags").options[0].fallback() == rs.DEFAULT_PATH_PATTERN
+
+
+def test_pattern_preview_uses_the_first_book_or_a_builtin_sample(env):
+    spec = _step(env, "rename").options[0]
+    assert spec.preview("%series% %number%") == "Series 001"
+    assert _step(env, "move_into_folders").options[0].preview("%publisher%/%series%/%series% %number%") == (
+        "Publisher/Series/Series 001"
+    )
+    env.sample_values = {"series": "Saga", "number": "7"}
+    assert spec.preview("%series% %number%") == "Saga 7"
+    assert spec.preview("") != ""  # never raises, never blank
+
+
+def test_stored_pattern_wins_and_empty_follows(env, tmp_path):
+    env.pattern_history = ["%series% %number%"]
+    stored = CbzBook(_cbz(tmp_path / "a.cbz"))
+    _only(_run(env, [stored], _recipe(env, disable=("filename_tags",), options={"rename": {"pattern": "%series%-x"}})))
+    assert os.path.basename(stored.path) == "Saga-x.cbz"  # the stored pattern, not the history's
+    follow = CbzBook(_cbz(tmp_path / "b.cbz"))
+    _only(_run(env, [follow], _recipe(env, disable=("filename_tags",))))
+    assert os.path.basename(follow.path) == "Saga 1.cbz"
+
+
+def test_pinned_pattern_ignores_a_later_history_change(env, tmp_path):
+    env.pattern_history = ["%series% %number%"]
+    recipe = rs.pin_patterns(Recipe.default_for(build_catalogue(env)), build_catalogue(env))
+    assert recipe.options["rename"]["pattern"] == "%series% %number%"
+    assert recipe.options["path_tags"]["pattern"] == rs.DEFAULT_PATH_PATTERN
+    assert recipe.options["move_into_folders"]["pattern"] == ""
+    stored = Recipe.from_json(rs.recipe_to_setting(recipe))
+    env.pattern_history = ["%publisher% %year%", "%series% %number%"]  # the user later saves another pattern
+    book = CbzBook(_cbz(tmp_path / "old.cbz"))
+    stored.enabled["filename_tags"] = False
+    _only(_run(env, [book], stored))
+    assert os.path.basename(book.path) == "Saga 1.cbz"
+    # an empty pin (Use fallback) follows the history again
+    stored.options["rename"]["pattern"] = ""
+    again = CbzBook(_cbz(tmp_path / "second.cbz"))
+    _only(_run(env, [again], stored))
+    assert os.path.basename(again.path) == "Image 2012.cbz"
+
+
+def test_pin_keeps_an_existing_stored_pattern(env):
+    env.pattern_history = ["%series% %number%"]
+    recipe = _recipe(env, options={"rename": {"pattern": "%title%"}})
+    assert rs.pin_patterns(recipe, build_catalogue(env)).options["rename"]["pattern"] == "%title%"
+
+
+def test_old_recipe_json_loads_unchanged(env):
+    text = '{"order": ["rename"], "enabled": {"rename": true}, "options": {"rename": {"pattern": "%series%"}}, "confidence_threshold": 0.8}'
+    recipe = rs.recipe_from_setting(text)
+    assert recipe.options["rename"]["pattern"] == "%series%" and recipe.confidence_threshold == 0.8
+    assert Recipe.from_json(rs.recipe_to_setting(recipe)).options == recipe.options
