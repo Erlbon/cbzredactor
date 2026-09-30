@@ -1690,6 +1690,10 @@ class MainWindow(QMainWindow):
             strip_leading_zeros_fields={"number"},
             title="Parse Filename → Metadata",
             item_noun="file",
+            # A pattern with a '/' reads the folders too; the root is the same
+            # setting Rename / Export's "Move into folders" keeps.
+            library_root=app_settings.load_library_root(),
+            on_library_root_changed=app_settings.save_library_root,
             parent=self,
         )
         if dialog.exec() != dialog.DialogCode.Accepted:

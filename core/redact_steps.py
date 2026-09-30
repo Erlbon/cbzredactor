@@ -49,6 +49,7 @@ from typing import Callable
 from redactor_common.core.filename_parser import parse_filename as parse_pattern_filename
 from redactor_common.core.move_plan import execute_move, plan_moves
 from redactor_common.core.os_utils import rename_no_clobber
+from redactor_common.core.path_parser import parse_path_detailed
 from redactor_common.core.pipeline import (
     CommitError,
     OptionSpec,
@@ -431,6 +432,70 @@ class ResizeImagesStep(Step):
             f"resized {summary.pages_resized} page(s) to {opts['max_width']}px wide, "
             f"{before / mb:.1f} MB -> {os.path.getsize(work.path) / mb:.1f} MB"
         )
+
+
+DEFAULT_PATH_PATTERN = "%series%/%title% %number%"
+
+
+def _under_root(path: str, root: str) -> bool:
+    """True when `path` lies inside the folder `root` (case-insensitive on Windows)."""
+    try:
+        a, b = os.path.normcase(os.path.abspath(path)), os.path.normcase(os.path.abspath(root))
+        return os.path.commonpath([a, b]) == b and a != b
+    except ValueError:  # another drive
+        return False
+
+
+class PathTagsStep(Step):
+    key = "path_tags"
+    label = "Fill empty fields from the folder path"
+    description = (
+        "Fills ComicInfo fields that are EMPTY from the folders the file sits in, with a path pattern such as "
+        "%publisher%/%series% (%year%)/%series% %number%: the last part matches the file name, the parts before "
+        "it the folders above it, counted from the library root chosen in Rename / Export ('Move into "
+        "folders'). Leave the pattern blank to use the newest saved pattern with a '/'. Only a result the "
+        "parser is sure of (at the confidence threshold or above: every folder part matched, none a bare "
+        "catch-all) is applied; anything weaker is listed under Needs review with the parts that did not match. "
+        "Does nothing until a library root is set and the file is inside it. Existing values are never replaced; "
+        "it runs before the filename and lookup steps, which fill only what is still empty."
+    )
+    options = (
+        OptionSpec("pattern", "Path pattern (blank = newest saved with '/')", "str", "", max_length=200,
+                   tooltip=f"e.g. {DEFAULT_PATH_PATTERN}"),
+    )
+
+    def run(self, ctx: CbzCtx) -> StepResult:
+        if (missing := ctx.need_work()) is not None:
+            return missing
+        root = ctx.env.library_root
+        if not root or not os.path.isdir(root):
+            return StepResult.nothing(
+                "path tags skipped: no library root folder set (choose one under Rename / Export > Move into "
+                "folders, or in Parse Filename with a '/' pattern)"
+            )
+        if not _under_root(ctx.book.path, root):
+            return StepResult.nothing("path tags skipped: the file is outside the library root")
+        pattern = self.options_for(ctx)["pattern"].strip() or ctx.env.move_pattern() or DEFAULT_PATH_PATTERN
+        parsed = parse_path_detailed(
+            ctx.book.path, pattern, root, set(FILENAME_FIELD_KEYS), set(NUMERIC_FILENAME_FIELDS),
+            strip_leading_zeros_fields={"number"},
+        )
+        if not parsed.matched:
+            return StepResult.nothing(f"path tags: {parsed.notes[-1] if parsed.notes else 'no match'}")
+        fill = _empty_fields(ctx, parsed.values)
+        if not fill:
+            return StepResult.nothing()
+        reason = f"the path matches {pattern!r}"
+        if parsed.missing_segments:
+            reason += "; no match for " + ", ".join(repr(m) for m in parsed.missing_segments)
+        if parsed.matched_segments:
+            reason += "; matched " + ", ".join(f"{seg!r} = {text!r}" for seg, text in parsed.matched_segments)
+        # Below the recipe threshold the engine lists it under Needs review; the confidence is the parser's own.
+        return StepResult.suggestion(FieldFill(fill, f"path {pattern!r}"), parsed.confidence, reason)
+
+    def apply_suggestion(self, ctx: CbzCtx, result: StepResult) -> str:
+        filled = _fill_empty(ctx, result.value.fields)
+        return f"filled {', '.join(filled)} from the folder path ({result.value.source})"
 
 
 class FilenameTagsStep(Step):
@@ -870,7 +935,7 @@ FINALIZE_LABEL = "Save"
 
 def build_catalogue(env: RedactEnv | None = None) -> list[Step]:
     """The steps the recipe editor offers, in default order: structure
-    first (convert, cleanup, pages, resize), then metadata (filename,
+    first (convert, cleanup, pages, resize), then metadata (path, filename,
     lookup, fixes, tag), then the two pinned-last steps. `env` decides
     whether Rename starts enabled (only once a pattern exists)."""
     return [
@@ -878,6 +943,7 @@ def build_catalogue(env: RedactEnv | None = None) -> list[Step]:
         CleanContentsStep(),
         RemoveCreditPagesStep(),
         ResizeImagesStep(),
+        PathTagsStep(),
         FilenameTagsStep(),
         LookupStep(),
         ValidateFixStep(),

@@ -1,5 +1,21 @@
 # Changelog
 
+## 2026-09-30#13 -- Read metadata from the folder path
+
+- **Parse Filename** now understands folders. A pattern with a "/" such as
+  `%series%/%title% %number%` or `%publisher%/%series% (%year%)/%series% %number%`
+  matches the file name with its last part and the folders above it with the
+  earlier parts, counted from the library root (the same root Rename / Export's
+  "Move into folders" remembers). The preview shows a confidence and the parts
+  that matched. Patterns without a "/" work as before.
+- Redact has a new step, **Fill empty fields from the folder path**, before the
+  filename and lookup steps. It fills only empty fields, applies a result the
+  parser is sure of at the confidence threshold, and lists a weaker one under
+  Needs review with the parts that did not match. It does nothing (with a note)
+  until a library root is set and the file is inside it. Leave its pattern blank
+  to use the newest saved pattern with a "/".
+- Import > Read Filename Tags is unchanged (filename only).
+
 ## 2026-09-30#12 -- Move into folders
 
 - **File > Rename / Export Files** has a third mode, **Move into folders

@@ -134,7 +134,7 @@ def test_default_enabled_states(env):
     enabled = {s.key: s.default_enabled for s in build_catalogue(env)}
     assert enabled == {
         "convert_to_cbz": True, "clean_contents": True, "remove_credit_pages": False, "resize_images": False,
-        "filename_tags": True, "lookup": True, "validate_fix": True, "tag_low_res": True,
+        "path_tags": True, "filename_tags": True, "lookup": True, "validate_fix": True, "tag_low_res": True,
         "rename": False, "move_into_folders": False,
     }
     env.pattern_history = ["%series% %number%"]
@@ -532,3 +532,108 @@ def test_move_never_overwrites(env, tmp_path):
     _only(_run(env, [book], _recipe(env, enable=("move_into_folders",), disable=("filename_tags",))))
     assert book.path == str(root / "Saga" / "Saga 1 (2).cbz")
     assert CbzBook(str(root / "Saga" / "Saga 1.cbz")).metadata.title == "other"
+
+
+# --- path tags ---------------------------------------------------------------
+
+
+def _library(tmp_path, env, *parts, name="Saga 007.cbz"):
+    """A book at <Library>/<parts>/<name> with empty ComicInfo; env.library_root set."""
+    root = tmp_path / "Library"
+    folder = root.joinpath(*parts)
+    folder.mkdir(parents=True, exist_ok=True)
+    env.library_root = str(root)
+    return CbzBook(_empty_info(folder / name))
+
+
+def _path_recipe(env, pattern=None, **kwargs):
+    options = {"path_tags": {"pattern": pattern}} if pattern else None
+    return _recipe(env, disable=("filename_tags",), options=options, **kwargs)
+
+
+def test_path_tags_runs_before_filename_tags_and_lookup(env):
+    keys = [s.key for s in build_catalogue(env)]
+    assert keys.index("path_tags") < keys.index("filename_tags") < keys.index("lookup")
+
+
+def test_path_tags_confident_match_is_applied(env, tmp_path):
+    book = _library(tmp_path, env, "Image", "Saga (2012)")
+    entry = _only(_run(env, [book], _path_recipe(env, "%publisher%/%series% (%year%)/%series% %number%")))
+    assert entry.status is FileStatus.CHANGED
+    meta = book.metadata
+    assert (meta.publisher, meta.series, meta.year, meta.number) == ("Image", "Saga", "2012", "7")
+    assert any("from the folder path" in a for a in entry.applied)
+
+
+def test_path_tags_bare_folder_capture_goes_to_review_then_applies_when_threshold_lowered(env, tmp_path):
+    book = _library(tmp_path, env, "Saga")
+    entry = _only(_run(env, [book], _path_recipe(env, "%series%/%title% %number%")))  # bare %series% folder
+    assert entry.status is FileStatus.NEEDS_REVIEW and book.metadata.series == ""
+    assert entry.review[0].confidence == pytest.approx(0.875)
+    again = _only(_run(env, [book], _path_recipe(env, "%series%/%title% %number%", threshold=0.85)))
+    assert again.status is FileStatus.CHANGED and book.metadata.series == "Saga" and book.metadata.number == "7"
+
+
+def test_path_tags_missing_folder_is_reviewed_with_the_missing_segment_named(env, tmp_path):
+    book = _library(tmp_path, env)  # the file sits directly in the root
+    entry = _only(_run(env, [book], _path_recipe(env, "%publisher%/Saga %number%")))
+    assert entry.status is FileStatus.NEEDS_REVIEW
+    assert "no match for '%publisher%'" in entry.review[0].reason
+    assert book.metadata.number == ""
+
+
+def test_path_tags_fill_empty_only(env, tmp_path):
+    root = tmp_path / "Library"
+    (root / "Image").mkdir(parents=True)
+    env.library_root = str(root)
+    book = CbzBook(_cbz(root / "Image" / "Saga 007.cbz", comicinfo=b"<ComicInfo><Series>Keep</Series></ComicInfo>"))
+    _only(_run(env, [book], _path_recipe(env, "%publisher%/%series% %number%", threshold=0.5)))
+    assert (book.metadata.series, book.metadata.publisher, book.metadata.number) == ("Keep", "Image", "7")
+
+
+def test_filename_tags_do_not_overwrite_path_results(env, tmp_path):
+    book = _library(tmp_path, env, "Image", "Saga (2012)", name="Other 009.cbz")
+    env.pattern_history = ["%series% %number%"]
+    recipe = _recipe(
+        env, options={"path_tags": {"pattern": "%publisher%/%series% (%year%)/%title% %number%"}}, threshold=0.8
+    )
+    _only(_run(env, [book], recipe))
+    assert book.metadata.title == "Other" and book.metadata.series == "Saga"  # series from the path, not "Other"
+    assert book.metadata.number == "9" and book.metadata.publisher == "Image"
+
+
+def test_path_tags_without_a_library_root_is_a_note(env, tmp_path):
+    book = CbzBook(_empty_info(tmp_path / "Saga 007.cbz"))
+    entry = _only(_run(env, [book], _path_recipe(env, threshold=0.8)))
+    assert entry.status is FileStatus.UNCHANGED and any("no library root" in n for n in entry.notes)
+    assert book.metadata.series == ""
+
+
+def test_path_tags_outside_the_root_is_a_note(env, tmp_path):
+    _library(tmp_path, env, "Image")
+    (tmp_path / "Elsewhere").mkdir()
+    outside = CbzBook(_empty_info(tmp_path / "Elsewhere" / "Saga 007.cbz"))
+    entry = _only(_run(env, [outside], _path_recipe(env, "%series%/%title% %number%")))
+    assert entry.status is FileStatus.UNCHANGED and any("outside the library root" in n for n in entry.notes)
+    assert outside.metadata.series == ""
+
+
+def test_path_tags_default_pattern_is_the_newest_saved_path_pattern(env, tmp_path):
+    book = _library(tmp_path, env, "Image", "Saga")
+    env.pattern_history = ["%series% %number%", "%publisher%/%series%/%series% %number%", "%series%/%title%"]
+    entry = _only(_run(env, [book], _path_recipe(env, threshold=0.8)))
+    assert entry.status is FileStatus.CHANGED and book.metadata.publisher == "Image"
+    # No saved path pattern at all: the built-in %series%/%title% %number%.
+    env.pattern_history = ["%series% %number%"]
+    second = _library(tmp_path, env, "Saga", name="Saga 008.cbz")
+    _only(_run(env, [second], _path_recipe(env, threshold=0.8)))
+    assert second.metadata.series == "Saga" and second.metadata.number == "8"
+
+
+def test_recipe_round_trip_keeps_the_path_step(env):
+    recipe = _recipe(env, options={"path_tags": {"pattern": "%series%/%series% %number%"}}, disable=("path_tags",))
+    again = recipe_from_setting(recipe_to_setting(recipe))
+    assert again.to_dict() == recipe.to_dict()
+    assert again.options["path_tags"]["pattern"] == "%series%/%series% %number%"
+    assert again.enabled["path_tags"] is False
+    assert "path_tags" not in [s.key for s, _ in again.resolve(run_catalogue(env))]
