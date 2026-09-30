@@ -64,6 +64,7 @@ from redactor_common.gui.manage_list_dialog import ManageListDialog
 from redactor_common.gui.menu_builder import MenuAction, Separator, Submenu, build_menu_bar
 from redactor_common.gui.overwrite_review_dialog import resolve_overwrite_conflicts
 from redactor_common.gui.parse_filename_dialog import ParseFilenameDialog
+from redactor_common.gui.move_runner import run_planned_moves
 from redactor_common.gui.progress import ProgressReporter, run_with_progress
 from redactor_common.gui.redact_dialog import (
     RecipeEditorDialog,
@@ -1617,12 +1618,17 @@ class MainWindow(QMainWindow):
             on_ascii_only_changed=app_settings.save_ascii_filenames,
             zero_pad_initial=app_settings.load_rename_zero_pad(),
             on_zero_pad_changed=app_settings.save_rename_zero_pad,
+            library_root=app_settings.load_library_root(),
+            on_library_root_changed=app_settings.save_library_root,
             parent=self,
         )
         if dialog.exec() != dialog.DialogCode.Accepted:
             return
 
         app_settings.save_pattern_used(dialog.pattern_edit.text())
+        if dialog.is_move_mode():
+            self._move_into_folders(dialog.planned_moves())
+            return
         export_mode = dialog.is_export_mode()
         errors: list[str] = []
         renamed: list[tuple[str, str]] = []
@@ -1652,6 +1658,20 @@ class MainWindow(QMainWindow):
         if errors:
             from redactor_common.core.error_summary import summarize_errors
             QMessageBox.warning(self, "Some Files Failed", summarize_errors(errors))
+        self._update_status()
+
+    def _move_into_folders(self, planned) -> None:
+        """The Rename / Export dialog's "Move into folders" mode: the planned
+        moves run through redactor_common's runner (progress, per-file errors,
+        the tidy-up question) and are recorded as one batch in the rename log,
+        so File > Undo Last Rename puts them back. A cross-volume move sends its
+        original to the Recycle Bin."""
+        summary = run_planned_moves(
+            self, planned, copy=False, rename_log=_rename_log(), label="Move into Folders", trash=move_to_trash,
+        )
+        for book, _old_path, new_path in summary.done:
+            book.path = new_path
+            self._refresh_table_row(self.books.index(book), book)
         self._update_status()
 
     def open_parse_filename_dialog(self) -> None:

@@ -1,5 +1,18 @@
 # Changelog
 
+## 2026-09-30#12 -- Move into folders
+
+- **File > Rename / Export Files** has a third mode, **Move into folders
+  under a library root**. The pattern may contain "/" to make sub-folders
+  (for example `%publisher%/%series%/%series% %number%`); the preview shows
+  each file's new path, and nothing is ever overwritten (a taken name gets
+  "(2)"). The library root is remembered.
+- The moves run with progress and per-file error reporting, and are logged as
+  one batch: **File > Undo Last Rename** moves the files back and offers to
+  remove the folders the move created. Rename and Export work as before.
+- Redact's optional **Move into folders** step uses the same pattern and
+  library root.
+
 ## 2026-09-30#11 -- Redact: one click to convert, clean, fill in and fix
 
 - **Operations > Redact** (Ctrl+Shift+E, also on the toolbar) runs a recipe
