@@ -576,3 +576,29 @@ def load_auto_number_padding() -> int:
 
 def save_auto_number_padding(width: int) -> None:
     _settings().setValue(_AUTO_NUMBER_PADDING_KEY, int(width))
+
+
+# ------------------------------------------------------------------
+# Whole-list writers, used by Import Settings (gui/settings_adapter.py):
+# the per-item add/remove functions above can't express "replace with
+# this list".
+# ------------------------------------------------------------------
+
+def save_pattern_history(history: list[str]) -> None:
+    _settings().setValue(_PATTERN_HISTORY_KEY, pattern_history.encode_history(history[:_MAX_PATTERN_HISTORY]))
+
+
+def save_custom_genres(genres: list[str]) -> None:
+    _save_names(_CUSTOM_GENRES_KEY, genres)
+
+
+def save_hidden_default_genres(genres: list[str]) -> None:
+    _save_names(_HIDDEN_DEFAULT_GENRES_KEY, genres)
+
+
+def save_custom_languages(pairs: list[tuple[str, str]]) -> None:
+    _settings().setValue(_CUSTOM_LANGUAGES_KEY, managed_list.encode_pairs(pairs))
+
+
+def save_hidden_default_language_codes(codes: list[str]) -> None:
+    _save_names(_HIDDEN_DEFAULT_LANGUAGES_KEY, codes)

@@ -131,6 +131,9 @@ from gui.comicvine_lookup_dialog import ComicVineLookupDialog
 from gui.conversion_settings_dialog import ConversionSettingsDialog
 from gui.gcd_lookup_dialog import GcdLookupDialog
 from gui.page_size_scanner import PageSizeScanner
+from gui.settings_adapter import CbzSettingsAdapter
+from redactor_common.gui.settings_bundle_dialogs import export_settings as run_export_settings
+from redactor_common.gui.settings_bundle_dialogs import import_settings as run_import_settings
 from gui.resize_dialog import ResizeImagesDialog
 from gui.metadata_panel import (
     CREDIT_FIELDS,
@@ -467,8 +470,8 @@ class MainWindow(QMainWindow):
             # No explicit shortcut -- Alt+F4 already closes this (or any)
             # plain QMainWindow at the OS level, independent of anything bound here.
             exit_slot=self.close,
-            # Export/Import Settings need a settings adapter this app has not
-            # got yet: they stay greyed (disable, never hide).
+            export_settings=self.export_settings,
+            import_settings=self.import_settings,
         )
         edit_items = standard_edit_items(
             undo=self.undo_last_action,
@@ -711,6 +714,39 @@ class MainWindow(QMainWindow):
             on_toggle=self._on_column_visibility_toggled,
             open_column_settings_dialog=self.open_column_settings_dialog,
         )
+
+    def _settings_adapter(self) -> CbzSettingsAdapter:
+        return CbzSettingsAdapter(APP_VERSION, DEFAULT_HIDDEN_COLUMNS)
+
+    def export_settings(self) -> None:
+        """File > Export Settings...: see gui/settings_adapter.py for what
+        travels (and what never does)."""
+        run_export_settings(self, self._settings_adapter())
+
+    def import_settings(self) -> None:
+        run_import_settings(self, self._settings_adapter(), on_applied=self._on_settings_imported)
+
+    def _on_settings_imported(self, _result=None) -> None:
+        """Re-applies imported column layout live. The recipe, patterns,
+        defaults, conversion and resize settings are read from the settings
+        file each time they are used, and the Genre/Language lists each time
+        a picker opens, so they need nothing here."""
+        header = self.table.horizontalHeader()
+        order = merge_column_order(app_settings.load_column_order(), _ALL_COLUMN_KEYS)
+        for position, key in enumerate(order):
+            current = header.visualIndex(self._col_index[key])
+            if current != position:
+                header.moveSection(current, position)
+        if app_settings.has_hidden_columns_preference():
+            hidden = sanitize_hidden_fields(app_settings.load_hidden_columns(), PROTECTED_COLUMNS)
+        else:
+            hidden = sanitize_hidden_fields(set(DEFAULT_HIDDEN_COLUMNS), PROTECTED_COLUMNS)
+        for key in self._column_keys:
+            self.table.setColumnHidden(self._col_index[key], key in hidden)
+        for key, width in app_settings.load_column_widths().items():
+            if key in self._col_index:
+                header.resizeSection(self._col_index[key], width)
+        self._sync_panel_visible_fields()
 
     def open_column_settings_dialog(self) -> None:
         all_columns = [(key, _COLUMN_LABELS[key]) for key in self._column_keys]

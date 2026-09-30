@@ -1,5 +1,22 @@
 # Changelog
 
+## 2026-09-30#18 -- Export / Import Settings
+
+- **File > Export Settings... / Import Settings...** now work. They save and
+  load one file, `cbzredactor-settings.json`, so a new install or a second
+  computer can pick up your setup. You choose which sections to export, and
+  Import shows what would change before applying anything.
+- **Travels by default:** Redact recipe, Rename / Parse Filename pattern
+  history, rename and numbering defaults (ASCII, zero-pad), column layout
+  (order, visibility, widths), Genre and Language lists, Converting to CBZ
+  settings, Resize Images defaults. Column changes apply at once; the rest is
+  picked up the next time it is used.
+- **This computer only (unticked):** GCD and ComicRack database paths, the
+  library root and the last-used folder.
+- **Never included:** the Comic Vine key and GCD password (nor the GCD
+  username), the unencrypted-secret-file choice, and Known Credit Pages
+  (a file of learned page thumbnails, not plain settings).
+
 ## 2026-09-30#17 -- Save All on Ctrl+S, F1 is free, zoom keys untangled
 
 - **F1 no longer opens About.** F1 is the standard "Help contents" key on every
