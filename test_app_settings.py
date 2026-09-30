@@ -48,3 +48,16 @@ def test_merge_languages_defaults_win_on_code_conflict():
 def test_exclude_hidden_languages():
     defaults = [("en", "English"), ("de", "German")]
     assert _exclude_hidden_languages(defaults, ["de"]) == [("en", "English")]
+
+
+def test_padding_choices_are_remembered(monkeypatch, tmp_path):
+    from gui import app_settings
+
+    monkeypatch.setattr(app_settings, "_settings_ini_path", lambda: str(tmp_path / "s.ini"))
+
+    assert app_settings.load_rename_zero_pad() == (False, 2)
+    app_settings.save_rename_zero_pad(True, 3)
+    assert app_settings.load_rename_zero_pad() == (True, 3)
+    assert app_settings.load_auto_number_padding() == 2
+    app_settings.save_auto_number_padding(4)
+    assert app_settings.load_auto_number_padding() == 4

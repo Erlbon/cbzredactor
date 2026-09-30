@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-09-30#04 -- Zero-padding choices are remembered
+
+- Rename / Export by Pattern remembers the zero-pad checkbox and width,
+  and Auto-Numbering remembers its "Zero-pad to" width, until next time.
+- redactor_common 2026-09-30-01 (from 2026-09-29-05): the shared dialogs
+  that make this possible.
+
 ## 2026-09-30#03 -- Every lookup is in the right-click menu
 
 - Right-clicking a file now has a **Look Up** submenu with Comic Vine,

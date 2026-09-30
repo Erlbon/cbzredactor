@@ -439,3 +439,33 @@ def load_ascii_filenames() -> bool:
 
 def save_ascii_filenames(enabled: bool) -> None:
     _settings().setValue(_ASCII_FILENAMES_KEY, bool(enabled))
+
+
+_ZERO_PAD_ENABLED_KEY = "rename/zero_pad_enabled"
+_ZERO_PAD_WIDTH_KEY = "rename/zero_pad_width"
+_AUTO_NUMBER_PADDING_KEY = "auto_numbering/padding"
+
+
+def load_rename_zero_pad() -> tuple[bool, int]:
+    """Rename/Export by Pattern's zero-pad checkbox and width,
+    remembered between runs (redactor_common's RenamePatternDialog)."""
+    settings = _settings()
+    return (
+        bool(settings.value(_ZERO_PAD_ENABLED_KEY, False, type=bool)),
+        int(settings.value(_ZERO_PAD_WIDTH_KEY, 2, type=int)),
+    )
+
+
+def save_rename_zero_pad(enabled: bool, width: int) -> None:
+    settings = _settings()
+    settings.setValue(_ZERO_PAD_ENABLED_KEY, bool(enabled))
+    settings.setValue(_ZERO_PAD_WIDTH_KEY, int(width))
+
+
+def load_auto_number_padding() -> int:
+    """Auto-Numbering's "Zero-pad to" width, remembered between runs."""
+    return int(_settings().value(_AUTO_NUMBER_PADDING_KEY, 2, type=int))
+
+
+def save_auto_number_padding(width: int) -> None:
+    _settings().setValue(_AUTO_NUMBER_PADDING_KEY, int(width))

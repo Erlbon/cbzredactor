@@ -1575,6 +1575,8 @@ class MainWindow(QMainWindow):
             always_pad_fields={"month": 2},
             ascii_only=app_settings.load_ascii_filenames(),
             on_ascii_only_changed=app_settings.save_ascii_filenames,
+            zero_pad_initial=app_settings.load_rename_zero_pad(),
+            on_zero_pad_changed=app_settings.save_rename_zero_pad,
             parent=self,
         )
         if dialog.exec() != dialog.DialogCode.Accepted:
@@ -1820,7 +1822,10 @@ class MainWindow(QMainWindow):
         dialog = CaseConversionDialog(
             target_books, list(_FIELD_LABELS.items()), get_value,
             lambda book: os.path.basename(book.path),
-            item_noun="file", parent=self,
+            item_noun="file",
+            padding=app_settings.load_auto_number_padding(),
+            on_padding_changed=app_settings.save_auto_number_padding,
+            parent=self,
         )
         if dialog.exec() != dialog.DialogCode.Accepted:
             return
