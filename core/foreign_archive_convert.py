@@ -105,9 +105,17 @@ def convert_to_cbz(source_path: str, output_path: Optional[str] = None) -> str:
 
     if container == CONTAINER_ZIP:
         _verify_cbz(source_path, None)
+        # Copy to a temp name first: a copy cut short (disk full) must
+        # never leave a truncated file under the final .cbz name.
+        tmp_copy = output_path + ".tmp_convert"
         try:
-            shutil.copy2(source_path, output_path)
+            shutil.copy2(source_path, tmp_copy)
+            os.replace(tmp_copy, output_path)
         except OSError as exc:
+            try:
+                os.remove(tmp_copy)
+            except OSError:
+                pass
             raise ForeignArchiveConversionError(f"Could not write CBZ file: {exc}") from exc
         return output_path
 
@@ -145,7 +153,7 @@ def convert_to_cbz(source_path: str, output_path: Optional[str] = None) -> str:
                             zf.writestr(arcname, f.read())
             _verify_cbz(tmp_output, extracted_pages)
             os.replace(tmp_output, output_path)
-        except (OSError, ForeignArchiveConversionError) as exc:
+        except (OSError, zipfile.BadZipFile, ForeignArchiveConversionError) as exc:
             try:
                 os.remove(tmp_output)
             except OSError:
@@ -200,6 +208,10 @@ def _verify_cbz(path: str, expected_pages: Optional[int]) -> None:
         )
 
 
+def _describe(exc: BaseException) -> str:
+    return str(exc) or type(exc).__name__
+
+
 def _extract_cbr(path: str, dest_dir: str) -> None:
     try:
         import rarfile
@@ -218,8 +230,14 @@ def _extract_cbr(path: str, dest_dir: str) -> None:
             "and try again. See the project README's 'Foreign archive "
             "formats' section."
         ) from exc
+    except ForeignArchiveConversionError:
+        raise
     except rarfile.Error as exc:
         raise ForeignArchiveConversionError(f"Could not read CBR file: {exc}") from exc
+    except Exception as exc:
+        # Plain OSError (disk full, an entry name Windows can't hold) and
+        # anything the library doesn't wrap: fail this file, not the batch.
+        raise ForeignArchiveConversionError(f"Could not extract CBR file: {_describe(exc)}") from exc
 
 
 def _extract_cbt(path: str, dest_dir: str) -> None:
@@ -236,9 +254,28 @@ def _extract_cbt(path: str, dest_dir: str) -> None:
             if hasattr(tarfile, "data_filter"):
                 tf.extractall(dest_dir, filter="data")
             else:
-                tf.extractall(dest_dir)
+                _extract_tar_safely(tf, dest_dir)
     except tarfile.TarError as exc:
         raise ForeignArchiveConversionError(f"Could not read CBT file: {exc}") from exc
+    except Exception as exc:
+        raise ForeignArchiveConversionError(f"Could not extract CBT file: {_describe(exc)}") from exc
+
+
+def _extract_tar_safely(tf: tarfile.TarFile, dest_dir: str) -> None:
+    """Stand-in for extractall(filter="data") on Python < 3.12: only
+    regular files and folders whose resolved path stays under dest_dir
+    are extracted; links, devices and "../" or absolute names are
+    skipped (a hostile .cbt could otherwise write anywhere)."""
+    root = os.path.realpath(dest_dir)
+    safe = []
+    for member in tf.getmembers():
+        if not (member.isfile() or member.isdir()):
+            continue
+        target = os.path.realpath(os.path.join(root, member.name))
+        if target != root and not target.startswith(root + os.sep):
+            continue
+        safe.append(member)
+    tf.extractall(dest_dir, members=safe)
 
 
 def _extract_cb7(path: str, dest_dir: str) -> None:
@@ -259,3 +296,6 @@ def _extract_cb7(path: str, dest_dir: str) -> None:
         ) from exc
     except py7zr.exceptions.ArchiveError as exc:
         raise ForeignArchiveConversionError(f"Could not read CB7 file: {exc}") from exc
+    except Exception as exc:
+        # lzma.LZMAError, OSError, ... -- not py7zr's own error classes.
+        raise ForeignArchiveConversionError(f"Could not extract CB7 file: {_describe(exc)}") from exc

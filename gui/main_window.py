@@ -825,6 +825,13 @@ class MainWindow(QMainWindow):
             new_path = convert_to_cbz(source)
         except ForeignArchiveConversionError as exc:
             errors.append(f"{name}: {exc}")
+            if source != path:
+                # Undo the relabel, or the file stays under a name the
+                # table row (still holding `path`) doesn't know.
+                try:
+                    os.rename(source, path)
+                except OSError as rename_exc:
+                    errors.append(f"{name}: could not restore its name from {os.path.basename(source)}: {rename_exc}")
             return None
         if delete_original:
             try:

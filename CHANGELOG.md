@@ -1,5 +1,19 @@
 # Changelog
 
+## 2026-09-30#06 -- Converting foreign archives can't abort the batch
+
+- **A full disk, an entry name Windows can't hold or a corrupt 7-Zip
+  stream now fails just that file** with a message; before, it escaped
+  and stopped the whole conversion run.
+- **A failed Convert no longer leaves a renamed file behind.** A ".cbz"
+  that was really a RAR/7z/tar is renamed to its true extension to be
+  converted; if the conversion fails it is renamed back, so the list row
+  still points at a real file.
+- **CBT extraction on older Python** (before 3.12) skips "../" names,
+  absolute paths and links instead of extracting them anywhere.
+- A ZIP renamed ".cbr" is copied to a temp file first, so a copy cut short
+  never leaves a truncated .cbz.
+
 ## 2026-09-30#05 -- Saving and resizing can't lose a file
 
 - **Save and Resize replace the original atomically** (`os.replace`). They
