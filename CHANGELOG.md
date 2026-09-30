@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026-09-30#16 -- Command palette
+
+- **Ctrl+K** (or View > Command Palette) opens a command palette: type a few
+  letters to find any menu command, see which menu it lives in and its
+  shortcut, and press Enter to run it. Greyed-out commands are listed but
+  cannot be run.
+- A test now checks the whole menu bar against the shared menu rules (heading
+  order, unique mnemonics, no shortcut bound twice, standard shortcuts,
+  canonical labels).
+
 ## 2026-09-30#15 -- New menu layout
 
 - The menus now follow the shared Redactor layout: **File, Edit, View, Metadata,

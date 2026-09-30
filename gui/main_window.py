@@ -59,6 +59,7 @@ from redactor_common.gui.collapsible_splitter import SplitterPaneCollapser
 from redactor_common.gui.colors import DIRTY_COLOR, ERROR_COLOR, HIGHLIGHT_TEXT_COLOR, TABLE_SELECTION_STYLESHEET
 from redactor_common.gui.column_menu import show_column_header_context_menu
 from redactor_common.gui.column_settings_dialog import ColumnSettingsDialog
+from redactor_common.gui.command_palette import add_command_palette
 from redactor_common.gui.context_menu import show_table_context_menu
 from redactor_common.gui.manage_list_dialog import ManageListDialog
 from redactor_common.core import labels
@@ -554,6 +555,7 @@ class MainWindow(QMainWindow):
         build_standard_menu_bar(self, spec)
         registry = get_action_registry(self)
         self.actions_ = {key: registry[key] for key in registry.keys()}
+        add_command_palette(self, registry)  # Ctrl+K / View > Command Palette: every menu action, searchable
         # Keys this file (and its tests) used before the skeleton renamed them.
         for old, new in LEGACY_ACTION_KEYS.items():
             self.actions_[old] = self.actions_[new]
@@ -565,7 +567,6 @@ class MainWindow(QMainWindow):
         # F1 stays on About for now; moved off it in a later commit.
         self.actions_["about"].setShortcut(QKeySequence(shortcuts.HELP))
         self.actions_["show_metadata_panel"].setChecked(True)
-        self.actions_["command_palette"].setEnabled(False)  # wired up in the next step
         self.actions_["apply"].setEnabled(False)
         self.actions_["undo"].setEnabled(False)
         self.actions_["redo"].setEnabled(False)
