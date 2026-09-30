@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-09-30#09 -- Open in Default App
+
+- Right-click menu gains Open in Default App (redactor_common 2026-09-30-04).
+
 ## 2026-09-30#08 -- ComicInfo.xml is parsed more strictly
 
 - A ComicInfo.xml that declares an external entity (a file or network
