@@ -108,7 +108,7 @@ def read_image_size(stream) -> Optional[tuple[int, int]]:
     try:
         with Image.open(stream) as image:
             return image.size
-    except (UnidentifiedImageError, OSError, ValueError, SyntaxError):
+    except (UnidentifiedImageError, OSError, ValueError, SyntaxError, Image.DecompressionBombError):
         return None
 
 

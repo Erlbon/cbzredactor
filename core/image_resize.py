@@ -104,8 +104,10 @@ def resize_page(
     try:
         image = Image.open(io.BytesIO(data))
         image.load()  # force the full decode now, not lazily at save time
-    except (UnidentifiedImageError, OSError, ValueError) as exc:
+    except (UnidentifiedImageError, OSError, ValueError, Image.DecompressionBombError) as exc:
         return ResizeResult(data=data, resized=False, error=str(exc))
+    except Exception as exc:  # a decoder bug on one page must not sink the batch
+        return ResizeResult(data=data, resized=False, error=f"{type(exc).__name__}: {exc}")
 
     width, height = image.size
     spread = is_double_page_spread(width, height)

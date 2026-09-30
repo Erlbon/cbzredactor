@@ -29,7 +29,7 @@ import copy
 import os
 import posixpath
 import re
-import shutil
+import time
 import zipfile
 import zlib
 from concurrent.futures import ThreadPoolExecutor
@@ -53,6 +53,12 @@ _FORMAT_EXTENSION_FAMILY = {"JPEG": (".jpg", ".jpeg"), "WEBP": (".webp",)}
 # counted as a page.
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp"}
 COMICINFO_NAME = "ComicInfo.xml"
+
+# What zipfile/zlib raise for a bad archive or entry. RuntimeError is an
+# encrypted entry, NotImplementedError a compression method zipfile has
+# no codec for, ValueError a malformed header/name -- none is an OSError,
+# so all of them used to escape past the CbzError the GUI catches.
+_ZIP_ERRORS = (zipfile.BadZipFile, KeyError, OSError, zlib.error, RuntimeError, NotImplementedError, ValueError)
 
 
 class CbzError(Exception):
@@ -89,6 +95,62 @@ def page_sort_key(name: str) -> list:
     Plain text sorting put "10" before "2", and real archives number
     pages unpadded (seen 2026-09-29: "1.webp", "2.webp", "10.webp")."""
     return [int(part) if part.isdigit() else part.casefold() for part in _DIGITS_RE.split(name)]
+
+
+_REPLACE_ATTEMPTS = 5
+_REPLACE_DELAY = 0.1  # seconds between attempts
+
+
+def _replace(tmp_path: str, path: str) -> None:
+    """os.replace, retried briefly on PermissionError: on Windows another
+    reader holding the file open for a moment (the app's own cover and
+    page-size scans, a virus scanner) fails the rename, where the old
+    shutil.move silently fell back to copying over it."""
+    for attempt in range(_REPLACE_ATTEMPTS):
+        try:
+            os.replace(tmp_path, path)
+            return
+        except PermissionError:
+            if attempt == _REPLACE_ATTEMPTS - 1:
+                raise
+            time.sleep(_REPLACE_DELAY)
+
+
+class _ReplaceFailedAfterDispose(OSError):
+    """The original was already sent to the Recycle Bin when the rewritten
+    file failed to replace it; the rewrite is still at `tmp_path`."""
+
+    def __init__(self, tmp_path: str, cause: BaseException):
+        super().__init__(
+            f"the original is in the Recycle Bin and the rewritten copy was kept at "
+            f"{tmp_path} ({describe_save_error(cause)})"
+        )
+        self.tmp_path = tmp_path
+
+
+def _dispose_then_replace(dispose_original, tmp_path: str, path: str) -> None:
+    """`dispose_original(path)` (Recycle Bin) then os.replace(tmp, path).
+    If the replace fails after the original is gone, the temp file is the
+    only full copy: it is kept, and the error names it."""
+    if dispose_original is not None:
+        dispose_original(path)
+    try:
+        _replace(tmp_path, path)
+    except OSError as exc:
+        if dispose_original is not None and not os.path.exists(path):
+            raise _ReplaceFailedAfterDispose(tmp_path, exc) from exc
+        raise
+
+
+def _discard_temp(exc: BaseException, tmp_path: str) -> None:
+    """Removes a rewriter's temp file after a failure -- except when it
+    holds the only remaining copy (see _ReplaceFailedAfterDispose)."""
+    if isinstance(exc, _ReplaceFailedAfterDispose):
+        return
+    try:
+        os.remove(tmp_path)
+    except OSError:
+        pass
 
 
 def _is_image(name: str) -> bool:
@@ -229,7 +291,7 @@ class CbzBook:
                     self.metadata = parse_comicinfo_xml(zf.read(self.comicinfo_name))
                 else:
                     self.metadata = ComicInfoMetadata()
-        except (zipfile.BadZipFile, KeyError, OSError, zlib.error) as exc:
+        except _ZIP_ERRORS as exc:
             self.load_error = str(exc)
         except ComicInfoError as exc:
             # A malformed ComicInfo.xml shouldn't sink the whole file --
@@ -252,7 +314,7 @@ class CbzBook:
         try:
             with zipfile.ZipFile(self.path, "r") as zf:
                 return zf.read(self.first_page_name)
-        except (zipfile.BadZipFile, KeyError, OSError, zlib.error):
+        except _ZIP_ERRORS:
             return None
 
     @property
@@ -313,8 +375,15 @@ class CbzBook:
                         new_info.external_attr = info.external_attr
                         dst.writestr(new_info, src.read(name))
                     dst.writestr(write_name, new_xml_bytes)
-            shutil.move(tmp_path, target)
-        except (zipfile.BadZipFile, KeyError, OSError, zlib.error) as exc:
+            # os.replace (via _replace), not shutil.move: move() falls back to copy +
+            # delete when the rename fails (Windows, file held open),
+            # which overwrites the original in place -- not atomic.
+            _replace(tmp_path, target)
+        except _ZIP_ERRORS as exc:
+            try:
+                os.remove(tmp_path)
+            except OSError:
+                pass
             # describe_save_error() recognizes Windows' path-too-long
             # limit specifically -- worth knowing here since tmp_path
             # (target + ".tmp_write") is 10 characters longer than the
@@ -384,15 +453,10 @@ class CbzBook:
                     new_info.compress_type = info.compress_type
                     new_info.external_attr = info.external_attr
                     dst.writestr(new_info, src.read(info.filename))
-            if dispose_original is not None:
-                dispose_original(self.path)
-            os.replace(tmp_path, self.path)
+            _dispose_then_replace(dispose_original, tmp_path, self.path)
         except Exception as exc:
-            try:
-                os.remove(tmp_path)
-            except OSError:
-                pass
-            if isinstance(exc, (zipfile.BadZipFile, KeyError, OSError, zlib.error)):
+            _discard_temp(exc, tmp_path)
+            if isinstance(exc, _ZIP_ERRORS):
                 raise CbzError(f"Could not remove pages: {describe_save_error(exc)}") from exc
             raise
 
@@ -448,15 +512,10 @@ class CbzBook:
                     new_info.compress_type = info.compress_type
                     new_info.external_attr = info.external_attr
                     dst.writestr(new_info, src.read(name))
-            if dispose_original is not None:
-                dispose_original(self.path)
-            os.replace(tmp_path, self.path)
+            _dispose_then_replace(dispose_original, tmp_path, self.path)
         except Exception as exc:
-            try:
-                os.remove(tmp_path)
-            except OSError:
-                pass
-            if isinstance(exc, (zipfile.BadZipFile, KeyError, OSError, zlib.error)):
+            _discard_temp(exc, tmp_path)
+            if isinstance(exc, _ZIP_ERRORS):
                 raise CbzError(f"Could not clean up the archive: {describe_save_error(exc)}") from exc
             raise
 
@@ -533,6 +592,7 @@ class CbzBook:
                 convertible = _renamable_pages(names, output_format)
 
                 with zipfile.ZipFile(tmp_path, "w") as dst, ThreadPoolExecutor(max_workers=workers) as pool:
+                    dst.comment = src.comment
                     window = workers * 2
                     done = 0
                     for start in range(0, len(names), window):
@@ -574,19 +634,17 @@ class CbzBook:
                             done += 1
                             if progress is not None:
                                 progress(done, len(names))
-            shutil.move(tmp_path, target)
-        except ResizeCancelled:
+            _replace(tmp_path, target)
+        except BaseException as exc:
+            # Any failure (including Pillow's DecompressionBombError or a
+            # worker's unexpected exception) must not leave the temp behind.
             try:
                 os.remove(tmp_path)
             except OSError:
                 pass
+            if isinstance(exc, _ZIP_ERRORS) and not isinstance(exc, ResizeCancelled):
+                raise CbzError(f"Could not resize CBZ file: {describe_save_error(exc)}") from exc
             raise
-        except (zipfile.BadZipFile, KeyError, OSError, zlib.error) as exc:
-            try:
-                os.remove(tmp_path)
-            except OSError:
-                pass
-            raise CbzError(f"Could not resize CBZ file: {describe_save_error(exc)}") from exc
 
         if output_path is None or output_path == self.path:
             self.path = target

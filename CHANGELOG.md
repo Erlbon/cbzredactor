@@ -1,5 +1,21 @@
 # Changelog
 
+## 2026-09-30#05 -- Saving and resizing can't lose a file
+
+- **Save and Resize replace the original atomically** (`os.replace`). They
+  used to fall back to copy-over-the-original when the rename failed.
+- **Temp files are cleaned up on every failure**, including Save (which
+  left `.tmp_write` behind). An encrypted entry, an unsupported compression
+  method or a malformed header is now a normal "could not save" message,
+  not an unhandled error.
+- **Resize reports a decompression-bomb image as a failed page** and keeps
+  the rest of the book going; Resize also keeps the archive comment.
+  The Size column no longer gets stuck blank on such a page.
+- **Remove Pages / Clean Up**: if the Recycle Bin step succeeded but the
+  new file could not be put in place, the rewritten copy is kept and the
+  message says where it is.
+- redactor_common 2026-09-30-02 (from 2026-09-30-01).
+
 ## 2026-09-30#04 -- Zero-padding choices are remembered
 
 - Rename / Export by Pattern remembers the zero-pad checkbox and width,

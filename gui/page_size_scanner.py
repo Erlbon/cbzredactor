@@ -15,8 +15,6 @@ scan_now() for the rest instead, under a progress dialog.
 
 from __future__ import annotations
 
-import zipfile
-import zlib
 from typing import Optional
 
 from PyQt6.QtCore import QObject, QRunnable, QThreadPool, pyqtSignal
@@ -28,7 +26,7 @@ from redactor_common.gui.async_icon_cache import IdentityWeakDict
 def _scan(path: str, page_names: list[str]) -> PageSizeStats:
     try:
         return scan_page_sizes(path, page_names)
-    except (OSError, zipfile.BadZipFile, zlib.error):
+    except Exception:  # anything else would leave _in_flight set: the row never re-measured
         return PageSizeStats(unreadable=len(page_names))
 
 
