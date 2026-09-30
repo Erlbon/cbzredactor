@@ -22,7 +22,7 @@ import shutil
 import threading
 
 from PyQt6.QtCore import QSize, Qt, QTimer
-from PyQt6.QtGui import QColor, QIcon, QImage
+from PyQt6.QtGui import QColor, QIcon, QImage, QKeySequence
 from PyQt6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
@@ -61,7 +61,8 @@ from redactor_common.gui.column_menu import show_column_header_context_menu
 from redactor_common.gui.column_settings_dialog import ColumnSettingsDialog
 from redactor_common.gui.context_menu import show_table_context_menu
 from redactor_common.gui.manage_list_dialog import ManageListDialog
-from redactor_common.gui.menu_builder import MenuAction, Separator, Submenu, build_menu_bar
+from redactor_common.core import labels
+from redactor_common.gui.menu_builder import MenuAction, Separator, Submenu
 from redactor_common.gui.overwrite_review_dialog import resolve_overwrite_conflicts
 from redactor_common.gui.parse_filename_dialog import ParseFilenameDialog
 from redactor_common.gui.move_runner import run_planned_moves
@@ -69,8 +70,6 @@ from redactor_common.gui.progress import ProgressReporter, run_with_progress
 from redactor_common.gui.redact_dialog import (
     RecipeEditorDialog,
     RedactResultsDialog,
-    edit_recipe_menu_action,
-    redact_menu_action,
 )
 from redactor_common.gui.redact_dialog import run_redact as run_redact_dialog
 from redactor_common.core.rename_log import RenameLog
@@ -80,6 +79,19 @@ from redactor_common.gui.rename_pattern_dialog import RenamePatternDialog
 from redactor_common.gui.rename_single_file import rename_single_file as prompt_rename_single_file
 from redactor_common.gui.search_replace_dialog import FILENAME_FIELD_KEY, SearchReplaceDialog
 from redactor_common.gui import standard_shortcuts as shortcuts
+from redactor_common.gui.standard_menus import (
+    AppMenu,
+    StandardMenuSpec,
+    build_standard_menu_bar,
+    get_action_registry,
+    look_up_submenu,
+    set_apply_count,
+    standard_edit_items,
+    standard_file_items,
+    standard_help_items,
+    standard_tools_items,
+    standard_view_items,
+)
 from redactor_common.gui.zoom_toolbar import TableZoomController
 from redactor_common.core.version import REDACTOR_COMMON_REPO_URL, REDACTOR_COMMON_VERSION
 
@@ -273,6 +285,19 @@ RESIZE_PROGRESS_THRESHOLD = 1
 # width, leaving the toggle button stuck unable to expand it back.
 PANEL_COLLAPSED_WIDTH = 70
 
+# Action keys this file used before the menu skeleton renamed them, kept as
+# aliases in MainWindow.actions_ so existing callers and tests keep working.
+LEGACY_ACTION_KEYS = {
+    "load_files": "open_files",
+    "load_folder": "open_folder",
+    "remove_files": "remove_from_list",
+    "rename_files": "rename_export_move",
+    "apply_bulk_edit": "apply",
+    "case_conversion": "change_case",
+    "auto_numbering": "auto_number",
+    "save_all_changed": "save_all",
+}
+
 # Table cover thumbnails (page 1, in the Filename cell) -- same size as
 # epubredactor's table covers.
 COVER_ICON_SIZE = QSize(24, 32)
@@ -419,121 +444,129 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
 
     def _build_menu(self) -> None:
-        specs = {
-            "File": [
-                MenuAction("load_files", "&Load Files...", self.load_files_dialog, shortcut=shortcuts.LOAD_FILES),
-                MenuAction(
-                    "load_folder", "Load &Folder...", self.load_folder_dialog, shortcut=shortcuts.LOAD_FOLDER
-                ),
-                Separator(),
-                MenuAction("save", "&Save", self.save_current, shortcut=shortcuts.SAVE),
-                MenuAction("save_as", "Save &As...", self.save_current_as, shortcut=shortcuts.SAVE_AS),
-                Separator(),
-                # Quick, direct rename of the one selected file -- matches
-                # Explorer's F2 exactly. Distinct from "rename_files"
-                # below (the pattern-based batch tool, moved off F2 to
-                # make room for this): see rename_selected_file().
-                MenuAction(
-                    "rename_file", "&Rename File...", self.rename_selected_file,
-                    shortcut=shortcuts.RENAME_SINGLE_FILE,
-                ),
-                MenuAction("undo_rename", "&Undo Last Rename...", self.undo_last_rename),
-                MenuAction(
-                    "rename_files", "Rename / &Export Files...", self.open_rename_dialog,
-                    shortcut=shortcuts.RENAME_EXPORT_BY_PATTERN,
-                ),
-                Separator(),
-                MenuAction("remove_files", "Remo&ve Files", self.remove_selected, shortcut=shortcuts.REMOVE_FROM_LIST),
-                Separator(),
-                MenuAction("refresh_list", "Re&fresh List", self.refresh_list, shortcuts=shortcuts.REFRESH_LIST),
-                MenuAction("clear_list", "&Clear List", self.clear_list),
-                Separator(),
-                # No explicit shortcut -- Alt+F4 already closes this (or
-                # any) plain QMainWindow at the OS level, verified
-                # directly (launch, send Alt+F4, confirm the process
-                # exits), independent of anything bound here.
-                MenuAction("exit", "E&xit", self.close),
-            ],
-            "Import": [
-                MenuAction(
-                    "parse_filename", "&Parse Filename...", self.open_parse_filename_dialog,
-                    shortcut=shortcuts.PARSE_FILENAME_TO_METADATA,
-                ),
-                MenuAction("read_filename_tags", "Read Filename &Tags", self.read_filename_tags),
-                MenuAction("convert_foreign", "Convert to CB&Z...", self.convert_foreign_archives_dialog),
-                Separator(),
-                MenuAction("comicvine_lookup", "Look Up via Comic &Vine...", self.open_comicvine_lookup_dialog),
-                MenuAction("gcd_lookup", "Look Up via &Grand Comics Database...", self.open_gcd_lookup_dialog),
-                MenuAction(
-                    "gcd_local_lookup", "Look Up via GCD (&Local Database)...", self.open_gcd_local_lookup_dialog
-                ),
-                MenuAction(
-                    "comicrack_lookup", "Look Up via Comic&Rack Library...", self.open_comicrack_lookup_dialog
-                ),
-                MenuAction("compare_with_gcd", "Compare ComicRack Library &with GCD...", self.compare_library_with_gcd),
-                MenuAction("bedetheque_lookup", "Look Up via &Bedetheque...", self.open_bedetheque_lookup_dialog),
-            ],
-            "Operations": [
-                # Shared with the toolbar (see _build_toolbar) -- one
-                # QAction instance, so its dynamic "Apply to N selected
-                # file(s)" text and enabled state never drift out of
-                # sync between the two places it appears.
-                MenuAction("apply_bulk_edit", "&Apply to 0 Selected File(s)", self._apply_bulk_edit),
-                Separator(),
-                # One click: the recipe's conversion/cleanup/lookup/fix steps on the
-                # selected files (or all loaded, if none selected), saved in place with
-                # each original in the Recycle Bin. See redact_files().
-                redact_menu_action(self.redact_files, text="Re&dact"),
-                edit_recipe_menu_action(self.edit_redact_recipe, text="Edit Redact Reci&pe..."),
-                Separator(),
-                MenuAction(
-                    "search_replace", "&Search/Replace...", self.open_search_replace_dialog,
-                    shortcut=shortcuts.SEARCH_REPLACE,
-                ),
-                MenuAction("case_conversion", "&Case Conversion...", self.open_case_conversion_dialog),
-                MenuAction("auto_numbering", "Auto-&Numbering...", self.open_auto_numbering_dialog),
-                MenuAction("validate", "&Validate / Fix Issues...", self.open_validate_fix_dialog),
-                Separator(),
-                MenuAction("resize_images", "Resi&ze Images...", self.open_resize_images_dialog),
-                MenuAction("tag_low_res", "&Tag Low-Res Scans", self.tag_low_res_scans),
-                MenuAction("remove_credit_pages", "Remove Credit &Pages...", self.open_remove_credit_pages_dialog),
-                MenuAction("clean_contents", "Clean Up Archive C&ontents...", self.open_clean_contents_dialog),
-                MenuAction("find_duplicates", "Find &Duplicates...", self.open_find_duplicates_dialog),
-                Separator(),
-                MenuAction("save_all", "Save &All Changed", self.save_all_changed, shortcut=shortcuts.SAVE_ALL),
-                Separator(),
-                MenuAction("undo", "&Undo", self.undo_last_action, shortcut=shortcuts.UNDO),
-                MenuAction("redo", "&Redo", self.redo_last_action, shortcut=shortcuts.REDO),
-            ],
-            "Settings": [
-                MenuAction("comicvine_api_key", "Comic Vine API &Key...", self.change_comicvine_api_key),
-                MenuAction("known_credit_pages", "Known C&redit Pages...", self.open_known_credit_pages_dialog),
-                MenuAction("gcd_account", "&GCD Account...", self.open_gcd_account_dialog),
-                MenuAction("gcd_local_settings", "GCD &Local Database...", self.open_gcd_local_settings_dialog),
-                MenuAction(
-                    "comicrack_settings", "Comic&Rack Library Database...", self.open_comicrack_settings_dialog
-                ),
-                MenuAction("conversion_settings", "Converting to CB&Z...", self.open_conversion_settings_dialog),
-                Separator(),
-                MenuAction("column_settings", "Add/Remove &Columns...", self.open_column_settings_dialog),
-                MenuAction("genre_settings", "Add/Remove &Genres...", self.open_genre_settings_dialog),
-                MenuAction("language_settings", "Add/Remove &Languages...", self.open_language_settings_dialog),
-            ],
-            "Help": [
-                MenuAction("about", f"&About {APP_NAME}", self.open_about_dialog, shortcut=shortcuts.HELP),
-                MenuAction("changelog", "View &Changelog", self.open_changelog_dialog),
-                MenuAction("credits", "View C&redits", self.open_credits_dialog),
-            ],
-        }
-        # Not a key in `specs`: build_menu_bar() only builds the five
-        # standard menus from it, and before redactor_common 2026-09-29#05
-        # silently dropped any other key -- which hid this whole menu.
-        collection = [
-            MenuAction("scan_collection", "&Scan Collection Folder...", self.scan_collection_folder),
-            MenuAction("collection_report", "Collection &Report...", self.open_collection_report),
+        """The shared menu skeleton (redactor_common's gui/standard_menus.py):
+        File, Edit, View, Metadata, Repair, Tools, Help. The shared actions
+        come from the standard_*_items() helpers with their canonical labels
+        and shortcuts; Metadata and Repair are this app's own menus, and the
+        former Collection menu is a submenu of Tools (whole-library, cbz-only)."""
+        # Quick, direct rename of the one selected file -- matches Explorer's
+        # F2 exactly. Distinct from Rename / Export / Move (the pattern-based
+        # batch tool): see rename_selected_file().
+        file_items = standard_file_items(
+            open_files=self.load_files_dialog,
+            open_folder=self.load_folder_dialog,
+            save=self.save_current,
+            save_as=self.save_current_as,
+            save_all=self.save_all_changed,
+            rename_file=self.rename_selected_file,
+            undo_last_rename=self.undo_last_rename,
+            rename_export_move=self.open_rename_dialog,
+            remove_from_list=self.remove_selected,
+            clear_list=self.clear_list,
+            # No explicit shortcut -- Alt+F4 already closes this (or any)
+            # plain QMainWindow at the OS level, independent of anything bound here.
+            exit_slot=self.close,
+            # Export/Import Settings need a settings adapter this app has not
+            # got yet: they stay greyed (disable, never hide).
+        )
+        edit_items = standard_edit_items(
+            undo=self.undo_last_action,
+            redo=self.redo_last_action,
+            apply=self._apply_bulk_edit,
+            # One click: the recipe's conversion/cleanup/lookup/fix steps on the
+            # selected files (or all loaded, if none selected), saved in place with
+            # each original in the Recycle Bin. See redact_files().
+            redact=self.redact_files,
+            edit_redact_recipe=self.edit_redact_recipe,
+            search_replace=self.open_search_replace_dialog,
+            change_case=self.open_case_conversion_dialog,
+            auto_number=self.open_auto_numbering_dialog,
+        )
+        view_items = standard_view_items(
+            show_metadata_panel=self._set_panel_shown,
+            zoom_in=self.zoom.zoom_in,
+            zoom_out=self.zoom.zoom_out,
+            reset_zoom=self.zoom.zoom_reset,
+            refresh_list=self.refresh_list,
+        )
+        metadata_items = [
+            MenuAction(
+                "parse_filename", labels.PARSE_FILENAME, self.open_parse_filename_dialog,
+                shortcut=shortcuts.PARSE_FILENAME,
+            ),
+            MenuAction("read_filename_tags", "Read Filename &Tags", self.read_filename_tags),
+            Separator(),
+            look_up_submenu([
+                MenuAction("comicvine_lookup", "Comic &Vine…", self.open_comicvine_lookup_dialog),
+                MenuAction("gcd_lookup", "&Grand Comics Database…", self.open_gcd_lookup_dialog),
+                MenuAction("gcd_local_lookup", "GCD &Local Database…", self.open_gcd_local_lookup_dialog),
+                MenuAction("comicrack_lookup", "Comic&Rack Library…", self.open_comicrack_lookup_dialog),
+                MenuAction("bedetheque_lookup", "&Bedetheque…", self.open_bedetheque_lookup_dialog),
+            ]),
+            Separator(),
+            # Act on the current selection (enabled by _update_selection_actions);
+            # the right-click menu reuses these same two actions.
+            MenuAction("credit_pages", "&Credit Pages…", self._credit_pages_for_selection, enabled=False),
+            MenuAction("number_issues", "&Number Issues…", self._number_issues_for_selection, enabled=False),
         ]
-        self.actions_ = build_menu_bar(self, specs, extra_menus=[("Collection", 3, collection)])
-        self.actions_["apply_bulk_edit"].setEnabled(False)
+        repair_items = [
+            MenuAction("validate", labels.VALIDATE_AND_FIX, self.open_validate_fix_dialog),
+            MenuAction("resize_images", "Resi&ze Images…", self.open_resize_images_dialog),
+            MenuAction("tag_low_res", "&Tag Low-Res Scans", self.tag_low_res_scans),
+            MenuAction("remove_credit_pages", "Remove Credit &Pages…", self.open_remove_credit_pages_dialog),
+            MenuAction("clean_contents", "Clean Up Archive C&ontents…", self.open_clean_contents_dialog),
+            MenuAction("convert_foreign", "Convert to &CBZ…", self.convert_foreign_archives_dialog),
+            Separator(),
+            MenuAction("find_duplicates", labels.FIND_DUPLICATES, self.open_find_duplicates_dialog),
+        ]
+        tools_items = standard_tools_items(
+            api_keys=self.open_api_keys_dialog,
+            app_settings=[
+                Separator(),
+                MenuAction("known_credit_pages", "Known Credit &Pages…", self.open_known_credit_pages_dialog),
+                MenuAction("conversion_settings", "Conversion &Settings…", self.open_conversion_settings_dialog),
+                Separator(),
+                MenuAction("gcd_local_settings", "GCD &Local Database…", self.open_gcd_local_settings_dialog),
+                MenuAction(
+                    "comicrack_settings", "Comic&Rack Library Database…", self.open_comicrack_settings_dialog
+                ),
+                Separator(),
+                # Whole-library concept (cbz only), so a submenu here rather
+                # than a top-level menu of its own.
+                Submenu("C&ollection", [
+                    MenuAction("scan_collection", "&Scan Collection Folder…", self.scan_collection_folder),
+                    MenuAction("collection_report", "Collection &Report…", self.open_collection_report),
+                    MenuAction("compare_with_gcd", "&Compare Library with GCD…", self.compare_library_with_gcd),
+                ]),
+            ],
+            columns=self.open_column_settings_dialog,
+            genres=self.open_genre_settings_dialog,
+            languages=self.open_language_settings_dialog,
+        )
+        help_items = standard_help_items(
+            APP_NAME, self.open_changelog_dialog, self.open_credits_dialog, self.open_about_dialog
+        )
+        spec = StandardMenuSpec(
+            file=file_items, edit=edit_items, view=view_items,
+            app_menus=[AppMenu(labels.MENU_METADATA, metadata_items), AppMenu(labels.MENU_REPAIR, repair_items)],
+            tools=tools_items, help=help_items,
+        )
+        build_standard_menu_bar(self, spec)
+        registry = get_action_registry(self)
+        self.actions_ = {key: registry[key] for key in registry.keys()}
+        # Keys this file (and its tests) used before the skeleton renamed them.
+        for old, new in LEGACY_ACTION_KEYS.items():
+            self.actions_[old] = self.actions_[new]
+        # The zoom toolbar's own StandardKey-bound actions own Ctrl++ / Ctrl+-:
+        # the same keys on these menu items would be ambiguous (Qt then fires
+        # neither). Reset Zoom keeps Ctrl+0.
+        self.actions_["zoom_in"].setShortcuts([])
+        self.actions_["zoom_out"].setShortcuts([])
+        # F1 stays on About for now; moved off it in a later commit.
+        self.actions_["about"].setShortcut(QKeySequence(shortcuts.HELP))
+        self.actions_["show_metadata_panel"].setChecked(True)
+        self.actions_["command_palette"].setEnabled(False)  # wired up in the next step
+        self.actions_["apply"].setEnabled(False)
         self.actions_["undo"].setEnabled(False)
         self.actions_["redo"].setEnabled(False)
 
@@ -549,13 +582,18 @@ class MainWindow(QMainWindow):
         toolbar = self.addToolBar("Main")
         toolbar.setMovable(False)
 
-        toolbar.addAction(self.actions_["load_files"])
-        toolbar.addAction(self.actions_["load_folder"])
+        toolbar.addAction(self.actions_["open_files"])
+        toolbar.addAction(self.actions_["open_folder"])
         toolbar.addSeparator()
         toolbar.addAction(self.actions_["save"])
+        toolbar.addAction(self.actions_["save_all"])
         toolbar.addSeparator()
-        toolbar.addAction(self.actions_["apply_bulk_edit"])
+        toolbar.addAction(self.actions_["apply"])
         toolbar.addAction(self.actions_["redact"])
+        # Redact is the headline action: bold so it stands out from the plain buttons.
+        redact_button = toolbar.widgetForAction(self.actions_["redact"])
+        if redact_button is not None:
+            redact_button.setStyleSheet("font-weight: bold;")
         toolbar.addSeparator()
         toolbar.addAction(self.actions_["undo"])
         toolbar.addAction(self.actions_["redo"])
@@ -685,13 +723,34 @@ class MainWindow(QMainWindow):
         # Selection-fix, and the generic Open Containing Folder/Copy
         # Path actions, are handled by the shared helper.
         def extra_items(_books: list[CbzBook]) -> list:
+            items: list = [Separator()]
+            # Reuses the actual menu-bar QActions (same objects) rather than
+            # building fresh ones, so text, shortcut hints and enabled state
+            # can never drift out of sync with the menus.
+            # Rename File (F2) only for exactly one book with no load error --
+            # rename_selected_file() has the same guard.
+            if len(self._selected_rows) == 1 and not self.books[self._selected_rows[0]].load_error:
+                items.extend([self.actions_["rename_file"], Separator()])
+            # Every per-file lookup, so none of them needs a trip to the menu
+            # bar. "Compare Library with GCD" is a whole-library report, not a
+            # lookup on the selection, so it stays in the menu bar only.
+            items.append(look_up_submenu([
+                self.actions_[key] for key in (
+                    "comicvine_lookup", "gcd_lookup", "gcd_local_lookup",
+                    "comicrack_lookup", "bedetheque_lookup",
+                )
+            ]))
+            organize: list = [self.actions_["rename_export_move"]]
+            if self._editable_selected_rows():
+                organize.append(self.actions_["number_issues"])
+            if len(self._selected_rows) == 1 and self._editable_selected_rows():
+                organize.append(self.actions_["credit_pages"])
+            items.append(Submenu("&Organize", organize))
+            items.append(Separator())
             # Deliberately checks self._selected_rows directly, not the
-            # `_books` param (get_selected_items=self._target_books,
-            # which falls back to "every loaded book" when nothing's
-            # selected) -- both actions below only make sense against a
-            # genuine selection, not "there happens to be only N books
-            # loaded total".
-            items: list = []
+            # `_books` param (get_selected_items=self._target_books, which
+            # falls back to "every loaded book" when nothing's selected) --
+            # Convert only makes sense against a genuine selection.
             selected_unconverted = [
                 self.books[r] for r in self._selected_rows if self.books[r].needs_conversion
             ]
@@ -700,36 +759,8 @@ class MainWindow(QMainWindow):
                     "convert_selected", f"Convert {len(selected_unconverted)} File(s) to CBZ",
                     lambda: self.convert_books_to_cbz(selected_unconverted),
                 ))
-            # Reuses the actual File-menu QAction (F2) rather than
-            # building a fresh one -- same object, so this shows the
-            # real shortcut hint and can never drift out of sync with
-            # it. Its own enabled guard (exactly one book selected, no
-            # load error) is rename_selected_file()'s job, not this
-            # menu's -- see there for why this is distinct from
-            # "Rename / Export Files..." (the pattern-based batch tool).
-            if len(self._selected_rows) == 1 and not self.books[self._selected_rows[0]].load_error:
-                items.append(self.actions_["rename_file"])
-            if len(self._selected_rows) == 1 and self._editable_selected_rows():
-                one = self.books[self._selected_rows[0]]
-                items.append(MenuAction("credit_pages", "Credit Pages...", lambda: self.open_credit_pages_dialog(one)))
-            if self._editable_selected_rows():
-                selected_books = [self.books[r] for r in self._editable_selected_rows()]
-                items.append(MenuAction(
-                    "number_issues", "Number Issues...", lambda: self._quick_number_issues(selected_books)
-                ))
-            # Every per-file lookup from the Tools menu, so none of them
-            # needs a trip to the menu bar. Reuses the real QActions
-            # (same as rename_file above) so text and enabled state
-            # can't drift. "Compare ComicRack Library with GCD" is a
-            # whole-library report, not a lookup on the selection, so
-            # it stays in the menu bar only.
-            items.append(Submenu("Look Up", [
-                self.actions_[key] for key in (
-                    "comicvine_lookup", "gcd_lookup", "gcd_local_lookup",
-                    "comicrack_lookup", "bedetheque_lookup",
-                )
-            ]))
-            items.insert(0, Separator())
+            items.append(self.actions_["redact"])
+            items.extend([Separator(), self.actions_["remove_from_list"]])
             return items
 
         show_table_context_menu(
@@ -801,7 +832,7 @@ class MainWindow(QMainWindow):
         options_layout.setContentsMargins(0, 0, 0, 0)
         delete_checkbox = QCheckBox("Move the originals to the Recycle Bin after a successful conversion")
         delete_checkbox.setChecked(app_settings.load_recycle_originals())
-        remember_checkbox = QCheckBox("Remember my choice (change it in Settings > Converting to CBZ...)")
+        remember_checkbox = QCheckBox("Remember my choice (change it in Tools > Conversion Settings...)")
         remember_checkbox.setToolTip("Remembers Convert Now or Add Unconverted; Skip is never remembered.")
         options_layout.addWidget(delete_checkbox)
         options_layout.addWidget(remember_checkbox)
@@ -829,7 +860,7 @@ class MainWindow(QMainWindow):
 
     def _resolve_foreign_choice(self, paths: list[str]) -> tuple[str, bool]:
         """What _load_paths() does with files needing conversion, per
-        Settings > Converting to CBZ...: list them unconverted (the
+        Tools > Conversion Settings...: list them unconverted (the
         default), convert them without asking, or ask."""
         behavior = app_settings.load_foreign_load_behavior()
         if behavior == app_settings.FOREIGN_LOAD_ASK:
@@ -1004,7 +1035,7 @@ class MainWindow(QMainWindow):
             item.setText(f"{len(matches)} pages")
         item.setToolTip("Known scanner credit page(s):\n" + "\n".join(
             f"page {m.index + 1}: {m.name}" for m in matches
-        ) + "\n\nOperations > Remove Credit Pages... removes them.")
+        ) + "\n\nRepair > Remove Credit Pages... removes them.")
         item.setBackground(CREDIT_PAGE_COLOR)
         item.setForeground(HIGHLIGHT_TEXT_COLOR)
 
@@ -1082,6 +1113,7 @@ class MainWindow(QMainWindow):
         self._commit_current_edits()
         self._selected_rows = sorted(index.row() for index in self.table.selectionModel().selectedRows())
         editable_rows = self._editable_selected_rows()
+        self._update_selection_actions()
 
         if not editable_rows:
             # Nothing selected, or only rows waiting for Convert to CBZ
@@ -1116,10 +1148,26 @@ class MainWindow(QMainWindow):
             if row < len(self.books) and not self.books[row].needs_conversion
         ]
 
+    def _update_selection_actions(self) -> None:
+        """Enables Metadata > Credit Pages (exactly one editable file) and
+        Number Issues (any editable selection) to match the selection."""
+        editable = self._editable_selected_rows()
+        self.actions_["credit_pages"].setEnabled(len(self._selected_rows) == 1 and len(editable) == 1)
+        self.actions_["number_issues"].setEnabled(bool(editable))
+
+    def _credit_pages_for_selection(self) -> None:
+        if len(self._selected_rows) == 1 and self._editable_selected_rows():
+            self.open_credit_pages_dialog(self.books[self._selected_rows[0]])
+
+    def _number_issues_for_selection(self) -> None:
+        rows = self._editable_selected_rows()
+        if rows:
+            self._quick_number_issues([self.books[r] for r in rows])
+
     def _update_apply_bulk_edit_action(self) -> None:
         count = len(self._editable_selected_rows()) if self.panel.bulk_mode else 0
-        self.actions_["apply_bulk_edit"].setText(f"&Apply to {count} Selected File(s)")
-        self.actions_["apply_bulk_edit"].setEnabled(self.panel.bulk_mode)
+        set_apply_count(self.actions_["apply"], count)
+        self.actions_["apply"].setEnabled(self.panel.bulk_mode)
 
     def _commit_current_edits(self) -> None:
         """Writes the panel's current widget values back into whichever
@@ -1170,7 +1218,17 @@ class MainWindow(QMainWindow):
 
     def _toggle_panel(self) -> None:
         self._panel_collapser.toggle()
-        self.panel.collapse_toggle_btn.set_collapsed(self._panel_collapser.is_collapsed())
+        collapsed = self._panel_collapser.is_collapsed()
+        self.panel.collapse_toggle_btn.set_collapsed(collapsed)
+        # Keep View > Show Metadata Panel's tick in step, whichever control was used.
+        shown = self.actions_.get("show_metadata_panel")
+        if shown is not None:
+            shown.setChecked(not collapsed)
+
+    def _set_panel_shown(self, shown: bool = True) -> None:
+        """View > Show Metadata Panel: the same collapse/restore as the toolbar's Panel button."""
+        if self._panel_collapser.is_collapsed() == shown:
+            self._toggle_panel()
 
     # ------------------------------------------------------------------
     # Undo -- in-memory metadata/dirty-flag edits only (bulk edits,
@@ -1959,7 +2017,7 @@ class MainWindow(QMainWindow):
         Number field). For anything beyond the plain "start here, count
         up by one" case on Number specifically -- a different field, a
         different step, or a look at what's changing before it does --
-        use Operations -> Auto-Numbering... instead."""
+        use Edit > Auto-Number... instead."""
         values = prompt_and_generate_series_numbers(self, len(books), field_label="Starting Number")
         if values is None:
             return
@@ -2224,7 +2282,7 @@ class MainWindow(QMainWindow):
         self._refresh_all_credit_cells()
 
     def open_remove_credit_pages_dialog(self) -> None:
-        """Operations > Remove Credit Pages...: finds every learned credit
+        """Repair > Remove Credit Pages...: finds every learned credit
         page in the selected files (or all), for review, then removes the
         ticked ones."""
         from gui.credit_pages_dialogs import RemoveCreditPagesDialog
@@ -3068,7 +3126,7 @@ class MainWindow(QMainWindow):
             f"Convert {len(books)} file(s) to CBZ?\n\n"
             "Each converted file is checked (it opens, and has as many pages "
             f"as the original) before anything else happens. {originals}\n\n"
-            "(Change this in Settings > Converting to CBZ...)",
+            "(Change this in Tools > Conversion Settings...)",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.Yes,
         )
@@ -3094,7 +3152,7 @@ class MainWindow(QMainWindow):
             "GCD Local Database", app_settings.load_gcd_local_database, self.open_gcd_local_settings_dialog,
             "No local GCD database is set up yet. It's a free download from the "
             "Grand Comics Database (you need a comics.org account).\n\n"
-            "Open Settings > GCD Local Database... for instructions?",
+            "Open Tools > GCD Local Database... for instructions?",
         )
 
     def compare_library_with_gcd(self) -> None:
@@ -3106,7 +3164,7 @@ class MainWindow(QMainWindow):
         self._open_local_lookup(
             "ComicRack Library Database", app_settings.load_comicrack_database, self.open_comicrack_settings_dialog,
             "No ComicRack library has been converted yet -- it's built from ComicRack's "
-            "ComicDb.xml file.\n\nOpen Settings > ComicRack Library Database... to build it?",
+            "ComicDb.xml file.\n\nOpen Tools > ComicRack Library Database... to build it?",
         )
 
     def _open_local_lookup(self, name: str, load_path, open_settings, not_set_up: str) -> None:
@@ -3131,7 +3189,7 @@ class MainWindow(QMainWindow):
         try:
             database = open_database(path)
         except GcdLocalError as exc:
-            QMessageBox.warning(self, name, f"{exc}\n\nCheck Settings > {name}...")
+            QMessageBox.warning(self, name, f"{exc}\n\nCheck Tools > {name}...")
             return
         self._run_lookup_dialog(
             GcdLocalLookupDialog, f"{name} lookup",
@@ -3272,6 +3330,12 @@ class MainWindow(QMainWindow):
             )
             return
         self._run_lookup_dialog(BedethequeLookupDialog, "Bedetheque lookup")
+
+    def open_api_keys_dialog(self) -> None:
+        """Tools > API Keys...: the Comic Vine key and the GCD account in one dialog."""
+        from gui.api_keys_dialog import ApiKeysDialog
+
+        ApiKeysDialog(self).exec()
 
     def change_comicvine_api_key(self) -> None:
         from gui.comicvine_key_dialog import ComicVineKeyDialog

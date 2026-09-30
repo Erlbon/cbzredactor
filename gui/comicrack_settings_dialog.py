@@ -49,7 +49,7 @@ def _check(path: str) -> str:
         if not db.is_comicrack:
             raise GcdLocalError(
                 "This is a GCD dump, not a converted ComicRack library -- set it under "
-                "Settings > GCD Local Database... instead."
+                "Tools > GCD Local Database... instead."
             )
     finally:
         db.close()

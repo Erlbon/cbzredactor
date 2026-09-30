@@ -218,7 +218,7 @@ def test_flow_explains_what_is_missing(monkeypatch):
     shown = []
     monkeypatch.setattr(flow.QMessageBox, "information", lambda *a: shown.append(a[2]))
     assert flow.compare_library_with_gcd(None) is None
-    assert "ComicRack Library Database and Settings > GCD Local Database" in shown[0]
+    assert "ComicRack Library Database and Tools > GCD Local Database" in shown[0]
 
 
 def test_flow_compares_and_writes_csvs(tmp_path, monkeypatch):

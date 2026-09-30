@@ -90,7 +90,7 @@ RATE_LIMIT_MESSAGE = (
 )
 AUTH_MESSAGE = (
     "The Grand Comics Database didn't accept your username/password -- check "
-    "Settings > GCD Account..."
+    "Tools > API Keys..."
 )
 
 
@@ -187,7 +187,7 @@ def make_gcd_fetch(username: str = "", password: str = "", timeout: float = 30.0
             return base_fetch(request)
         except urllib.error.HTTPError as exc:
             if exc.code == 429:
-                hint = "" if auth_header else ", or add a free GCD account in Settings > GCD Account... for a higher limit"
+                hint = "" if auth_header else ", or add a free GCD account in Tools > API Keys... for a higher limit"
                 raise GcdRateLimitError(f"{RATE_LIMIT_MESSAGE}{hint}.") from exc
             if exc.code in (401, 403) and auth_header:
                 raise GcdAuthError(AUTH_MESSAGE) from exc

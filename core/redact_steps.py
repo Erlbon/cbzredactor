@@ -384,7 +384,7 @@ class CleanContentsStep(Step):
     label = "Clean up archive contents"
     description = (
         "Removes junk inside the archive (Thumbs.db, desktop.ini, .DS_Store, __MACOSX, release-group .nfo/.sfv/"
-        ".url/.txt files) and, as Operations > Clean Up Archive Contents does, gives the pages plain numbered "
+        ".url/.txt files) and, as Repair > Clean Up Archive Contents does, gives the pages plain numbered "
         "names out of any folders. Page bytes, order and ComicInfo.xml content are unchanged."
     )
 
@@ -414,7 +414,7 @@ class RemoveCreditPagesStep(Step):
     label = "Remove known credit pages"
     default_enabled = False  # destructive
     description = (
-        "Finds pages that match a scanner credit page you taught the app (Settings > Known Credit Pages / right-click "
+        "Finds pages that match a scanner credit page you taught the app (Tools > Known Credit Pages / right-click "
         "> Credit Pages...). Removing a page can't be undone except from the Recycle Bin copy, so it is only a "
         "suggestion: applied when the page fingerprint matches at or above the confidence threshold (an identical "
         "page is 99%, each step of difference costs 2%), otherwise listed under Needs review. Off by default."
@@ -451,7 +451,7 @@ class ResizeImagesStep(Step):
     label = "Resize oversized page images"
     default_enabled = False  # lossy
     description = (
-        "Shrinks page images wider than the limit (double-page spreads get twice the width), as Operations > "
+        "Shrinks page images wider than the limit (double-page spreads get twice the width), as Repair > "
         "Resize Images does. This re-encodes the pixels: the original is only recoverable from the Recycle "
         "Bin. A book with no oversized page is left untouched. Off by default."
     )
@@ -744,7 +744,7 @@ class ValidateFixStep(Step):
     key = "validate_fix"
     label = "Fix ComicInfo issues"
     description = (
-        "Applies every fixable problem Operations > Validate / Fix Issues finds: stray spaces, scene tags or an "
+        "Applies every fixable problem Repair > Validate and Fix finds: stray spaces, scene tags or an "
         "extension left in Series/Title, '#' or leading zeros in Number, an implausible Year/Month/Day cleared, "
         "a wrong PageCount, LanguageISO written as 'en-US'. Issues that have no automatic fix are left for you."
     )
@@ -766,7 +766,7 @@ class TagLowResStep(Step):
     label = "Tag low-res scans"
     description = (
         f'Adds the "{LOW_RES_TAG}" tag to a book whose pages are under 1000px wide, and removes it from one '
-        "that no longer is (as Operations > Tag Low-Res Scans does). Other tags are kept."
+        "that no longer is (as Repair > Tag Low-Res Scans does). Other tags are kept."
     )
 
     def run(self, ctx: CbzCtx) -> StepResult:

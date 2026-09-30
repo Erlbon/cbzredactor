@@ -1,5 +1,37 @@
 # Changelog
 
+## 2026-09-30#15 -- New menu layout
+
+- The menus now follow the shared Redactor layout: **File, Edit, View, Metadata,
+  Repair, Tools, Help**. The keyboard shortcuts are unchanged, only the places
+  in the menus moved.
+- **Load Files / Load Folder** are now **Open Files / Open Folder**. **Save All
+  Changed** is **Save All** (File). **Remove Files** is **Remove from List**.
+  **Rename / Export Files** is **Rename / Export / Move** (it still holds the
+  Move into folders mode). **Search/Replace**, **Case Conversion** and
+  **Auto-Numbering** are now **Search and Replace**, **Change Case** and
+  **Auto-Number**, in Edit next to Undo, Redo, Apply to N Selected and Redact.
+- **Refresh List** moved from File to View. View also gets **Show Metadata
+  Panel** and **Zoom In / Zoom Out / Reset Zoom** (Ctrl+0).
+- **Metadata** holds Parse Filename, Read Filename Tags, a **Look Up** submenu
+  (Comic Vine, Grand Comics Database, GCD Local Database, ComicRack Library,
+  Bedetheque) and, new as menu entries, **Credit Pages** and **Number Issues**.
+- **Repair** holds Validate and Fix, Resize Images, Tag Low-Res Scans, Remove
+  Credit Pages, Clean Up Archive Contents, Convert to CBZ and Find Duplicates.
+- **Tools** holds everything that used to be under Settings, plus a
+  **Collection** submenu (Scan Collection Folder, Collection Report and Compare
+  Library with GCD, which were the Collection menu and Import). There is no
+  Collection menu, Import menu, Operations menu or Settings menu any more.
+- **API Keys** is one dialog for the Comic Vine key and the GCD account.
+  Converting to CBZ settings is now **Conversion Settings**.
+- The toolbar is Open Files, Open Folder | Save, Save All | Apply | **Redact**
+  (bold) | Undo, Redo | Panel, zoom. The right-click menu is shorter: Rename
+  File, Look Up, a new **Organize** submenu (Rename / Export / Move, Number
+  Issues, Credit Pages), Convert to CBZ, Redact and **Remove from List**.
+- Export Settings and Import Settings appear in File, greyed out until this
+  app has settings to export.
+- Needs redactor_common 2026-09-30-13.
+
 ## 2026-09-30#14 -- Redact keeps the patterns it was saved with
 
 - The Redact recipe editor now shows a **pattern trail** for the four pattern

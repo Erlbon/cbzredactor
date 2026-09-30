@@ -35,7 +35,7 @@ def compare_library_with_gcd(parent: Optional[QWidget]) -> Optional[str]:
         QMessageBox.information(
             parent, TITLE,
             "This compares your converted ComicRack library with your local copy of the GCD, "
-            f"so both need setting up first -- see Settings > {' and Settings > '.join(missing)}.",
+            f"so both need setting up first -- see Tools > {' and Tools > '.join(missing)}.",
         )
         return None
     suggested = os.path.join(os.path.dirname(library), "comicrack_vs_gcd.db")

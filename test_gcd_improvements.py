@@ -131,7 +131,7 @@ def test_429_becomes_a_rate_limit_error_suggesting_an_account(monkeypatch):
         raise _http_error(429)
 
     _patched_base(monkeypatch, refuse)
-    with pytest.raises(GcdRateLimitError, match="GCD Account"):
+    with pytest.raises(GcdRateLimitError, match="API Keys"):
         make_gcd_fetch()("https://www.comics.org/api/x")
 
 

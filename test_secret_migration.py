@@ -181,3 +181,38 @@ def test_dialog_declining_fallback_saves_nothing(unavailable, monkeypatch, tmp_i
     assert app_settings.load_allow_unencrypted_fallback() is False
     assert app_settings.load_comicvine_api_key() == ""
     assert dialog.result() == 0  # still open, not accepted
+
+
+# -- the merged Tools > API Keys... dialog -------------------------------------
+
+def test_api_keys_dialog_saves_both_sections(fake_keyring, tmp_ini):
+    from gui.api_keys_dialog import ApiKeysDialog
+
+    dialog = ApiKeysDialog()
+    dialog.key_field.edit.setText("typed-key")
+    dialog.username_edit.setText("me")
+    dialog.password_field.edit.setText("hunter2")
+    dialog.accept()
+    assert app_settings.load_comicvine_api_key() == "typed-key"
+    assert app_settings.load_gcd_account() == ("me", "hunter2")
+    text = _ini_text(tmp_ini)
+    assert "typed-key" not in text and "hunter2" not in text
+
+
+def test_api_keys_dialog_empty_boxes_keep_stored_values(fake_keyring):
+    from gui.api_keys_dialog import ApiKeysDialog
+
+    app_settings.save_comicvine_api_key("kept-key")
+    app_settings.save_gcd_account("me", "kept")
+    ApiKeysDialog().accept()
+    assert app_settings.load_comicvine_api_key() == "kept-key"
+    assert app_settings.load_gcd_account() == ("me", "kept")
+
+
+def test_api_keys_dialog_remove_account(fake_keyring):
+    from gui.api_keys_dialog import ApiKeysDialog
+
+    app_settings.save_gcd_account("me", "pw")
+    dialog = ApiKeysDialog()
+    dialog._remove_account()
+    assert app_settings.load_gcd_account() == ("", "")

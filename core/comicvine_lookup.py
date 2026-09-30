@@ -375,7 +375,7 @@ def search_comicvine(
     """
     if not (api_key or "").strip():
         raise ComicVineLookupError(
-            "No Comic Vine API key set -- add one via Settings > Comic Vine API Key..."
+            "No Comic Vine API key set -- add one via Tools > API Keys..."
         )
     fetch = fetch or _default_fetch
     url = build_search_url(api_key, series, number, max_results)
