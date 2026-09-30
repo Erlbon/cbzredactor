@@ -18,7 +18,12 @@ from redactor_common.gui.app_bootstrap import run_app
 
 
 def _window():
+    from gui import app_settings
     from gui.main_window import MainWindow
+
+    # Move a pre-secret-store Comic Vine key / GCD password out of the
+    # ini file (no-op once done, or while no secure store exists).
+    app_settings.migrate_legacy_secrets()
 
     return MainWindow()
 

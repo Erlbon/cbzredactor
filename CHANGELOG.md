@@ -1,5 +1,20 @@
 # Changelog
 
+## 2026-09-30#10 -- Comic Vine key and GCD password move to secure storage
+
+- **The Comic Vine API key and the GCD password are now kept in the
+  Windows Credential Manager** (macOS Keychain / Linux keyring on those
+  systems) instead of the settings file, where they sat as plain text
+  and as an easily reversed scramble.
+- **Existing keys are moved automatically** at startup and removed from
+  the settings file once the secure copy is confirmed. If no secure
+  store is available the old value is left in place and keeps working.
+- The Comic Vine key and GCD account dialogs use a masked field that
+  never shows the stored value (empty = keep it, Remove to delete).
+- Where there is no secure store, the app asks whether it may use an
+  unencrypted file in your user folder instead, and remembers a yes.
+- redactor_common 2026-09-30-07; new dependency: keyring.
+
 ## 2026-09-30#09 -- Open in Default App
 
 - Right-click menu gains Open in Default App (redactor_common 2026-09-30-04).

@@ -42,7 +42,7 @@ from __future__ import annotations
 
 import os
 
-from PyQt6.QtWidgets import QInputDialog, QLineEdit, QPushButton
+from PyQt6.QtWidgets import QPushButton
 
 from redactor_common.gui.lookup_dialog import LookupAlternative, LookupDialogBase, LookupResult
 
@@ -108,16 +108,10 @@ class ComicVineLookupDialog(LookupDialogBase):
 
     @staticmethod
     def _prompt_for_key_value(parent, current: str) -> str:
-        text, ok = QInputDialog.getText(
-            parent,
-            "Comic Vine API Key",
-            "Enter your Comic Vine API key (free -- register at comicvine.gamespot.com/api/):",
-            QLineEdit.EchoMode.Normal,
-            current,
-        )
-        if ok:
-            app_settings.save_comicvine_api_key(text)
-            return text.strip()
+        from gui.comicvine_key_dialog import ComicVineKeyDialog
+
+        if ComicVineKeyDialog(parent).exec():
+            return app_settings.load_comicvine_api_key()
         return current
 
     def _change_key(self) -> None:

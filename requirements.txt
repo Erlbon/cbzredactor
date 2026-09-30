@@ -35,10 +35,15 @@ py7zr>=1.0
 # was chosen over (Playwright), accepted deliberately.
 cloudscraper>=1.2
 
+# OS credential store for the Comic Vine key / GCD password
+# (redactor_common's secret_store; optional there -- without it the app
+# offers an unencrypted fallback file instead).
+keyring>=25.0
+
 # Shared UI/core code with the epub, mp3, and video Redactor tools -- a
 # real pip dependency (github.com/Erlbon/redactor_common), not a
 # vendored copy. Pinned to a tag, not @main -- see that repo's README
 # ("Releasing a new version") for how to bump this pin deliberately
 # when it changes, rather than floating and having one bad push there
 # break this project's next install.
-redactor_common @ git+https://github.com/Erlbon/redactor_common.git@2026-09-30-04
+redactor_common @ git+https://github.com/Erlbon/redactor_common.git@2026-09-30-07

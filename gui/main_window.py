@@ -3101,16 +3101,9 @@ class MainWindow(QMainWindow):
         self._run_lookup_dialog(BedethequeLookupDialog, "Bedetheque lookup")
 
     def change_comicvine_api_key(self) -> None:
-        current = app_settings.load_comicvine_api_key()
-        text, ok = QInputDialog.getText(
-            self,
-            "Comic Vine API Key",
-            "Enter your Comic Vine API key (free -- register at comicvine.gamespot.com/api/):",
-            QLineEdit.EchoMode.Normal,
-            current,
-        )
-        if ok:
-            app_settings.save_comicvine_api_key(text)
+        from gui.comicvine_key_dialog import ComicVineKeyDialog
+
+        ComicVineKeyDialog(self).exec()
 
     # ------------------------------------------------------------------
     # Settings menu: Genres / Languages

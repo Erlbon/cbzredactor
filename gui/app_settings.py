@@ -2,9 +2,11 @@
 gui/app_settings.py
 
 Thin wrapper around QSettings for the things this app needs to
-remember across runs: the user's Comic Vine API key, table column
+remember across runs: table column
 order/widths/visibility, rename/parse-filename pattern history, and
-custom Genre/Language quick-pick entries. Stored in a plain .ini file
+custom Genre/Language quick-pick entries. (Secrets -- the Comic Vine
+key, the GCD password -- are NOT kept here; see the secret store
+section below.) Stored in a plain .ini file
 next to the executable (or, in dev mode, at the project root) -- not
 the Windows registry, since a plain file is easier to back up, copy to
 a new machine, or inspect directly. Same approach as epubredactor's
@@ -23,10 +25,15 @@ import os
 from core.app_paths import base_dir
 from core.comic_genres import COMMON_COMIC_GENRES
 from core.comic_languages import DEFAULT_LANGUAGES
-from redactor_common.core import managed_list, pattern_history
+from redactor_common.core import managed_list, pattern_history, secret_store
 
 _SETTINGS_FILENAME = "cbzredactor_settings.ini"
-_COMICVINE_API_KEY = "comicvine/api_key"
+_COMICVINE_API_KEY = "comicvine/api_key"  # legacy plaintext; read for migration only
+
+# Secret store names are PERMANENT (they are the OS credential entries).
+SECRET_APP = "cbzredactor"
+COMICVINE_SECRET = "comicvine_api_key"
+GCD_SECRET = "gcd_password"
 _LAST_DIR_KEY = "files/last_directory"
 
 _PATTERN_HISTORY_KEY = "patterns/history"
@@ -63,26 +70,44 @@ def _settings():
     return QSettings(_settings_ini_path(), QSettings.Format.IniFormat)
 
 
-def load_comicvine_api_key() -> str:
+def _legacy_comicvine_api_key() -> str:
     return str(_settings().value(_COMICVINE_API_KEY, ""))
 
 
-def save_comicvine_api_key(api_key: str) -> None:
+def clear_legacy_comicvine_api_key() -> None:
     settings = _settings()
-    settings.setValue(_COMICVINE_API_KEY, api_key.strip())
+    settings.remove(_COMICVINE_API_KEY)
     settings.sync()
+
+
+def load_comicvine_api_key() -> str:
+    # `legacy` keeps an install that hasn't migrated yet (keyring
+    # unavailable, or migrate_legacy_secrets() not run) working.
+    return secret_store.get_secret(
+        SECRET_APP, COMICVINE_SECRET, legacy=_legacy_comicvine_api_key
+    ).strip()
+
+
+def save_comicvine_api_key(api_key: str, allow_unencrypted_fallback: bool | None = None) -> None:
+    """Raises SecretStoreUnavailable when there is no secure store and
+    the unencrypted fallback isn't allowed; the old ini value is then
+    left alone. A blank key removes it."""
+    api_key = api_key.strip()
+    if api_key:
+        secret_store.set_secret(SECRET_APP, COMICVINE_SECRET, api_key, allow_unencrypted_fallback)
+    else:
+        secret_store.delete_secret(SECRET_APP, COMICVINE_SECRET)
+    clear_legacy_comicvine_api_key()
 
 
 # ------------------------------------------------------------------
 # GCD account (Settings > GCD Account...) -- optional; GCD's API gives
 # a logged-in account a higher hourly limit than anonymous access.
 #
-# The password is stored SCRAMBLED, not encrypted: GCD's login is HTTP
-# Basic auth, which needs the real password on every request, so it
-# can't be hashed. Scrambling only keeps it from being readable at a
-# glance in this per-install settings file (a comics-database login,
-# by the user's own call "hardly top secret") -- anyone with the file
-# and this source can reverse it.
+# The username is not a secret and stays in the ini. The password lives
+# in redactor_common's secret store (OS credential store, or the opt-in
+# unencrypted file). The old XOR-scrambled ini value is only ever READ,
+# to migrate it (see migrate_legacy_secrets()).
 # ------------------------------------------------------------------
 
 _GCD_USERNAME_KEY = "gcd/username"
@@ -91,13 +116,8 @@ _SCRAMBLE_PREFIX = "s1:"
 _SCRAMBLE_KEY = b"cbzredactor-gcd"
 
 
-def scramble(text: str) -> str:
-    data = text.encode("utf-8")
-    mixed = bytes(b ^ _SCRAMBLE_KEY[i % len(_SCRAMBLE_KEY)] for i, b in enumerate(data))
-    return _SCRAMBLE_PREFIX + base64.urlsafe_b64encode(mixed).decode("ascii")
-
-
 def unscramble(stored: str) -> str:
+    """Decode the old scrambled ini password; legacy migration only."""
     if not stored.startswith(_SCRAMBLE_PREFIX):
         return ""
     try:
@@ -108,25 +128,90 @@ def unscramble(stored: str) -> str:
     return data.decode("utf-8", errors="replace")
 
 
+def _legacy_gcd_password() -> str:
+    return unscramble(str(_settings().value(_GCD_PASSWORD_KEY, "")))
+
+
+def clear_legacy_gcd_password() -> None:
+    settings = _settings()
+    settings.remove(_GCD_PASSWORD_KEY)
+    settings.sync()
+
+
+def load_gcd_username() -> str:
+    return str(_settings().value(_GCD_USERNAME_KEY, "")).strip()
+
+
+def load_gcd_password() -> str:
+    return secret_store.get_secret(SECRET_APP, GCD_SECRET, legacy=_legacy_gcd_password)
+
+
 def load_gcd_account() -> tuple[str, str]:
     """(username, password); ("", "") when none is set."""
-    settings = _settings()
-    username = str(settings.value(_GCD_USERNAME_KEY, ""))
-    password = unscramble(str(settings.value(_GCD_PASSWORD_KEY, "")))
+    username = load_gcd_username()
+    password = load_gcd_password()
     return (username, password) if username and password else ("", "")
 
 
-def save_gcd_account(username: str, password: str) -> None:
-    """Blank username or password removes the account."""
+def save_gcd_username(username: str) -> None:
     settings = _settings()
     username = username.strip()
-    if username and password:
+    if username:
         settings.setValue(_GCD_USERNAME_KEY, username)
-        settings.setValue(_GCD_PASSWORD_KEY, scramble(password))
     else:
         settings.remove(_GCD_USERNAME_KEY)
-        settings.remove(_GCD_PASSWORD_KEY)
     settings.sync()
+
+
+def save_gcd_password(password: str, allow_unencrypted_fallback: bool | None = None) -> None:
+    """Raises SecretStoreUnavailable (see save_comicvine_api_key)."""
+    if password:
+        secret_store.set_secret(SECRET_APP, GCD_SECRET, password, allow_unencrypted_fallback)
+    else:
+        secret_store.delete_secret(SECRET_APP, GCD_SECRET)
+    clear_legacy_gcd_password()
+
+
+def save_gcd_account(username: str, password: str, allow_unencrypted_fallback: bool | None = None) -> None:
+    """Blank username or password removes the account."""
+    username = username.strip()
+    if username and password:
+        save_gcd_password(password, allow_unencrypted_fallback)
+        save_gcd_username(username)
+    else:
+        save_gcd_password("")
+        save_gcd_username("")
+
+
+# ------------------------------------------------------------------
+# Secret store plumbing
+# ------------------------------------------------------------------
+
+_ALLOW_UNENCRYPTED_KEY = "secrets/allow_unencrypted_fallback"
+
+
+def load_allow_unencrypted_fallback() -> bool:
+    return bool(_settings().value(_ALLOW_UNENCRYPTED_KEY, False, type=bool))
+
+
+def save_allow_unencrypted_fallback(enabled: bool) -> None:
+    settings = _settings()
+    settings.setValue(_ALLOW_UNENCRYPTED_KEY, bool(enabled))
+    settings.sync()
+
+
+def migrate_legacy_secrets() -> None:
+    """Startup: apply the remembered fallback choice, then move the old
+    ini values into the secret store. A value is cleared from the ini
+    only after the store read it back; with no usable store it stays
+    (and keeps working through get_secret's `legacy`)."""
+    secret_store.set_allow_unencrypted_fallback(load_allow_unencrypted_fallback())
+    secret_store.migrate_legacy_secret(
+        SECRET_APP, COMICVINE_SECRET, _legacy_comicvine_api_key, clear_legacy_comicvine_api_key
+    )
+    secret_store.migrate_legacy_secret(
+        SECRET_APP, GCD_SECRET, _legacy_gcd_password, clear_legacy_gcd_password
+    )
 
 
 def credit_pages_path() -> str:

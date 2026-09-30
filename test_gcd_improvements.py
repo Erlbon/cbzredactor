@@ -174,13 +174,15 @@ def test_dialog_skips_remaining_files_after_the_rate_limit(tmp_path, monkeypatch
 
 
 # ---------------------------------------------------------------------------
-# Settings: scrambled password
+# Settings: legacy scrambled password (read-only, for migration)
 # ---------------------------------------------------------------------------
 
-def test_password_scramble_round_trips_and_is_not_plain():
-    from gui.app_settings import scramble, unscramble
+def test_unscramble_reads_legacy_value_and_rejects_garbage():
+    import base64
 
-    stored = scramble("s3cret pässword")
-    assert "s3cret" not in stored
-    assert unscramble(stored) == "s3cret pässword"
+    from gui.app_settings import _SCRAMBLE_KEY, unscramble
+
+    data = "s3cret pässword".encode("utf-8")
+    mixed = bytes(b ^ _SCRAMBLE_KEY[i % len(_SCRAMBLE_KEY)] for i, b in enumerate(data))
+    assert unscramble("s1:" + base64.urlsafe_b64encode(mixed).decode("ascii")) == "s3cret pässword"
     assert unscramble("garbage") == ""
