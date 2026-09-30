@@ -129,3 +129,19 @@ def test_v21_draft_fields_sit_at_correct_schema_positions():
     assert order.index("Translator") < order.index("Genre") < order.index("Tags")
     assert order.index("StoryArc") < order.index("StoryArcNumber") < order.index("SeriesGroup")
     assert order.index("Review") < order.index("GTIN")  # GTIN is always last
+
+
+def test_external_entities_are_not_resolved(tmp_path):
+    secret = tmp_path / "secret.txt"
+    secret.write_text("TOPSECRET")
+    xml = (
+        f'<?xml version="1.0"?><!DOCTYPE ComicInfo [<!ENTITY x SYSTEM "{secret.as_uri()}">]>'
+        "<ComicInfo><Title>&x;</Title></ComicInfo>"
+    ).encode()
+    assert "TOPSECRET" not in parse_comicinfo_xml(xml).title
+
+
+def test_non_numeric_int_field_round_trips_as_written():
+    metadata = ComicInfoMetadata(number="12a", year="n/a")
+    parsed = parse_comicinfo_xml(serialize_comicinfo_xml(metadata))
+    assert (parsed.number, parsed.year) == ("12a", "n/a")

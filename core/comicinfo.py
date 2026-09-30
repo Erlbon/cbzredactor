@@ -202,7 +202,7 @@ def parse_comicinfo_xml(data: bytes) -> ComicInfoMetadata:
     the caller decides how to surface that (core/cbz_file.py treats it
     as a load error for that one file, not a crash)."""
     try:
-        root = etree.fromstring(data, parser=etree.XMLParser(remove_blank_text=False))
+        root = etree.fromstring(data, parser=etree.XMLParser(remove_blank_text=False, resolve_entities=False, no_network=True))
     except etree.XMLSyntaxError as exc:
         raise ComicInfoError(f"Malformed ComicInfo.xml: {exc}") from exc
 
@@ -246,13 +246,10 @@ def serialize_comicinfo_xml(metadata: ComicInfoMetadata) -> bytes:
             value = (value or "").strip()
             if not value:
                 continue
-            if tag in INT_FIELDS and not value.lstrip("-").isdigit():
-                # A non-numeric value in an int field (typically hand-
-                # edited or carried over from a malformed source file)
-                # is written as-is rather than silently dropped --
-                # letting it round-trip is safer than guessing at a
-                # "corrected" number.
-                pass
+            # A non-numeric value in an int field (typically hand-edited
+            # or carried over from a malformed source file) is written
+            # as-is rather than silently dropped -- letting it round-trip
+            # is safer than guessing at a "corrected" number.
             etree.SubElement(root, tag).text = value
 
     _add_fields(FIELD_ORDER_BEFORE_EXTRAS)

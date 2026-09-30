@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026-09-30#08 -- ComicInfo.xml is parsed more strictly
+
+- A ComicInfo.xml that declares an external entity (a file or network
+  reference) is no longer expanded while reading; it is ignored.
+
 ## 2026-09-30#07 -- Saving several files and exporting show progress
 
 - **Save with several files selected** now shows a progress dialog (with
