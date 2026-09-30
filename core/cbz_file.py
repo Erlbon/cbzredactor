@@ -59,6 +59,11 @@ class CbzError(Exception):
     """Raised for a problem reading or writing a CBZ file."""
 
 
+class ResizeCancelled(CbzError):
+    """resize_images()'s `should_cancel` fired; the temp file was removed
+    and the source left untouched."""
+
+
 @dataclass
 class ResizeSummary:
     """What CbzBook.resize_images() actually did -- shown to the user
@@ -472,6 +477,8 @@ class CbzBook:
         max_height: Optional[int] = None,
         output_format: Optional[str] = None,
         workers: Optional[int] = None,
+        progress: Optional[Callable[[int, int], None]] = None,
+        should_cancel: Optional[Callable[[], bool]] = None,
     ) -> ResizeSummary:
         """Rewrites every page image down to `max_width` (see
         core/image_resize.py for the double-page-spread doubling rule),
@@ -490,6 +497,12 @@ class CbzBook:
         releases the GIL while it works), a bounded window at a time so
         a huge book is never held in memory all at once. Output order
         always matches the source's.
+
+        `progress(done, total)` is called after each entry is written
+        (safe to call from a worker thread: this method touches no GUI).
+        `should_cancel()` is polled between chunks; when true the temp
+        file is removed, the source is left as it was and ResizeCancelled
+        is raised.
 
         Unlike save() and everything else in this module, this DOES
         re-encode pixel data -- the one deliberate exception to "images
@@ -521,7 +534,10 @@ class CbzBook:
 
                 with zipfile.ZipFile(tmp_path, "w") as dst, ThreadPoolExecutor(max_workers=workers) as pool:
                     window = workers * 2
+                    done = 0
                     for start in range(0, len(names), window):
+                        if should_cancel is not None and should_cancel():
+                            raise ResizeCancelled("Resize cancelled")
                         chunk = names[start:start + window]
                         pending = []
                         for name in chunk:
@@ -555,7 +571,16 @@ class CbzBook:
                             new_info.compress_type = info.compress_type
                             new_info.external_attr = info.external_attr
                             dst.writestr(new_info, data_to_write)
+                            done += 1
+                            if progress is not None:
+                                progress(done, len(names))
             shutil.move(tmp_path, target)
+        except ResizeCancelled:
+            try:
+                os.remove(tmp_path)
+            except OSError:
+                pass
+            raise
         except (zipfile.BadZipFile, KeyError, OSError, zlib.error) as exc:
             try:
                 os.remove(tmp_path)

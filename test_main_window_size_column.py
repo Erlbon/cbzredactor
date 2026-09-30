@@ -94,3 +94,33 @@ def test_resize_in_place_forgets_the_old_measurement(window, tmp_path):
     after = window._ensure_page_sizes([book])[id(book)]
     assert after.representative_width == 1440
     assert after.category == SIZE_OK
+
+
+def test_resize_images_runs_off_thread_and_updates_rows(window, tmp_path, monkeypatch):
+    import gui.main_window as mw
+    from PyQt6.QtWidgets import QMessageBox
+
+    paths = [_cbz(tmp_path / f"{n}.cbz", 1500, 2200, pages=4) for n in "ab"]
+    window._load_paths(paths)
+    window.table.selectAll()
+
+    class FakeDialog:
+        DialogCode = mw.ResizeImagesDialog.DialogCode
+        def __init__(self, *a, **k): pass
+        def exec(self): return self.DialogCode.Accepted
+        def max_width(self): return 1000
+        def max_height(self): return None
+        def output_format(self): return None
+        def jpeg_quality(self): return 85
+        def is_export_mode(self): return False
+        def oversized_only(self): return False
+        def output_path_for(self, p): return None
+
+    monkeypatch.setattr(mw, "ResizeImagesDialog", FakeDialog)
+    monkeypatch.setattr(QMessageBox, "information", lambda *a, **k: None)
+    monkeypatch.setattr(QMessageBox, "warning", lambda *a, **k: None)
+    window.open_resize_images_dialog()
+    for p in paths:
+        with zipfile.ZipFile(p) as zf:
+            im = Image.open(io.BytesIO(zf.read("000.jpg")))
+            assert im.width == 1000

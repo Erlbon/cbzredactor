@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026-09-30#01 -- Resize Images no longer freezes the window
+
+- **Resizing runs on a worker thread.** Before, only the gap between two
+  files let the window repaint, so one big file froze it for the whole
+  re-encode.
+- **Progress is per page**: the dialog shows the file and "page N of M"
+  with a bar over all pages, and the status bar shows the same. Cancel
+  stops within a moment, deletes the half-written temp file and leaves
+  that file untouched.
+
 ## 2026-09-29#18 -- Collection Report no longer freezes the window on a big collection
 
 - **The report is analysed on a worker thread** with a progress dialog,

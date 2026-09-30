@@ -166,3 +166,20 @@ def test_many_pages_parallel_keep_source_order(tmp_path):
     CbzBook(path).resize_images(1440, workers=4)
     with zipfile.ZipFile(path) as zf:
         assert [n for n in zf.namelist() if n.endswith(".jpg")] == sorted(pages)
+
+
+def test_resize_reports_progress_and_can_be_cancelled(tmp_path):
+    import pytest
+    from core.cbz_file import ResizeCancelled
+
+    pages = {f"{i:03d}.png": _png_bytes(3000, 200) for i in range(6)}
+    path = _make_cbz(tmp_path / "a.cbz", pages)
+    calls = []
+    CbzBook(path).resize_images(1000, workers=2, progress=lambda d, t: calls.append((d, t)))
+    assert calls[-1][0] == calls[-1][1] >= 6
+
+    before = open(path, "rb").read()
+    with pytest.raises(ResizeCancelled):
+        CbzBook(path).resize_images(500, workers=2, should_cancel=lambda: True)
+    assert open(path, "rb").read() == before
+    assert not (tmp_path / "a.cbz.tmp_resize").exists()

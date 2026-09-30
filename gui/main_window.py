@@ -19,8 +19,9 @@ import os
 import posixpath
 import zipfile
 import shutil
+import threading
 
-from PyQt6.QtCore import QSize, Qt
+from PyQt6.QtCore import QSize, Qt, QTimer
 from PyQt6.QtGui import QColor, QIcon, QImage
 from PyQt6.QtWidgets import (
     QAbstractItemView,
@@ -79,7 +80,7 @@ from core.foreign_archive_convert import (
     convert_to_cbz,
 )
 from core.archive_sniff import extension_label
-from core.cbz_file import CbzBook, CbzError, path_needs_conversion
+from core.cbz_file import CbzBook, CbzError, ResizeCancelled, path_needs_conversion
 from core.foreign_archive_convert import relabel_mislabeled_cbz
 from redactor_common.core.trash import TrashError, move_to_trash
 from core.page_dimensions import SIZE_LOW, SIZE_OK, SIZE_OVERSIZED, PageSizeStats
@@ -1926,16 +1927,12 @@ class MainWindow(QMainWindow):
         exported_paths: list[str] = []
         totals = {"resized": 0, "skipped": 0, "failed": 0, "original_bytes": 0, "new_bytes": 0}
 
-        def _step(book: CbzBook, _index: int) -> None:
-            output_path = dialog.output_path_for(book.path)
-            try:
-                summary = book.resize_images(
-                    max_width, jpeg_quality, output_path, max_height=max_height, output_format=output_format
-                )
-            except CbzError as exc:
-                errors.append(f"{os.path.basename(book.path)}: {exc}")
-                return
+        total_pages = sum(max(len(b.page_names), 1) for b in target_books)
+        cancelled = threading.Event()
+        # Written by the worker thread, read by the GUI-thread timer below.
+        live = {"pages_before": 0, "done": 0, "total": 0}
 
+        def _apply(book: CbzBook, output_path: str | None, summary) -> None:
             totals["resized"] += summary.pages_resized
             totals["skipped"] += summary.pages_skipped
             totals["failed"] += summary.pages_failed
@@ -1954,9 +1951,52 @@ class MainWindow(QMainWindow):
                     page_count_text = f"{book.actual_page_count} page(s)"
                     self._show_book_in_panel(book, page_count_text)
 
-        run_with_progress(
-            self, target_books, _step, "Resizing images...", threshold=RESIZE_PROGRESS_THRESHOLD
-        )
+        # Each book is re-encoded on a worker thread (call_in_background)
+        # so the window keeps repainting; a timer on this thread turns the
+        # worker's per-page counter into the progress dialog and status bar.
+        with ProgressReporter(
+            self, total_pages, "Resizing images...", threshold=RESIZE_PROGRESS_THRESHOLD
+        ) as reporter:
+            reporter.connect_cancel(cancelled.set)
+            current = {"name": ""}
+
+            def _tick() -> None:
+                done = live["pages_before"] + live["done"]
+                reporter.set_label(f"Resizing: {current['name']} (page {live['done']} of {live['total']})")
+                reporter.set_value(done, pump=False)
+                self.statusBar().showMessage(f"Resizing {current['name']}: {done} of {total_pages} page(s)")
+
+            timer = QTimer(self)
+            timer.timeout.connect(_tick)
+            timer.start(100)
+            try:
+                for book in target_books:
+                    if cancelled.is_set():
+                        break
+                    output_path = dialog.output_path_for(book.path)
+                    current["name"] = os.path.basename(book.path)
+                    live["done"], live["total"] = 0, max(len(book.page_names), 1)
+
+                    def _on_page(done: int, total: int) -> None:
+                        live["done"], live["total"] = done, total
+
+                    try:
+                        summary = call_in_background(
+                            book.resize_images,
+                            max_width, jpeg_quality, output_path,
+                            max_height=max_height, output_format=output_format,
+                            progress=_on_page, should_cancel=cancelled.is_set,
+                        )
+                    except ResizeCancelled:
+                        break
+                    except CbzError as exc:
+                        errors.append(f"{os.path.basename(book.path)}: {exc}")
+                    else:
+                        _apply(book, output_path, summary)
+                    live["pages_before"] += live["total"]
+            finally:
+                timer.stop()
+        self.statusBar().clearMessage()
 
         if errors:
             from redactor_common.core.error_summary import summarize_errors
