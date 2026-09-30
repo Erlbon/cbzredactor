@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-09-30#07 -- Saving several files and exporting show progress
+
+- **Save with several files selected** now shows a progress dialog (with
+  Cancel), like Save All Changed, instead of freezing the window.
+- **Rename / Export by Pattern** shows progress while it renames or copies
+  files; Cancel stops before the next file.
+
 ## 2026-09-30#06 -- Converting foreign archives can't abort the batch
 
 - **A full disk, an entry name Windows can't hold or a corrupt 7-Zip

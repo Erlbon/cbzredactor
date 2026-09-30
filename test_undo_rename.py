@@ -40,3 +40,41 @@ def test_rename_by_pattern_then_undo(tmp_path, monkeypatch):
     window.undo_last_rename()
     assert sorted(f for f in os.listdir(tmp_path) if f.endswith(".cbz")) == ["scene.name.one.cbz", "scene.name.two.cbz"]
     assert sorted(os.path.basename(book.path) for book in window.books) == ["scene.name.one.cbz", "scene.name.two.cbz"]
+
+
+def test_multi_save_and_export_run_under_progress(tmp_path, monkeypatch):
+    """Review finding M6: multi-selection Save and Export by Pattern loop
+    over files, so they go through run_with_progress (cancellable: they
+    write to disk)."""
+    from gui import main_window as mw
+
+    calls = []
+    real = mw.run_with_progress
+
+    def spy(parent, items, step, label, **kwargs):
+        items = list(items)
+        calls.append((label, len(items), kwargs.get("cancellable")))
+        return real(parent, items, step, label, **kwargs)
+
+    monkeypatch.setattr(mw, "run_with_progress", spy)
+    monkeypatch.setattr(QMessageBox, "information", lambda *a, **k: None)
+    a = _cbz(tmp_path / "one.cbz", "Saga", "1")
+    b = _cbz(tmp_path / "two.cbz", "Saga", "2")
+    window = mw.MainWindow()
+    window._load_paths([a, b])
+    window.table.selectAll()
+    window.save_current()
+    assert ("Saving files...", 2, True) in calls
+
+    def export(dialog):
+        dialog.pattern_edit.setText("copy %series% %number%")
+        return dialog.DialogCode.Accepted
+
+    monkeypatch.setattr(mw.RenamePatternDialog, "exec", export)
+    monkeypatch.setattr(mw.RenamePatternDialog, "is_export_mode", lambda self: True)
+    window._selected_rows = []
+    window.open_rename_dialog()
+    assert any(label == "Exporting files..." and count == 2 and c is True for label, count, c in calls)
+    assert sorted(f for f in os.listdir(tmp_path) if f.endswith(".cbz")) == [
+        "copy Saga 1.cbz", "copy Saga 2.cbz", "one.cbz", "two.cbz",
+    ]

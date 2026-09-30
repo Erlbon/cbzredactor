@@ -1499,13 +1499,19 @@ class MainWindow(QMainWindow):
             return
 
         errors: list[str] = []
-        for row in rows:
+
+        def _step(row: int, _index: int) -> None:
             book = self.books[row]
             try:
                 book.save()
             except CbzError as exc:
                 errors.append(f"{os.path.basename(book.path)}: {exc}")
             self._refresh_table_row(row, book)
+
+        run_with_progress(
+            self, rows, _step, "Saving files...", threshold=SAVE_PROGRESS_THRESHOLD, cancellable=True,
+            label_for=lambda row: f"Saving: {os.path.basename(self.books[row].path)}",
+        )
         if errors:
             from redactor_common.core.error_summary import summarize_errors
             QMessageBox.warning(self, "Some Files Failed to Save", summarize_errors(errors))
@@ -1593,7 +1599,9 @@ class MainWindow(QMainWindow):
         export_mode = dialog.is_export_mode()
         errors: list[str] = []
         renamed: list[tuple[str, str]] = []
-        for book, old_path, new_path in dialog.planned_renames():
+
+        def _step(planned, _index: int) -> None:
+            book, old_path, new_path = planned
             try:
                 if export_mode:
                     shutil.copy2(old_path, new_path)
@@ -1603,6 +1611,13 @@ class MainWindow(QMainWindow):
                     renamed.append((old_path, new_path))
             except OSError as exc:
                 errors.append(f"{os.path.basename(old_path)}: {exc}")
+
+        run_with_progress(
+            self, dialog.planned_renames(), _step,
+            "Exporting files..." if export_mode else "Renaming files...",
+            threshold=SAVE_PROGRESS_THRESHOLD, cancellable=True,
+            label_for=lambda planned: f"{'Exporting' if export_mode else 'Renaming'}: {os.path.basename(planned[1])}",
+        )
         _rename_log().record("Rename by Pattern", renamed)
 
         for book in target_books:
