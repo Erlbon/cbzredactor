@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-09-30#02 -- Resize summary says "from ... to ..."
+
+- The Resize Complete box now reads "Total size went from 188.8 MB to
+  202.9 MB (14.1 MB larger)" instead of "188.8 MB → 202.9 MB (-14.1 MB)".
+  The old sign was "saved", so a file that grew showed a minus.
+
 ## 2026-09-30#01 -- Resize Images no longer freezes the window
 
 - **Resizing runs on a worker thread.** Before, only the gap between two

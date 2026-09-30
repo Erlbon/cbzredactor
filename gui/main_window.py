@@ -2004,13 +2004,21 @@ class MainWindow(QMainWindow):
 
         processed = totals["resized"] + totals["skipped"] + totals["failed"]
         if processed:
-            saved_mb = (totals["original_bytes"] - totals["new_bytes"]) / (1024 * 1024)
+            mb = 1024 * 1024
+            old_mb = totals["original_bytes"] / mb
+            new_mb = totals["new_bytes"] / mb
+            diff_mb = abs(old_mb - new_mb)
+            if round(diff_mb, 1) == 0:
+                change = "no change in size"
+            elif new_mb < old_mb:
+                change = f"{diff_mb:.1f} MB smaller"
+            else:
+                change = f"{diff_mb:.1f} MB larger"
             QMessageBox.information(
                 self, "Resize Complete",
                 f"{totals['resized']} page(s) resized or converted, {totals['skipped']} already small enough, "
                 f"{totals['failed']} couldn't be read.\n\n"
-                f"Total size: {totals['original_bytes'] / (1024 * 1024):.1f} MB → "
-                f"{totals['new_bytes'] / (1024 * 1024):.1f} MB ({saved_mb:+.1f} MB).",
+                f"Total size went from {old_mb:.1f} MB to {new_mb:.1f} MB ({change}).",
             )
 
         if export_mode and exported_paths:
