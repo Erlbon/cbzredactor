@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026-09-30#20 -- Adopt redactor_common 2026-09-30-15
+
+- **Adopt redactor_common 2026-09-30-15:** Redact saves retry briefly when
+  Windows antivirus/indexer briefly locks a file.
+
 ## 2026-09-30#19 -- Validate results are stamped into the file
 
 - **Validate / Fix Issues now records when a file was checked.** The result
