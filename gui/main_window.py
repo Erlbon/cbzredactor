@@ -60,7 +60,7 @@ from redactor_common.gui.column_menu import show_column_header_context_menu
 from redactor_common.gui.column_settings_dialog import ColumnSettingsDialog
 from redactor_common.gui.context_menu import show_table_context_menu
 from redactor_common.gui.manage_list_dialog import ManageListDialog
-from redactor_common.gui.menu_builder import MenuAction, Separator, build_menu_bar
+from redactor_common.gui.menu_builder import MenuAction, Separator, Submenu, build_menu_bar
 from redactor_common.gui.overwrite_review_dialog import resolve_overwrite_conflicts
 from redactor_common.gui.parse_filename_dialog import ParseFilenameDialog
 from redactor_common.gui.progress import ProgressReporter, run_with_progress
@@ -687,8 +687,19 @@ class MainWindow(QMainWindow):
                 items.append(MenuAction(
                     "number_issues", "Number Issues...", lambda: self._quick_number_issues(selected_books)
                 ))
-            if items:
-                items.insert(0, Separator())
+            # Every per-file lookup from the Tools menu, so none of them
+            # needs a trip to the menu bar. Reuses the real QActions
+            # (same as rename_file above) so text and enabled state
+            # can't drift. "Compare ComicRack Library with GCD" is a
+            # whole-library report, not a lookup on the selection, so
+            # it stays in the menu bar only.
+            items.append(Submenu("Look Up", [
+                self.actions_[key] for key in (
+                    "comicvine_lookup", "gcd_lookup", "gcd_local_lookup",
+                    "comicrack_lookup", "bedetheque_lookup",
+                )
+            ]))
+            items.insert(0, Separator())
             return items
 
         show_table_context_menu(

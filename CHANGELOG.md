@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-09-30#03 -- Every lookup is in the right-click menu
+
+- Right-clicking a file now has a **Look Up** submenu with Comic Vine,
+  Grand Comics Database, GCD (Local Database), ComicRack Library and
+  Bedetheque, the same entries as the Import menu.
+
 ## 2026-09-30#02 -- Resize summary says "from ... to ..."
 
 - The Resize Complete box now reads "Total size went from 188.8 MB to
