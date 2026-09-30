@@ -48,7 +48,7 @@ def test_file_menu_structure():
     menu = _menus(MainWindow())["File"]
     assert _texts(menu) == [
         "Open Files…", "Open Folder…", "---",
-        "Save", "Save As…", "Save All", "---",
+        "Save As…", "Save All", "---",
         "Rename File…", "Undo Last Rename", "Rename / Export / Move…", "---",
         "Export Settings…", "Import Settings…", "---",
         "Remove from List", "Clear List", "---",
@@ -126,7 +126,7 @@ def test_every_old_feature_is_still_reachable_from_a_menu():
     window = MainWindow()
     in_menus = {id(a) for menu in _menus(window).values() for a in _all_actions(menu)}
     old_keys = [
-        "load_files", "load_folder", "save", "save_as", "save_all", "rename_file", "undo_rename",
+        "load_files", "load_folder", "save_as", "save_all", "rename_file", "undo_rename",
         "rename_files", "remove_files", "refresh_list", "clear_list", "exit",
         "parse_filename", "read_filename_tags", "convert_foreign",
         "comicvine_lookup", "gcd_lookup", "gcd_local_lookup", "comicrack_lookup", "compare_with_gcd",
@@ -172,7 +172,7 @@ def test_toolbar_holds_the_c1_actions_in_order():
     window = MainWindow()
     by_action = {id(v): k for k, v in window.actions_.items() if k not in LEGACY_ACTION_KEYS}
     keys = [by_action[id(a)] for a in _main_toolbar(window).actions() if id(a) in by_action]
-    assert keys == ["open_files", "open_folder", "save", "save_all", "apply", "redact", "undo", "redo"]
+    assert keys == ["open_files", "open_folder", "save_all", "apply", "redact", "undo", "redo"]
 
 
 def test_redact_toolbar_button_is_prominent():
@@ -255,3 +255,46 @@ def test_right_click_menu_is_the_short_core_plus_submenus(monkeypatch):
     # Redact comes before Remove from List, which is last.
     assert actions[-1] is window.actions_["remove_from_list"]
     assert actions.index(window.actions_["redact"]) < actions.index(window.actions_["remove_from_list"])
+
+
+def _two_cbz(tmp_path):
+    paths = []
+    for name in ("A.cbz", "B.cbz"):
+        path = tmp_path / name
+        with zipfile.ZipFile(path, "w") as zf:
+            zf.writestr("ComicInfo.xml", "<ComicInfo><Title>T</Title></ComicInfo>")
+            zf.writestr("001.jpg", b"x")
+        paths.append(str(path))
+    return paths
+
+
+def test_there_is_one_save_and_it_saves_all_changed_files(tmp_path, monkeypatch):
+    """No selected-only Save: Save All is the only save command, on
+    Ctrl+Shift+A with Ctrl+S kept as a secondary key, and saves every
+    changed file whatever is selected."""
+    from PyQt6.QtGui import QKeySequence
+
+    window = MainWindow()
+    assert "save" not in window.actions_
+    save_all = window.actions_["save_all"]
+    portable = QKeySequence.SequenceFormat.PortableText
+    assert [s.toString(portable) for s in save_all.shortcuts()] == ["Ctrl+Shift+A", "Ctrl+S"]
+
+    window._load_paths(_two_cbz(tmp_path))
+    saved = []
+    for book in window.books:
+        book.dirty = True
+        monkeypatch.setattr(book, "save", lambda output_path=None, b=book: saved.append(b.path) or setattr(b, "dirty", False))
+    window.table.selectRow(0)  # only one selected: both still get saved
+    save_all.trigger()
+    assert sorted(saved) == sorted(b.path for b in window.books)
+
+
+def test_save_all_with_nothing_changed_is_a_status_message_not_a_dialog(tmp_path, monkeypatch):
+    from PyQt6.QtWidgets import QMessageBox
+
+    window = MainWindow()
+    window._load_paths(_two_cbz(tmp_path))
+    monkeypatch.setattr(QMessageBox, "information", lambda *a, **k: (_ for _ in ()).throw(AssertionError("dialog")))
+    window.actions_["save_all"].trigger()
+    assert "No files have unsaved changes" in window.statusBar().currentMessage()

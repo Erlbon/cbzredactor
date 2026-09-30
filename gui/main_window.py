@@ -22,7 +22,7 @@ import shutil
 import threading
 
 from PyQt6.QtCore import QSize, Qt, QTimer
-from PyQt6.QtGui import QColor, QIcon, QImage, QKeySequence
+from PyQt6.QtGui import QColor, QIcon, QImage
 from PyQt6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
@@ -92,6 +92,7 @@ from redactor_common.gui.standard_menus import (
     standard_help_items,
     standard_tools_items,
     standard_view_items,
+    with_aliases,
 )
 from redactor_common.gui.zoom_toolbar import TableZoomController
 from redactor_common.core.version import REDACTOR_COMMON_REPO_URL, REDACTOR_COMMON_VERSION
@@ -456,7 +457,6 @@ class MainWindow(QMainWindow):
         file_items = standard_file_items(
             open_files=self.load_files_dialog,
             open_folder=self.load_folder_dialog,
-            save=self.save_current,
             save_as=self.save_current_as,
             save_all=self.save_all_changed,
             rename_file=self.rename_selected_file,
@@ -547,6 +547,9 @@ class MainWindow(QMainWindow):
         help_items = standard_help_items(
             APP_NAME, self.open_changelog_dialog, self.open_credits_dialog, self.open_about_dialog
         )
+        # Saving is always "all changed files" here (Ctrl+S and Ctrl+Shift+A):
+        # the helper's separate selected-only Save entry is left out.
+        file_items = [i for i in file_items if not (isinstance(i, MenuAction) and i.key == "save")]
         spec = StandardMenuSpec(
             file=file_items, edit=edit_items, view=view_items,
             app_menus=[AppMenu(labels.MENU_METADATA, metadata_items), AppMenu(labels.MENU_REPAIR, repair_items)],
@@ -554,6 +557,9 @@ class MainWindow(QMainWindow):
         )
         build_standard_menu_bar(self, spec)
         registry = get_action_registry(self)
+        # Save All is Ctrl+Shift+A (family key); the old Ctrl+S now saves all
+        # changed files too, as a secondary shortcut (drop after one release).
+        with_aliases(registry["save_all"], "Ctrl+S")
         self.actions_ = {key: registry[key] for key in registry.keys()}
         add_command_palette(self, registry)  # Ctrl+K / View > Command Palette: every menu action, searchable
         # Keys this file (and its tests) used before the skeleton renamed them.
@@ -564,8 +570,6 @@ class MainWindow(QMainWindow):
         # neither). Reset Zoom keeps Ctrl+0.
         self.actions_["zoom_in"].setShortcuts([])
         self.actions_["zoom_out"].setShortcuts([])
-        # F1 stays on About for now; moved off it in a later commit.
-        self.actions_["about"].setShortcut(QKeySequence(shortcuts.HELP))
         self.actions_["show_metadata_panel"].setChecked(True)
         self.actions_["apply"].setEnabled(False)
         self.actions_["undo"].setEnabled(False)
@@ -586,7 +590,6 @@ class MainWindow(QMainWindow):
         toolbar.addAction(self.actions_["open_files"])
         toolbar.addAction(self.actions_["open_folder"])
         toolbar.addSeparator()
-        toolbar.addAction(self.actions_["save"])
         toolbar.addAction(self.actions_["save_all"])
         toolbar.addSeparator()
         toolbar.addAction(self.actions_["apply"])
@@ -1575,37 +1578,6 @@ class MainWindow(QMainWindow):
     # Saving
     # ------------------------------------------------------------------
 
-    def save_current(self) -> None:
-        """Saves every selected file -- one file, the usual case, saves
-        exactly like before; several selected at once saves all of
-        them, matching a normal multi-select "Save" convention."""
-        self._commit_current_edits()
-        rows = self._editable_selected_rows()
-        if not rows:
-            return
-        if len(rows) == 1:
-            self._save_book(rows[0])
-            return
-
-        errors: list[str] = []
-
-        def _step(row: int, _index: int) -> None:
-            book = self.books[row]
-            try:
-                book.save()
-            except CbzError as exc:
-                errors.append(f"{os.path.basename(book.path)}: {exc}")
-            self._refresh_table_row(row, book)
-
-        run_with_progress(
-            self, rows, _step, "Saving files...", threshold=SAVE_PROGRESS_THRESHOLD, cancellable=True,
-            label_for=lambda row: f"Saving: {os.path.basename(self.books[row].path)}",
-        )
-        if errors:
-            from redactor_common.core.error_summary import summarize_errors
-            QMessageBox.warning(self, "Some Files Failed to Save", summarize_errors(errors))
-        self._update_status()
-
     def save_current_as(self) -> None:
         self._commit_current_edits()
         if len(self._selected_rows) != 1:
@@ -1627,10 +1599,14 @@ class MainWindow(QMainWindow):
         self._update_status()
 
     def save_all_changed(self) -> None:
+        """File > Save All (Ctrl+Shift+A, and Ctrl+S): writes every changed
+        file. There is no save-selected-only command; Save As... handles one."""
         self._commit_current_edits()
         changed_rows = [i for i, book in enumerate(self.books) if book.dirty]
         if not changed_rows:
-            QMessageBox.information(self, "Nothing to Save", "No files have unsaved changes.")
+            # A status message, not a dialog: Ctrl+S lands here too, and pressing it
+            # with nothing changed is harmless.
+            self.statusBar().showMessage("No files have unsaved changes.", 5000)
             return
 
         errors: list[str] = []
@@ -1644,7 +1620,7 @@ class MainWindow(QMainWindow):
             self._refresh_table_row(row, book)
 
         run_with_progress(
-            self, changed_rows, _step, "Saving files...", threshold=SAVE_PROGRESS_THRESHOLD,
+            self, changed_rows, _step, "Saving files...", threshold=SAVE_PROGRESS_THRESHOLD, cancellable=True,
             label_for=lambda row: f"Saving: {os.path.basename(self.books[row].path)}",
         )
 

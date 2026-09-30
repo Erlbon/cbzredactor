@@ -1,5 +1,20 @@
 # Changelog
 
+## 2026-09-30#17 -- Save All on Ctrl+S, F1 is free, zoom keys untangled
+
+- **F1 no longer opens About.** F1 is the standard "Help contents" key on every
+  platform; About is still in Help. (No alias: F1 is reserved for Help.)
+- **Zoom In / Zoom Out** in the View menu share the keys (Ctrl++ and Ctrl+-)
+  of the toolbar's zoom buttons instead of binding them a second time, which
+  would have made Qt ignore both. **Reset Zoom** is **Ctrl+0**.
+- **Ctrl+S now saves every changed file**, the same as Save All. There is no
+  separate save-selected command any more: File has **Save All** (Ctrl+Shift+A,
+  with **Ctrl+S kept as a second key for one release**) and **Save As...**
+  (Ctrl+Shift+S, one file). The toolbar has a single Save All button. With
+  nothing changed, Save All shows a short message in the status bar instead of
+  a dialog.
+- Tests check that no key is bound to two actions anywhere in the window.
+
 ## 2026-09-30#16 -- Command palette
 
 - **Ctrl+K** (or View > Command Palette) opens a command palette: type a few

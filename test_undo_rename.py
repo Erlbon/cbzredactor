@@ -63,7 +63,9 @@ def test_multi_save_and_export_run_under_progress(tmp_path, monkeypatch):
     window = mw.MainWindow()
     window._load_paths([a, b])
     window.table.selectAll()
-    window.save_current()
+    for book in window.books:
+        book.dirty = True
+    window.save_all_changed()
     assert ("Saving files...", 2, True) in calls
 
     def export(dialog):

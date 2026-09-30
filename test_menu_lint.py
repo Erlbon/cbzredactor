@@ -5,22 +5,18 @@ labels. Also covers the Ctrl+K command palette the skeleton installs."""
 
 import sys
 
-from PyQt6.QtGui import QKeySequence
+from PyQt6.QtGui import QAction, QKeySequence
 from PyQt6.QtWidgets import QApplication
 
-from core.version import APP_NAME
 from gui.main_window import MainWindow
 from redactor_common.gui.command_palette import collect_commands, filter_commands
 from redactor_common.gui.menu_lint import lint_menu_bar
 
 _app = QApplication.instance() or QApplication(sys.argv)
 
-# Explicitly documented exceptions to the skeleton. F1 stays on About for one
-# more step so the menu-move commit changes no shortcut; the shortcut-fix
-# commit unbinds it and empties this list.
-KNOWN_EXCEPTIONS: list[str] = [
-    f"Help > About {APP_NAME} is bound to F1: F1 is Help contents and must not be bound to About",
-]
+# Explicitly documented exceptions to the skeleton (none at the moment).
+KNOWN_EXCEPTIONS: list[str] = []
+PORTABLE = QKeySequence.SequenceFormat.PortableText
 
 
 def test_menu_bar_passes_the_shared_lint():
@@ -45,3 +41,41 @@ def test_palette_lists_every_menu_action_and_finds_moved_items():
     assert any(c.title == "Scan Collection Folder" and c.path == "Tools ▸ Collection" for c in found)
     lookup = next(c for c in commands if c.title == "Comic Vine")
     assert lookup.path == "Metadata ▸ Look Up"
+
+
+def test_about_has_no_shortcut_and_f1_is_free():
+    """F1 is Help contents everywhere; it used to open About. cbz has no
+    other shortcut that moved, so there are no old-key aliases to keep."""
+    window = MainWindow()
+    assert window.actions_["about"].shortcuts() == []
+    bound = {s.toString() for a in window.findChildren(QAction) for s in a.shortcuts()}
+    assert "F1" not in bound
+
+
+def test_no_shortcut_is_ambiguous_anywhere_in_the_window():
+    """Qt fires NEITHER action when two share a key. The zoom toolbar's own
+    StandardKey actions own Ctrl++ / Ctrl+-, so the View menu's Zoom In /
+    Zoom Out carry no key of their own (Reset Zoom has Ctrl+0)."""
+    window = MainWindow()
+    owners: dict[str, list[str]] = {}
+    for act in window.findChildren(QAction):
+        for seq in act.shortcuts():
+            owners.setdefault(seq.toString(), []).append(act.text())
+    assert {k: v for k, v in owners.items() if len(v) > 1} == {}
+    assert window.actions_["zoom_in"].shortcuts() == []
+    assert window.actions_["zoom_out"].shortcuts() == []
+    assert window.zoom.zoom_in_action.shortcuts() and window.zoom.zoom_out_action.shortcuts()
+    assert window.actions_["reset_zoom"].shortcut() == QKeySequence("Ctrl+0")
+
+
+def test_shortcuts_are_the_family_keys_with_ctrl_s_kept_on_save_all():
+    window = MainWindow()
+    expected = {
+        "open_files": ["Ctrl+O"], "open_folder": ["Ctrl+Shift+O"], "save_as": ["Ctrl+Shift+S"],
+        "save_all": ["Ctrl+Shift+A", "Ctrl+S"], "rename_file": ["F2"], "rename_export_move": ["Ctrl+E"],
+        "remove_from_list": ["Del"], "refresh_list": ["F5", "Ctrl+R"], "undo": ["Ctrl+Z"], "redo": ["Ctrl+Y"],
+        "search_replace": ["Ctrl+H"], "parse_filename": ["Ctrl+I"], "redact": ["Ctrl+Shift+E"],
+        "command_palette": ["Ctrl+K"],
+    }
+    for key, seqs in expected.items():
+        assert [s.toString(PORTABLE) for s in window.actions_[key].shortcuts()] == seqs, key
