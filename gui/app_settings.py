@@ -25,6 +25,7 @@ import os
 from core.app_paths import base_dir
 from core.comic_genres import COMMON_COMIC_GENRES
 from core.comic_languages import DEFAULT_LANGUAGES
+from core.image_resize import DEFAULT_MAX_WIDTH
 from redactor_common.core import managed_list, pattern_history, secret_store
 
 _SETTINGS_FILENAME = "cbzredactor_settings.ini"
@@ -52,9 +53,7 @@ _RESIZE_MAX_WIDTH_KEY = "resize/max_width"
 _RESIZE_JPEG_QUALITY_KEY = "resize/jpeg_quality"
 _RESIZE_MAX_HEIGHT_KEY = "resize/max_height"  # 0 = no height limit
 _RESIZE_OUTPUT_FORMAT_KEY = "resize/output_format"  # "" = keep each page's format
-# 1440 lands a resized book inside the Size column's "Acceptable" band
-# (1000-1599 px, see core/page_dimensions.py).
-_DEFAULT_RESIZE_MAX_WIDTH = 1440
+_DEFAULT_RESIZE_MAX_WIDTH = DEFAULT_MAX_WIDTH  # see core/image_resize.py
 _DEFAULT_RESIZE_JPEG_QUALITY = 90
 
 
@@ -352,6 +351,29 @@ def load_pattern_history() -> list[str]:
 def save_pattern_used(pattern: str) -> None:
     history = _dedupe_and_trim(load_pattern_history(), pattern)
     _settings().setValue(_PATTERN_HISTORY_KEY, pattern_history.encode_history(history))
+
+
+_LIBRARY_ROOT_KEY = "rename/library_root"
+_REDACT_RECIPE_KEY = "redact/recipe"
+
+
+def load_library_root() -> str:
+    """The Rename / Export dialog's "Move into folders" library root, or ""."""
+    return str(_settings().value(_LIBRARY_ROOT_KEY, "", type=str))
+
+
+def save_library_root(path: str) -> None:
+    _settings().setValue(_LIBRARY_ROOT_KEY, path or "")
+
+
+def load_redact_recipe() -> str:
+    """The Redact recipe as JSON (core/redact_steps.py), or "" for the
+    default. Holds step order, on/off and options -- never a secret."""
+    return str(_settings().value(_REDACT_RECIPE_KEY, "", type=str))
+
+
+def save_redact_recipe(recipe_json: str) -> None:
+    _settings().setValue(_REDACT_RECIPE_KEY, recipe_json or "")
 
 
 # ------------------------------------------------------------------

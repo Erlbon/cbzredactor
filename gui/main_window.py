@@ -26,6 +26,7 @@ from PyQt6.QtGui import QColor, QIcon, QImage
 from PyQt6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
+    QDialog,
     QFileDialog,
     QHeaderView,
     QInputDialog,
@@ -64,6 +65,13 @@ from redactor_common.gui.menu_builder import MenuAction, Separator, Submenu, bui
 from redactor_common.gui.overwrite_review_dialog import resolve_overwrite_conflicts
 from redactor_common.gui.parse_filename_dialog import ParseFilenameDialog
 from redactor_common.gui.progress import ProgressReporter, run_with_progress
+from redactor_common.gui.redact_dialog import (
+    RecipeEditorDialog,
+    RedactResultsDialog,
+    edit_recipe_menu_action,
+    redact_menu_action,
+)
+from redactor_common.gui.redact_dialog import run_redact as run_redact_dialog
 from redactor_common.core.rename_log import RenameLog
 from redactor_common.gui.rename_undo import undo_last_rename
 from core.app_paths import base_dir
@@ -86,6 +94,17 @@ from redactor_common.core.trash import TrashError, move_to_trash
 from core.page_dimensions import SIZE_LOW, SIZE_OK, SIZE_OVERSIZED, PageSizeStats
 from core.scan_quality_tag import LOW_RES_TAG, add_tag, has_tag, remove_tag
 from core.scene_name import parse_filename, proposed_fields
+from core.redact_steps import (
+    FINALIZE_LABEL,
+    CbzCtx,
+    RedactEnv,
+    build_catalogue,
+    recipe_for_run,
+    recipe_from_setting,
+    recipe_to_setting,
+    run_catalogue,
+    save_stage,
+)
 from core.credit_pages import KnownCreditPages, credit_matches, scan_book
 from core.duplicates import BookFacts, find_duplicates, fingerprint_book
 from core.version import APP_NAME, APP_REPO_URL, APP_VERSION, RELEASE_LABEL
@@ -457,6 +476,13 @@ class MainWindow(QMainWindow):
                 # file(s)" text and enabled state never drift out of
                 # sync between the two places it appears.
                 MenuAction("apply_bulk_edit", "&Apply to 0 Selected File(s)", self._apply_bulk_edit),
+                Separator(),
+                # One click: the recipe's conversion/cleanup/lookup/fix steps on the
+                # selected files (or all loaded, if none selected), saved in place with
+                # each original in the Recycle Bin. See redact_files().
+                redact_menu_action(self.redact_files, text="Re&dact"),
+                edit_recipe_menu_action(self.edit_redact_recipe, text="Edit Redact Reci&pe..."),
+                Separator(),
                 MenuAction(
                     "search_replace", "&Search/Replace...", self.open_search_replace_dialog,
                     shortcut=shortcuts.SEARCH_REPLACE,
@@ -526,6 +552,7 @@ class MainWindow(QMainWindow):
         toolbar.addAction(self.actions_["save"])
         toolbar.addSeparator()
         toolbar.addAction(self.actions_["apply_bulk_edit"])
+        toolbar.addAction(self.actions_["redact"])
         toolbar.addSeparator()
         toolbar.addAction(self.actions_["undo"])
         toolbar.addAction(self.actions_["redo"])
@@ -2391,6 +2418,112 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage(
                 f"Cleaned up {cleaned} archive(s). Originals are in the Recycle Bin.", 10000,
             )
+
+    # ------------------------------------------------------------------
+    # Redact (core/redact_steps.py, redactor_common's pipeline engine)
+    # ------------------------------------------------------------------
+
+    def _redact_env(self) -> RedactEnv:
+        """What one Redact run shares, read from the settings now."""
+        return RedactEnv(
+            rename_log=_rename_log(),
+            trash=move_to_trash,
+            pattern_history=app_settings.load_pattern_history(),
+            ascii_filenames=app_settings.load_ascii_filenames(),
+            zero_pad=app_settings.load_rename_zero_pad(),
+            library_root=app_settings.load_library_root(),
+            comicvine_key=app_settings.load_comicvine_api_key(),
+            local_databases=[
+                path for path in (app_settings.load_gcd_local_database(), app_settings.load_comicrack_database()) if path
+            ],
+            known_credits=self._known_credits,
+        )
+
+    def edit_redact_recipe(self) -> None:
+        """Operations > Edit Redact Recipe...: the shared recipe editor over
+        this app's steps; the result (order, on/off, options, threshold --
+        never a secret) is stored as JSON in the settings file."""
+        recipe = recipe_from_setting(app_settings.load_redact_recipe())
+        dialog = RecipeEditorDialog(build_catalogue(self._redact_env()), recipe, self)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            app_settings.save_redact_recipe(recipe_to_setting(dialog.recipe()))
+
+    def _redact_targets(self) -> list[CbzBook]:
+        """The selected files, else -- after asking -- every loaded file.
+        Rows still waiting for Convert to CBZ count: that is one of the steps."""
+        selected = [self.books[row] for row in self._selected_rows if row < len(self.books)]
+        if selected:
+            return selected
+        if not self.books:
+            QMessageBox.information(self, "No Files Loaded", "Load some files first.")
+            return []
+        reply = QMessageBox.question(
+            self, "Redact all files?",
+            f"Nothing is selected. Redact all {len(self.books)} loaded file(s)?\n\n"
+            "Each file is fixed and saved in place; the original goes to the Recycle Bin.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+        )
+        return list(self.books) if reply == QMessageBox.StandardButton.Yes else []
+
+    def redact_files(self) -> None:
+        """Operations > Redact (Ctrl+Shift+E): runs the saved recipe on the
+        targets through redactor_common's engine (progress, cancel, results
+        with Needs review). A file with unsaved edits, or one that failed to
+        load, is skipped and named in the report, never overwritten. Redact
+        is not on the Undo stack -- the Recycle Bin copy of each original is
+        the undo (renames and moves also go to File > Undo Last Rename) -- so
+        the stack is cleared, like Refresh List does."""
+        self._commit_current_edits()
+        targets = self._redact_targets()
+        if not targets:
+            return
+        unsaved = [book for book in targets if book.dirty]
+        if unsaved and QMessageBox.question(
+            self, "Unsaved changes",
+            f"{len(unsaved)} of the {len(targets)} file(s) have unsaved edits. Redact works on saved "
+            "files, so those will be skipped (and listed in the report). Continue with the rest?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+        ) != QMessageBox.StandardButton.Yes:
+            return
+
+        env = self._redact_env()
+        env.begin()
+        recipe = recipe_from_setting(app_settings.load_redact_recipe())
+        selected = [self.books[row] for row in self._selected_rows if row < len(self.books)]
+        report = run_redact_dialog(
+            self, targets, recipe_for_run(recipe), run_catalogue(env),
+            make_context=lambda book: CbzCtx(book, env),
+            describe=lambda book: os.path.basename(book.path),
+            show_results=False,
+            finalize=save_stage, finalize_label=FINALIZE_LABEL,
+        )
+        self._after_redact(targets, selected)
+        if report is not None:
+            RedactResultsDialog(
+                report, self,
+                header="Redact can't be undone with Undo. Each original was sent to the Recycle Bin: restore "
+                       "it from there to go back. Renames and moves are also listed under File > Undo Last Rename.",
+            ).exec()
+
+    def _after_redact(self, targets: list[CbzBook], selected: list[CbzBook]) -> None:
+        """Redact reloaded the rows from disk behind the panel's back: drop the
+        stale undo states and measurements, rebuild the table and re-select what
+        was selected (an old selection would write the panel's stale values
+        back over the reloaded metadata, see _refresh_edited_row)."""
+        self.undo_manager.clear()
+        self._update_undo_action()
+        self._update_redo_action()
+        for book in targets:
+            self._size_source.pop(book)
+        self._selected_rows = []
+        self._rebuild_table()
+        model = self.table.selectionModel()
+        for book in selected:
+            if book in self.books:
+                index = self.table.model().index(self.books.index(book), 0)
+                model.select(index, model.SelectionFlag.Select | model.SelectionFlag.Rows)
+        self._visible_rows.schedule()
+        self._update_status()
 
     def scan_collection_folder(self) -> None:
         """Collection > Scan Collection Folder...: reads every comic under

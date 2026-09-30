@@ -46,6 +46,10 @@ from PIL import Image, UnidentifiedImageError
 # a converted page still counts as a page.
 OUTPUT_FORMAT_EXTENSIONS = {"JPEG": ".jpg", "WEBP": ".webp"}
 
+# The Resize dialog's default target width (and Redact's): 1440 lands a resized
+# book inside the Size column's "Acceptable" band (1000-1599 px, core/page_dimensions.py).
+DEFAULT_MAX_WIDTH = 1440
+
 
 @dataclass
 class ResizeResult:

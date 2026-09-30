@@ -1,5 +1,27 @@
 # Changelog
 
+## 2026-09-30#11 -- Redact: one click to convert, clean, fill in and fix
+
+- **Operations > Redact** (Ctrl+Shift+E, also on the toolbar) runs a recipe
+  of steps on the selected files, or on all loaded files after asking, with
+  no further questions. Each changed file is saved in place, verified, and
+  its original goes to the Recycle Bin. It is not on the Undo stack (the
+  Recycle Bin is the undo); renames and moves also go to Undo Last Rename.
+- **Operations > Edit Redact Recipe...** turns steps on or off, reorders
+  them, sets their options and the confidence threshold (default 90%).
+  Steps that only guess (filename, lookup, credit pages) apply their guess
+  at or above the threshold and list the rest under Needs review.
+- Steps, on by default: Convert CBR/CB7/CBT to CBZ (saved under the .cbz
+  name), Clean up archive contents, Fill empty fields from the filename,
+  Fill empty fields from a database (local GCD / ComicRack first, then
+  Comic Vine when a key is saved; offline is a note, not a failure), Fix
+  ComicInfo issues, Tag low-res scans. Rename by pattern turns on once a
+  rename pattern exists. Off by default: Remove known credit pages (only a
+  suggestion), Resize oversized page images (1440 px), Move into folders.
+- Files with unsaved edits or a load error are skipped and listed in the
+  report, never overwritten.
+- redactor_common 2026-09-30-10.
+
 ## 2026-09-30#10 -- Comic Vine key and GCD password move to secure storage
 
 - **The Comic Vine API key and the GCD password are now kept in the
