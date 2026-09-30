@@ -102,7 +102,8 @@ def test_validate_fix_applies_ticked_fixes_as_one_undo_step(window, tmp_path, mo
     assert ("Series", "Saga") in seen["rows"] and ("Number", "7") in seen["rows"] and ("Year", "(clear)") in seen["rows"]
     first, second = window.books
     assert (first.metadata.series, first.metadata.number) == ("Saga", "7") and first.dirty
-    assert second.metadata.year == "2108" and not second.dirty  # unticked: untouched
+    assert second.metadata.year == "2108"  # unticked: untouched
+    assert second.stamp_only_dirty and second.stamp.status == "ISSUES"  # only the scan stamp is pending
     window.undo_last_action()
     assert (first.metadata.series, first.metadata.number) == ("Saga (Zone-Empire)", "#007")
 

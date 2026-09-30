@@ -37,7 +37,9 @@ from dataclasses import dataclass, field
 from typing import Callable, Optional
 
 from redactor_common.core.save_errors import describe_save_error
+from redactor_common.core.scan_stamp import ScanStamp, make_stamp, parse_stamp
 
+from core.cbz_fingerprint import cbz_fingerprint
 from core.archive_sniff import CONTAINER_UNKNOWN, CONTAINER_ZIP, detect_container
 from core.comicinfo import ComicInfoError, ComicInfoMetadata, parse_comicinfo_xml, serialize_comicinfo_xml
 from core.image_resize import OUTPUT_FORMAT_EXTENSIONS, resize_page
@@ -254,6 +256,21 @@ class CbzBook:
     # What the file really is (core/archive_sniff.py), whatever its
     # extension says.
     container: str = CONTAINER_ZIP
+    # Whether the scan stamp read from the file still matches the archive's
+    # pages: True = its fingerprint differs, False = matches, None = can't
+    # be told (no fingerprint in the stamp, or the archive is unreadable).
+    # Set by _load(), record_scan() and every rewrite; meaningless without
+    # a stamp.
+    stamp_stale: Optional[bool] = field(default=None, repr=False, compare=False)
+    # True while the ONLY unsaved change is a fresh scan stamp (no edits),
+    # so Remove Pages / Clean Up aren't refused over it. Any other
+    # assignment to `dirty` clears it (see __setattr__).
+    stamp_only_dirty: bool = field(default=False, repr=False, compare=False)
+
+    def __setattr__(self, name, value):
+        if name == "dirty":
+            object.__setattr__(self, "stamp_only_dirty", False)
+        object.__setattr__(self, name, value)
 
     def __post_init__(self) -> None:
         self._load()
@@ -299,6 +316,71 @@ class CbzBook:
             # error so the GUI can flag it rather than silently editing
             # blank metadata over top of whatever was actually there.
             self.load_error = str(exc)
+        # A stamp read from disk is the last-known scan: it never marks
+        # the book dirty, it is only checked against the pages.
+        self._refresh_stamp_staleness()
+
+    # ------------------------------------------------------------------
+    # Scan stamp (Validate / Fix Issues result kept inside the file)
+    # ------------------------------------------------------------------
+    # Stored as a <RedactorScan> element in ComicInfo.xml (core/comicinfo.py),
+    # so it travels with the file, is written only by Save like any other
+    # metadata, and survives every rewrite path (they all carry ComicInfo's
+    # content). The ZIP comment is deliberately not used: cover_stamp.py and
+    # collection_scan.py already own it and patch it outside Save.
+
+    @property
+    def stamp(self) -> Optional[ScanStamp]:
+        """The scan stamp recorded in the file (None if none or garbled)."""
+        return parse_stamp(self.metadata.scan_stamp)
+
+    def record_scan(self, status: str) -> bool:
+        """Stamps a completed validation scan (status, now, the archive's
+        fingerprint) into the metadata and marks the book dirty so Save
+        writes it. A book that failed to load, needs converting, or whose
+        archive can't be fingerprinted gets no stamp (a failed scan never
+        describes the file). Returns whether a stamp was recorded."""
+        if self.load_error or self.needs_conversion or not status:
+            return False
+        fingerprint = cbz_fingerprint(self.path)
+        if not fingerprint:
+            return False
+        self.metadata.scan_stamp = make_stamp(status, fingerprint).to_text()
+        self.stamp_stale = False
+        only_stamp = not self.dirty or self.stamp_only_dirty
+        self.dirty = True
+        self.stamp_only_dirty = only_stamp
+        return True
+
+    def _refresh_stamp_staleness(self) -> None:
+        """Compares the stamp's fingerprint with the archive now."""
+        stamp = self.stamp
+        self.stamp_stale = None
+        if stamp is None or not stamp.fingerprint:
+            return
+        current = cbz_fingerprint(self.path)
+        if current:
+            self.stamp_stale = current != stamp.fingerprint
+
+    def scan_status(self) -> str:
+        """The stamp's status while it still matches the pages ("" when
+        unscanned, garbled, stale or unverifiable)."""
+        stamp = self.stamp
+        return stamp.status if stamp is not None and self.stamp_stale is False else ""
+
+    def stamp_text(self) -> str:
+        """The stamp as the Status column shows it ("" without one):
+        `<STATUS> · <date time>`, plus "(changed since)" when the pages no
+        longer match it, or "(unverified)" when that can't be told."""
+        stamp = self.stamp
+        if stamp is None:
+            return ""
+        text = stamp.display()
+        if self.stamp_stale:
+            return f"{text} (changed since)"
+        if self.stamp_stale is None:
+            return f"{text} (unverified)"
+        return text
 
     @property
     def first_page_name(self) -> Optional[str]:
@@ -402,6 +484,7 @@ class CbzBook:
             self.path = target
             self.comicinfo_name = write_name
             self.dirty = False
+            self._refresh_stamp_staleness()
 
     # ------------------------------------------------------------------
     # Removing pages (scanner credit pages -- see core/credit_pages.py)
@@ -427,7 +510,7 @@ class CbzBook:
             raise CbzError(f"Cannot remove pages, file failed to load: {self.load_error}")
         if self.needs_conversion:
             raise CbzError("Cannot remove pages, this file needs converting to CBZ first (Convert to CBZ)")
-        if self.dirty:
+        if self.dirty and not self.stamp_only_dirty:
             raise CbzError("Save or undo this file's unsaved changes first")
         remove = set(names) & set(self.page_names)
         if not remove:
@@ -463,6 +546,9 @@ class CbzBook:
         self.page_names = new_pages
         if self.comicinfo_name:
             self.metadata = metadata
+            if self.stamp_only_dirty:
+                self.dirty = False  # the pending stamp was written with ComicInfo.xml
+        self._refresh_stamp_staleness()
         return len(removed_positions)
 
     # ------------------------------------------------------------------
@@ -487,9 +573,9 @@ class CbzBook:
             raise CbzError(f"Cannot clean up, file failed to load: {self.load_error}")
         if self.needs_conversion:
             raise CbzError("Cannot clean up, this file needs converting to CBZ first (Convert to CBZ)")
-        if self.dirty:
+        if self.dirty and not self.stamp_only_dirty:
             raise CbzError("Save or undo this file's unsaved changes first")
-        plan = self.cleanup_plan()
+        plan =self.cleanup_plan()
         if not plan.needed:
             return plan
 
@@ -522,6 +608,9 @@ class CbzBook:
         self.page_names = [plan.renames.get(name, name) for name in self.page_names]
         if self.comicinfo_name:
             self.comicinfo_name = plan.renames.get(self.comicinfo_name, self.comicinfo_name)
+            if self.stamp_only_dirty:
+                self.dirty = False  # the pending stamp was written with the archive
+        self._refresh_stamp_staleness()
         return plan
 
     # ------------------------------------------------------------------
@@ -654,5 +743,7 @@ class CbzBook:
                 # comicinfo_name/metadata are unchanged.
                 with zipfile.ZipFile(self.path, "r") as zf:
                     self.page_names = sorted((n for n in zf.namelist() if _is_image(n)), key=page_sort_key)
+            # Re-encoded pages change their CRCs: an earlier stamp is now stale.
+            self._refresh_stamp_staleness()
 
         return summary

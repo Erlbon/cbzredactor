@@ -56,7 +56,9 @@ from redactor_common.gui.case_conversion_dialog import CaseConversionDialog
 from redactor_common.gui.auto_numbering_dialog import AutoNumberingDialog
 from redactor_common.gui.quick_series_number import prompt_and_generate_series_numbers
 from redactor_common.gui.collapsible_splitter import SplitterPaneCollapser
-from redactor_common.gui.colors import DIRTY_COLOR, ERROR_COLOR, HIGHLIGHT_TEXT_COLOR, TABLE_SELECTION_STYLESHEET
+from redactor_common.gui.colors import (
+    DIRTY_COLOR, ERROR_COLOR, HIGHLIGHT_TEXT_COLOR, SAVE_FAILED_COLOR, TABLE_SELECTION_STYLESHEET,
+)
 from redactor_common.gui.column_menu import show_column_header_context_menu
 from redactor_common.gui.column_settings_dialog import ColumnSettingsDialog
 from redactor_common.gui.command_palette import add_command_palette
@@ -104,6 +106,7 @@ from core.foreign_archive_convert import (
 )
 from core.archive_sniff import extension_label
 from core.cbz_file import CbzBook, CbzError, ResizeCancelled, path_needs_conversion
+from core.comicinfo_check import SCAN_ISSUES, check_book, scan_status
 from core.foreign_archive_convert import relabel_mislabeled_cbz
 from redactor_common.core.trash import TrashError, move_to_trash
 from core.page_dimensions import SIZE_LOW, SIZE_OK, SIZE_OVERSIZED, PageSizeStats
@@ -995,7 +998,13 @@ class MainWindow(QMainWindow):
             return NEEDS_CONVERSION_STATUS
         if book.page_count_mismatch:
             return "Page count mismatch"
-        return "Modified" if book.dirty else "OK"
+        if book.dirty:
+            # A fresh validation scan marks the book unsaved (its stamp is
+            # pending); keep its result visible.
+            return f"Modified · {book.stamp_text()}" if book.stamp_only_dirty and book.stamp_text() else "Modified"
+        # Validate / Fix Issues: the stamp (status + when) in place of the
+        # unscanned "OK"; a stale one says so.
+        return book.stamp_text() or "OK"
 
     def _refresh_edited_row(self, book: CbzBook) -> None:
         """After an edit that changed `book`'s metadata behind the panel's
@@ -1029,7 +1038,13 @@ class MainWindow(QMainWindow):
         pages_text = "" if book.needs_conversion and not book.page_names else str(book.actual_page_count)
         self.table.setItem(row, self._col_index["pages"], QTableWidgetItem(pages_text))
         self.table.setItem(row, self._col_index["filesize"], QTableWidgetItem(_format_file_size(book.path)))
-        self.table.setItem(row, self._col_index["status"], QTableWidgetItem(status))
+        status_item = QTableWidgetItem(status)
+        stamp = book.stamp
+        if stamp is not None and not book.load_error and not book.needs_conversion:
+            note = {True: "The archive's pages changed since this scan.",
+                    None: "Can't tell whether the pages changed since this scan."}.get(book.stamp_stale, "")
+            status_item.setToolTip(stamp.tooltip(note))
+        self.table.setItem(row, self._col_index["status"], status_item)
         # Only already-measured sizes here, never a scan -- see
         # _load_lazy_cells_for_rows().
         self.table.setItem(row, self._col_index["size"], QTableWidgetItem())
@@ -1125,6 +1140,8 @@ class MainWindow(QMainWindow):
             color = None  # untinted, but greyed text -- see below
         elif book.dirty or book.page_count_mismatch:
             color = DIRTY_COLOR
+        elif book.scan_status() == SCAN_ISSUES:
+            color = SAVE_FAILED_COLOR  # a current validation scan found something left to fix
         else:
             color = None
 
@@ -1284,8 +1301,14 @@ class MainWindow(QMainWindow):
 
     @staticmethod
     def _restore_book(book: CbzBook, snapshot: dict) -> None:
+        # A scan isn't an undoable edit: undo keeps the book's current stamp
+        # (and stays dirty while that stamp is still unsaved).
+        stamp_changed = book.metadata.scan_stamp != snapshot["metadata"].scan_stamp
+        scan_stamp = book.metadata.scan_stamp
         book.metadata = snapshot["metadata"]
-        book.dirty = snapshot["dirty"]
+        book.metadata.scan_stamp = scan_stamp
+        book.dirty = snapshot["dirty"] or stamp_changed
+        book.stamp_only_dirty = stamp_changed and not snapshot["dirty"]
 
     def _push_undo(self, label: str, books: list[CbzBook]) -> None:
         """Call BEFORE mutating `books`, to capture their pre-change
@@ -2276,7 +2299,7 @@ class MainWindow(QMainWindow):
         from gui.credit_pages_dialogs import CreditPagesDialog
 
         self._commit_current_edits()
-        if book.dirty:
+        if book.dirty and not book.stamp_only_dirty:
             QMessageBox.information(
                 self, "Credit Pages", "This file has unsaved changes -- save it first, then remove pages."
             )
@@ -2310,8 +2333,8 @@ class MainWindow(QMainWindow):
             )
             return
         target_books = self._target_books()
-        unsaved = [b for b in target_books if b.dirty]
-        target_books = [b for b in target_books if not b.dirty]
+        unsaved = [b for b in target_books if b.dirty and not b.stamp_only_dirty]
+        target_books = [b for b in target_books if not (b.dirty and not b.stamp_only_dirty)]
         self._ensure_credit_scans(target_books)
 
         with_matches = [b for b in target_books if self._credit_matches_for(b)]
@@ -2419,38 +2442,50 @@ class MainWindow(QMainWindow):
         """Operations > Validate / Fix Issues...: ComicInfo mistakes in the
         selected files (or all) -- see core/comicinfo_check.py -- reviewed,
         then applied as ordinary edits: one Undo step, written on Save."""
-        from core.comicinfo_check import check_book
         from gui.validate_fix_dialog import ValidateFixDialog
 
         self._commit_current_edits()
         target_books = [b for b in self._target_books() if not b.load_error and not b.needs_conversion]
         found: list = []
+        checked: list[CbzBook] = []  # books whose check actually ran
 
         def _check(book: CbzBook, _index: int) -> None:
             found.extend((book, finding) for finding in check_book(book))
+            checked.append(book)
 
         run_with_progress(self, target_books, _check, "Checking metadata...",
                           threshold=LOAD_PROGRESS_THRESHOLD, update_every=20)
         if not found:
+            self._stamp_scans(checked)
             QMessageBox.information(self, "Validate / Fix Issues", f"No issues found in {len(target_books)} file(s).")
             return
         dialog = ValidateFixDialog(found, parent=self)
-        if dialog.exec() != dialog.DialogCode.Accepted:
-            return
-        chosen = dialog.ticked()
-        if not chosen:
-            return
+        chosen = dialog.ticked() if dialog.exec() == dialog.DialogCode.Accepted else []
         books = list({id(book): book for book, _finding in chosen}.values())
-        self._push_undo("Validate & Fix", books)
-        for book, finding in chosen:
-            setattr(book.metadata, finding.field, finding.fix)
-            book.dirty = True
+        if chosen:
+            self._push_undo("Validate & Fix", books)
+            for book, finding in chosen:
+                setattr(book.metadata, finding.field, finding.fix)
+                book.dirty = True
+        # The scan ran whether or not anything was applied: stamp what is left.
+        self._stamp_scans(checked)
         for book in books:
             self._refresh_edited_row(book)
         self._update_status()
-        self.statusBar().showMessage(
-            f"Applied {len(chosen)} fix(es) to {len(books)} file(s) -- Save to write them.", 10000,
-        )
+        message = (f"Applied {len(chosen)} fix(es) to {len(books)} file(s)" if chosen
+                   else f"Checked {len(checked)} file(s), nothing applied")
+        self.statusBar().showMessage(f"{message} -- Save to write the changes and scan stamps.", 10000)
+
+    def _stamp_scans(self, books: list[CbzBook]) -> None:
+        """Records each checked book's result (OK, or ISSUES while findings
+        remain) as its scan stamp -- held in memory, marking the book unsaved
+        like any edit, written on Save. A book that can't be stamped is left
+        as it was. Rows are reloaded via _refresh_edited_row: the selected
+        book's panel would otherwise write its stale values back over this."""
+        for book in books:
+            if book.record_scan(scan_status(check_book(book))):
+                self._refresh_edited_row(book)
+        self._update_status()
 
     def open_clean_contents_dialog(self) -> None:
         """Operations > Clean Up Archive Contents...: plain numbered page
@@ -2461,8 +2496,8 @@ class MainWindow(QMainWindow):
 
         self._commit_current_edits()
         target_books = [b for b in self._target_books() if not b.load_error and not b.needs_conversion]
-        unsaved = [b for b in target_books if b.dirty]
-        target_books = [b for b in target_books if not b.dirty]
+        unsaved = [b for b in target_books if b.dirty and not b.stamp_only_dirty]
+        target_books = [b for b in target_books if not (b.dirty and not b.stamp_only_dirty)]
         work, errors = [], []
 
         def _plan(book: CbzBook, _index: int) -> None:
@@ -2588,7 +2623,7 @@ class MainWindow(QMainWindow):
         targets = self._redact_targets()
         if not targets:
             return
-        unsaved = [book for book in targets if book.dirty]
+        unsaved = [book for book in targets if book.dirty and not book.stamp_only_dirty]
         if unsaved and QMessageBox.question(
             self, "Unsaved changes",
             f"{len(unsaved)} of the {len(targets)} file(s) have unsaved edits. Redact works on saved "

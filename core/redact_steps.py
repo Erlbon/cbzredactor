@@ -38,6 +38,7 @@ their job (offline, nothing configured) answer NOTHING with a note.
 
 from __future__ import annotations
 
+import copy
 import dataclasses
 import os
 import shutil
@@ -64,7 +65,7 @@ from redactor_common.core.trash import move_to_trash
 
 from core.cbz_file import CbzBook, CbzError
 from core.comicinfo import TAG_TO_ATTR, serialize_comicinfo_xml
-from core.comicinfo_check import check_metadata
+from core.comicinfo_check import check_metadata, scan_status
 from core.comicvine_lookup import (
     ComicVineLookupError,
     fetch_issue_details,
@@ -211,6 +212,16 @@ def _side_path(original: str, tag: str) -> str:
     return candidate
 
 
+def _xml_ignoring_stamp(metadata) -> bytes:
+    """ComicInfo.xml as it would be written, minus the scan stamp: a stamp
+    alone never makes a file count as changed (it rides along when the file
+    is saved for some other reason, so Redact doesn't rewrite every archive
+    it found nothing to do for)."""
+    clone = copy.copy(metadata)
+    clone.scan_stamp = ""
+    return serialize_comicinfo_xml(clone)
+
+
 class CbzCtx:
     """make_context() result for one file. `skip_reason` is set for a file
     that must not be touched (load error, unsaved edits); GuardStep turns
@@ -231,12 +242,13 @@ class CbzCtx:
         self.converted = False
         self.structure_changed = False  # an archive rewrite happened (cleanup, pages, resize)
         self.rename_to = ""
+        self.scan_status = ""  # the validation result the working copy is stamped with, once that step ran
         self.move = None  # a move_plan.PlannedMove
         self.temps: list[str] = []
         self.path_changed = False
         if book.load_error:
             self.skip_reason = f"the file could not be read ({book.load_error})"
-        elif book.dirty:
+        elif book.dirty and not book.stamp_only_dirty:  # a pending scan stamp is not an edit
             self.skip_reason = "it has unsaved edits (save or undo them first)"
         elif not os.path.isfile(self.original):
             self.skip_reason = "the file is missing"
@@ -246,13 +258,13 @@ class CbzCtx:
                 self.skip_reason = f"the file could not be read ({self.work.load_error})"
                 self.work = None
             else:
-                self.baseline = serialize_comicinfo_xml(self.work.metadata)
+                self.baseline = _xml_ignoring_stamp(self.work.metadata)
 
     # -- state ----------------------------------------------------------------
 
     @property
     def metadata_changed(self) -> bool:
-        return self.work is not None and serialize_comicinfo_xml(self.work.metadata) != self.baseline
+        return self.work is not None and _xml_ignoring_stamp(self.work.metadata) != self.baseline
 
     @property
     def changed(self) -> bool:
@@ -374,7 +386,7 @@ class ConvertStep(Step):
         if work.load_error:
             return StepResult.failed(f"the converted file could not be read ({work.load_error})")
         ctx.work, ctx.scratch, ctx.target_path, ctx.converted = work, scratch, target, True
-        ctx.baseline = serialize_comicinfo_xml(work.metadata)
+        ctx.baseline = _xml_ignoring_stamp(work.metadata)
         ext = os.path.splitext(ctx.original)[1].lower().lstrip(".") or "archive"
         return StepResult.applied(f"converted {ext.upper()} to CBZ, {work.actual_page_count} page(s)")
 
@@ -753,11 +765,20 @@ class ValidateFixStep(Step):
         if (missing := ctx.need_work()) is not None:
             return missing
         work = ctx.work
-        fixes = [f for f in check_metadata(work.metadata, work.actual_page_count) if f.fixable]
-        if not fixes:
-            return StepResult.nothing()
+        found = check_metadata(work.metadata, work.actual_page_count)
+        fixes = [f for f in found if f.fixable]
         for finding in fixes:
             setattr(work.metadata, finding.field, finding.fix)
+        # Stamp the final status (what is left after the fixes) into the scratch
+        # copy, so commit_in_place carries it. A current stamp with the same
+        # status is left alone: re-stamping would only move the time and force
+        # a rewrite of an otherwise unchanged archive.
+        ctx.scan_status = scan_status([f for f in found if not f.fixable])
+        current = work.stamp
+        if not (current is not None and work.stamp_stale is False and current.status == ctx.scan_status):
+            work.record_scan(ctx.scan_status)
+        if not fixes:
+            return StepResult.nothing()
         return StepResult.applied(*(f"{f.label}: {f.message}" for f in fixes))
 
 
@@ -892,6 +913,8 @@ def _write_and_commit(ctx: CbzCtx, done: list[str], notes: list[str]) -> str:
     expected = work.actual_page_count
     temp = _side_path(ctx.original, "redact-new")
     ctx.temps.append(temp)
+    if ctx.scan_status and ctx.structure_changed:
+        work.record_scan(ctx.scan_status)  # pages changed after the scan: re-take the fingerprint
     try:
         work.save(output_path=temp)
     except CbzError as exc:

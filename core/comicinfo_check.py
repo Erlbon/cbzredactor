@@ -172,3 +172,13 @@ def check_book(book) -> list[Finding]:
     if book.load_error or book.needs_conversion:
         return []
     return check_metadata(book.metadata, book.actual_page_count)
+
+
+# The two results a validation scan is stamped with (CbzBook.record_scan):
+# no findings left, or at least one (fixable or not).
+SCAN_OK = "OK"
+SCAN_ISSUES = "ISSUES"
+
+
+def scan_status(findings: list[Finding]) -> str:
+    return SCAN_ISSUES if findings else SCAN_OK

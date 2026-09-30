@@ -132,6 +132,13 @@ TAG_TO_ATTR = {
 }
 ATTR_TO_TAG = {attr: tag for tag, attr in TAG_TO_ATTR.items()}
 
+# The persisted validation-scan stamp (core/scan_stamp wire text, see
+# CbzBook.record_scan) lives here, as a plain child of <ComicInfo>. Not in
+# TAG_TO_ATTR on purpose: it isn't a field the user edits, so it must stay
+# out of columns, filename patterns and the Redact fill logic. Readers that
+# don't know the element skip it, like any other unrecognized one.
+SCAN_STAMP_TAG = "RedactorScan"
+
 INT_FIELDS = {"Count", "Volume", "AlternateCount", "Year", "Month", "Day", "PageCount"}
 
 
@@ -195,6 +202,11 @@ class ComicInfoMetadata:
     # diff two ComicInfoMetadata instances by extra_elements.
     extra_elements: list = field(default_factory=list)
 
+    # Raw text of the <RedactorScan> element ("" = none); parsed by
+    # CbzBook.stamp. Kept verbatim so a value this version can't parse
+    # still round-trips.
+    scan_stamp: str = ""
+
 
 def parse_comicinfo_xml(data: bytes) -> ComicInfoMetadata:
     """Parses ComicInfo.xml bytes into a ComicInfoMetadata. Raises
@@ -221,7 +233,9 @@ def parse_comicinfo_xml(data: bytes) -> ComicInfoMetadata:
             continue  # skip comments/PIs
         tag = etree.QName(child).localname
         attr = TAG_TO_ATTR.get(tag)
-        if attr:
+        if tag == SCAN_STAMP_TAG:
+            metadata.scan_stamp = (child.text or "").strip()
+        elif attr:
             setattr(metadata, attr, child.text or "")
         else:
             metadata.extra_elements.append(child)
@@ -256,6 +270,8 @@ def serialize_comicinfo_xml(metadata: ComicInfoMetadata) -> bytes:
     for element in metadata.extra_elements:
         root.append(element)
     _add_fields(FIELD_ORDER_AFTER_EXTRAS)
+    if (metadata.scan_stamp or "").strip():
+        etree.SubElement(root, SCAN_STAMP_TAG).text = metadata.scan_stamp.strip()
 
     return etree.tostring(
         root, xml_declaration=True, encoding="utf-8", pretty_print=True

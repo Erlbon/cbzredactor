@@ -461,6 +461,47 @@ def test_validate_fix_applies_fixable_issues(env, tmp_path):
     assert (book.metadata.number, book.metadata.language_iso) == ("7", "en")
 
 
+def test_validate_fix_stamps_the_final_status_when_the_file_is_saved(env, tmp_path):
+    info = b"<ComicInfo><Series>Saga</Series><Number>#007</Number></ComicInfo>"
+    book = CbzBook(_cbz(tmp_path / "A.cbz", comicinfo=info))
+    _only(_run(env, [book], _recipe(env, disable=("filename_tags",))))
+    assert book.stamp is not None and book.stamp.status == "OK" and book.stamp_stale is False
+    assert not book.dirty  # the row shows what is on disk
+    assert CbzBook(book.path).stamp.status == "OK"
+
+
+def test_validate_fix_stamps_issues_when_something_cannot_be_fixed(env, tmp_path):
+    info = b"<ComicInfo><Series>Saga (Digital)</Series><Number>5</Number><Count>3</Count></ComicInfo>"
+    book = CbzBook(_cbz(tmp_path / "A.cbz", comicinfo=info))
+    _only(_run(env, [book], _recipe(env, disable=("filename_tags",))))
+    assert book.metadata.series == "Saga" and book.stamp.status == "ISSUES"
+
+
+def test_a_stamp_alone_does_not_make_redact_rewrite_a_file(env, tmp_path):
+    book = CbzBook(_cbz(tmp_path / "A.cbz"))
+    before = open(book.path, "rb").read()
+    assert _only(_run(env, [book], _recipe(env, disable=("filename_tags", "lookup")))).status is FileStatus.UNCHANGED
+    assert open(book.path, "rb").read() == before and book.stamp is None
+
+
+def test_a_pending_scan_stamp_does_not_block_redact(env, tmp_path):
+    info = b"<ComicInfo><Series>Saga</Series><Number>#007</Number></ComicInfo>"
+    book = CbzBook(_cbz(tmp_path / "A.cbz", comicinfo=info))
+    book.record_scan("ISSUES")
+    entry = _only(_run(env, [book], _recipe(env, disable=("filename_tags",))))
+    assert entry.status is FileStatus.CHANGED
+    assert book.stamp.status == "OK"
+
+
+def test_stamp_is_retaken_when_a_later_step_changes_the_pages(env, tmp_path):
+    info = b"<ComicInfo><Series>Saga</Series><Number>#007</Number></ComicInfo>"
+    book = CbzBook(_cbz(tmp_path / "A.cbz", comicinfo=info, extra=[("Thumbs.db", b"x")]))
+    recipe = _recipe(env, disable=("filename_tags",))
+    recipe.order = ["validate_fix", "clean_contents"] + [k for k in recipe.order if k not in ("validate_fix", "clean_contents")]
+    _only(_run(env, [book], recipe))
+    assert book.stamp is not None and book.stamp_stale is False
+
+
 # --- rename and move ---------------------------------------------------------------
 
 

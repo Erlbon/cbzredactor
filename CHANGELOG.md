@@ -1,5 +1,25 @@
 # Changelog
 
+## 2026-09-30#19 -- Validate results are stamped into the file
+
+- **Validate / Fix Issues now records when a file was checked.** The result
+  (OK, or ISSUES while something is left to fix) and the time are kept inside
+  the CBZ, in a small `<RedactorScan>` element in ComicInfo.xml, so the record
+  follows the file when it is copied. It is held in memory after the check,
+  marks the file unsaved like any edit, and is written when you Save. Other
+  readers (ComicRack, Kavita, ComicTagger) skip the element.
+- **Status column:** shows `OK · 2026-09-30 14:05` instead of a bare `OK`
+  (tooltip has the full time). If the pages changed since, it says
+  `(changed since)`; if that can't be told, `(unverified)`. ISSUES rows are
+  tinted orange. Opening a file never marks it unsaved.
+- The page check is the central-directory list (name, CRC, size) of every entry
+  except ComicInfo.xml, so saving metadata keeps a stamp current while
+  replacing, removing, renaming or resizing pages makes it stale.
+- **Redact:** the Fix ComicInfo issues step stamps the final status into the
+  file it saves. A stamp alone never makes Redact rewrite a file it had
+  nothing else to change. A pending scan stamp no longer blocks Remove Pages,
+  Clean Up or Redact as "unsaved changes".
+
 ## 2026-09-30#18 -- Export / Import Settings
 
 - **File > Export Settings... / Import Settings...** now work. They save and
