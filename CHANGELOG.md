@@ -1,5 +1,23 @@
 # Changelog
 
+## 2026-10-01#05 -- Fuller right-click menu, and it works on unconverted rows
+
+- **The right-click menu now offers every command that works on the selected
+  files**, in the same order as the other Redactor apps: Rename File | Look Up,
+  Organize, Bulk Edit, Repair | Redact, Convert | Remove from List. New:
+  *Organize* also holds Parse Filename and Read Filename Tags; the new *Bulk
+  Edit* submenu has Search and Replace, Change Case and Auto-Number; the new
+  *Repair* submenu has Validate and Fix, Resize Images, Tag Low-Res Scans,
+  Remove Credit Pages and Clean Up Archive Contents. They are the menu-bar
+  commands themselves, so shortcuts and enabled state match. Whole-library
+  tools (Find Duplicates, Collection, Compare Library with GCD) stay in the
+  menus only.
+- **Fixed: right-clicking a CBR, CBT or CB7 row (for example in the Size
+  column) showed no menu at all**, so there was nowhere to choose Convert to
+  CBZ. The menu now opens for those rows, with Rename, Organize, Redact,
+  Convert and Remove from List; editing commands appear once a real CBZ is
+  in the selection.
+
 ## 2026-10-01#04 -- Preferences dialog (Tools > Preferences, Ctrl+,)
 
 - **New Tools > Preferences...** (shortcut Ctrl+,) gathers the everyday

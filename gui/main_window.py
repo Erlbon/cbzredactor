@@ -763,55 +763,87 @@ class MainWindow(QMainWindow):
         app_settings.save_hidden_columns(new_hidden)
         self._sync_panel_visible_fields()
 
-    def _show_table_context_menu(self, pos) -> None:
-        # Selection-fix, and the generic Open Containing Folder/Copy
-        # Path actions, are handled by the shared helper.
-        def extra_items(_books: list[CbzBook]) -> list:
-            items: list = [Separator()]
-            # Reuses the actual menu-bar QActions (same objects) rather than
-            # building fresh ones, so text, shortcut hints and enabled state
-            # can never drift out of sync with the menus.
-            # Rename File (F2) only for exactly one book with no load error --
-            # rename_selected_file() has the same guard.
-            if len(self._selected_rows) == 1 and not self.books[self._selected_rows[0]].load_error:
-                items.extend([self.actions_["rename_file"], Separator()])
-            # Every per-file lookup, so none of them needs a trip to the menu
-            # bar. "Compare Library with GCD" is a whole-library report, not a
-            # lookup on the selection, so it stays in the menu bar only.
+    def _context_menu_items(self, _books: list[CbzBook]) -> list:
+        """The app-specific rows of the table's right-click menu, after the
+        shared Open in Default App / Open Containing Folder / Copy Path:
+        rename | Look Up, Organize, Bulk Edit, Repair | Redact, Convert |
+        Remove from List.
+
+        Every entry is the real menu-bar QAction (same object), so text,
+        shortcut hints and enabled state can never drift from the menus.
+        Only whole-library tools (Find Duplicates, the Collection submenu,
+        Compare Library with GCD) and non-selection commands (Open, Save,
+        Undo, Settings) stay in the menu bar alone. The guards mirror what
+        the commands themselves enforce: Rename File and Credit Pages for
+        exactly one file, and every metadata edit or repair only when the
+        selection holds a file that is already a real CBZ (rows still waiting
+        for Convert to CBZ are read-only)."""
+        a = self.actions_
+        one = len(self._selected_rows) == 1
+        # Nothing selected means "all loaded files" for every command (that is
+        # what _target_books does), so the editing entries stay offered then.
+        editable = bool(self._editable_selected_rows()) or not self._selected_rows
+        items: list = [Separator()]
+        if one and not self.books[self._selected_rows[0]].load_error:
+            items.extend([a["rename_file"], Separator()])
+        # Every per-file lookup, so none of them needs a trip to the menu
+        # bar. "Compare Library with GCD" is a whole-library report, not a
+        # lookup on the selection, so it stays in the menu bar only.
+        if editable:
             items.append(look_up_submenu([
-                self.actions_[key] for key in (
+                a[key] for key in (
                     "comicvine_lookup", "gcd_lookup", "gcd_local_lookup",
                     "comicrack_lookup", "bedetheque_lookup",
                 )
             ]))
-            organize: list = [self.actions_["rename_export_move"]]
-            if self._editable_selected_rows():
-                organize.append(self.actions_["number_issues"])
-            if len(self._selected_rows) == 1 and self._editable_selected_rows():
-                organize.append(self.actions_["credit_pages"])
-            items.append(Submenu("&Organize", organize))
-            items.append(Separator())
-            # Deliberately checks self._selected_rows directly, not the
-            # `_books` param (get_selected_items=self._target_books, which
-            # falls back to "every loaded book" when nothing's selected) --
-            # Convert only makes sense against a genuine selection.
-            selected_unconverted = [
-                self.books[r] for r in self._selected_rows if self.books[r].needs_conversion
-            ]
-            if selected_unconverted:
-                items.append(MenuAction(
-                    "convert_selected", f"Convert {len(selected_unconverted)} File(s) to CBZ",
-                    lambda: self.convert_books_to_cbz(selected_unconverted),
-                ))
-            items.append(self.actions_["redact"])
-            items.extend([Separator(), self.actions_["remove_from_list"]])
-            return items
+        organize: list = [a["rename_export_move"]]
+        if editable:
+            organize.extend([a["parse_filename"], a["read_filename_tags"]])
+        if self._editable_selected_rows():
+            organize.append(a["number_issues"])
+        if one and self._editable_selected_rows():
+            organize.append(a["credit_pages"])
+        items.append(Submenu("&Organize", organize))
+        if editable:
+            items.append(Submenu("Bulk &Edit", [a["search_replace"], a["change_case"], a["auto_number"]]))
+            items.append(Submenu("Re&pair", [
+                a["validate"], a["resize_images"], a["tag_low_res"],
+                a["remove_credit_pages"], a["clean_contents"],
+            ]))
+        items.append(Separator())
+        items.append(a["redact"])
+        # Deliberately checks self._selected_rows directly, not the
+        # `_books` param (which falls back to "every loaded book" when
+        # nothing's selected) -- Convert only makes sense against a genuine
+        # selection.
+        selected_unconverted = [
+            self.books[r] for r in self._selected_rows if self.books[r].needs_conversion
+        ]
+        if selected_unconverted:
+            items.append(MenuAction(
+                "convert_selected", f"Convert {len(selected_unconverted)} File(s) to CBZ",
+                lambda: self.convert_books_to_cbz(selected_unconverted),
+            ))
+        items.extend([Separator(), a["remove_from_list"]])
+        return items
 
+    def _context_menu_books(self) -> list[CbzBook]:
+        """What the right-click menu is about: the selected files -- including
+        rows still waiting for Convert to CBZ (they need the menu most, and
+        _target_books() leaves them out, which used to make a right-click on
+        an unconverted row show no menu at all) -- or, with nothing selected,
+        every loaded file."""
+        selected = [self.books[r] for r in self._selected_rows if r < len(self.books)]
+        return selected or self._target_books()
+
+    def _show_table_context_menu(self, pos) -> None:
+        # Selection-fix, and the generic Open Containing Folder/Copy
+        # Path actions, are handled by the shared helper.
         show_table_context_menu(
             self, self.table, pos,
-            get_selected_items=self._target_books,
+            get_selected_items=self._context_menu_books,
             get_path=lambda book: book.path,
-            extra_items=extra_items,
+            extra_items=self._context_menu_items,
         )
 
     # ------------------------------------------------------------------
