@@ -7,7 +7,10 @@ content_fingerprint(): that hashes sampled bytes of the file, and saving a
 CBZ rewrites ComicInfo.xml and shifts every later byte.
 
 Instead this hashes the ZIP central directory's (name, CRC32, size) for
-every entry EXCEPT the root ComicInfo.xml. No entry data is read, so it is
+every entry EXCEPT the ComicInfo.xml the editor reads (the root one, else a
+nested one; core/comicinfo_locate.py), under the entry names the app shows
+(core/zip_names.py), so a Save that repairs legacy names keeps a stamp valid.
+No entry data is read, so it is
 as cheap as listing the archive. A metadata-only save leaves it unchanged;
 replacing, adding, removing, renaming or re-encoding any page (or any other
 entry) changes it. Entry order is ignored (sorted by name).
@@ -18,7 +21,9 @@ from __future__ import annotations
 import hashlib
 import zipfile
 
-_COMICINFO_LOWER = "comicinfo.xml"
+from core.comicinfo_locate import find_comicinfo_entry
+from core.zip_names import open_zip
+
 _ZIP_ERRORS = (zipfile.BadZipFile, OSError, RuntimeError, NotImplementedError, ValueError)
 
 
@@ -26,11 +31,11 @@ def cbz_fingerprint(path: str) -> str:
     """"<entries>-<hash>" for the archive at `path`, or "" when it can't
     be read as a ZIP."""
     try:
-        with zipfile.ZipFile(path, "r") as zf:
+        with open_zip(path) as zf:
+            infos = zf.infolist()
+            skipped = find_comicinfo_entry(info.filename for info in infos)
             entries = sorted(
-                (info.filename, info.CRC, info.file_size)
-                for info in zf.infolist()
-                if not ("/" not in info.filename and info.filename.lower() == _COMICINFO_LOWER)
+                (info.filename, info.CRC, info.file_size) for info in infos if info.filename != skipped
             )
     except _ZIP_ERRORS:
         return ""

@@ -33,6 +33,7 @@ from typing import Optional
 
 from PIL import UnidentifiedImageError
 
+from core.zip_names import open_zip
 from core.credit_pages import MATCH_DISTANCE, dhash, hamming, is_plain, open_page_image
 
 SAMPLE_POSITIONS = (1 / 3, 2 / 3)
@@ -64,7 +65,7 @@ def fingerprint_book(path: str, page_names: list[str]) -> BookFingerprint:
         wanted.update(_sample_indices(len(page_names), position))
     hashes: dict[int, Optional[int]] = {}
     try:
-        with zipfile.ZipFile(path) as zf:
+        with open_zip(path) as zf:
             for index in sorted(wanted):
                 try:
                     image = open_page_image(zf.read(page_names[index]))

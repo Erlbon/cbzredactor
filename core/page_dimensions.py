@@ -32,6 +32,7 @@ from typing import Optional
 from PIL import Image, UnidentifiedImageError
 
 from core.image_resize import is_double_page_spread
+from core.zip_names import open_zip
 
 LOW_RES_BELOW = 1000
 OVERSIZED_FROM = 1600
@@ -117,7 +118,7 @@ def scan_page_sizes(path: str, page_names: list[str]) -> PageSizeStats:
     Raises OSError/zipfile.BadZipFile if the archive itself can't be
     opened; a single bad page only counts as unreadable."""
     stats = PageSizeStats()
-    with zipfile.ZipFile(path, "r") as zf:
+    with open_zip(path) as zf:
         for name in page_names:
             try:
                 with zf.open(name) as stream:

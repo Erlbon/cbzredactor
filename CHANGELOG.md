@@ -1,5 +1,31 @@
 # Changelog
 
+## 2026-10-01#02 -- Old-encoding page names and nested ComicInfo.xml
+
+- **Archives from older tools keep their page and folder names.** A ZIP entry
+  name without the "UTF-8" flag was read as DOS cp437, so a page called
+  `Märchen 01.jpg` showed as `MÃ¤rchen 01.jpg`, and the first Save wrote that
+  mangled name back. Now: names whose bytes are really UTF-8 (many tools omit
+  the flag) are shown correctly in the page list and sorting, and Save writes
+  them flagged as UTF-8, which repairs the file for every reader. Names in a
+  local code page (Shift-JIS, GBK, cp1252 ...) can't be decoded without
+  guessing, so they are kept byte for byte: Save, Remove Pages, Clean Up and
+  Resize write the entry with its original name bytes and flags. They still
+  look odd in the app, but are never changed. (A Clean Up renames pages to
+  plain numbers as before.)
+- **One rule for finding ComicInfo.xml.** The collection scan accepted a
+  ComicInfo.xml inside a subfolder while the editor only looked at the archive
+  root, so the report could say "tagged" for a file the editor showed blank.
+  Both now use the same rule: a root ComicInfo.xml (any letter case) wins;
+  otherwise a nested one is read; with several nested ones the shallowest is
+  read, then alphabetical order, and the row's Status tooltip says which.
+- **Behaviour change on Save / Remove Pages:** a nested ComicInfo.xml that was
+  read is written at the archive root and the nested copy is removed, so there
+  are never two. When a root one exists, nested ones are left untouched.
+- The scan stamp's page check now ignores whichever ComicInfo.xml the editor
+  reads, and uses the repaired names. A file with a nested ComicInfo.xml or
+  legacy-named pages that was already stamped may show "(changed since)" once.
+
 ## 2026-10-01#01 -- One shared archive-rewrite routine
 
 - **Save, Remove Pages, Clean Up and Resize Images now share one rewrite

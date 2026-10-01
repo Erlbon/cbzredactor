@@ -78,6 +78,7 @@ from core.gcd_local import GcdLocalError, normalize_name, open_database
 from core.image_resize import DEFAULT_MAX_WIDTH, target_size
 from core.page_dimensions import SIZE_LOW, scan_page_sizes
 from core.scan_quality_tag import LOW_RES_TAG, add_tag, has_tag, remove_tag
+from core.zip_names import open_zip
 from core.scene_name import parse_filename as parse_scene_name, proposed_fields
 
 # Same field sets as the Rename/Export and Parse Filename dialogs (gui/main_window.py
@@ -887,7 +888,7 @@ def verify_written_file(path: str, expected_pages: int) -> bool:
     """The new archive opens, every entry passes its CRC, it holds the
     expected pages and has a ComicInfo.xml."""
     try:
-        with zipfile.ZipFile(path) as zf:
+        with open_zip(path) as zf:
             if zf.testzip() is not None:
                 return False
     except (zipfile.BadZipFile, OSError, zlib.error, RuntimeError, NotImplementedError, ValueError):

@@ -46,6 +46,7 @@ from typing import Optional
 from PIL import Image, UnidentifiedImageError
 
 from core import scene_tags
+from core.zip_names import open_zip
 
 FIRST_PAGES = 2
 LAST_PAGES = 4
@@ -240,7 +241,7 @@ def scan_book(path: str, page_names: list[str], with_thumbnails: bool = False) -
     indices = candidate_indices(len(page_names))
     candidates = [PageCandidate(index=i, name=page_names[i], hints=name_hints(page_names[i])) for i in indices]
     try:
-        with zipfile.ZipFile(path) as zf:
+        with open_zip(path) as zf:
             for candidate in candidates:
                 try:
                     image = open_page_image(zf.read(candidate.name))

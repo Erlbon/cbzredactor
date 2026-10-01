@@ -29,8 +29,6 @@ import copy
 import os
 import posixpath
 import re
-import zipfile
-import zlib
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from typing import Callable, Optional
@@ -41,6 +39,8 @@ from core.cbz_fingerprint import cbz_fingerprint
 from core.archive_sniff import CONTAINER_UNKNOWN, CONTAINER_ZIP, detect_container
 from core.comicinfo import ComicInfoError, ComicInfoMetadata, parse_comicinfo_xml, serialize_comicinfo_xml
 from core.image_resize import OUTPUT_FORMAT_EXTENSIONS, resize_page
+from core.comicinfo_locate import locate_comicinfo
+from core.zip_names import open_zip
 from core.zip_rewrite import (
     ZIP_ERRORS,
     Action,
@@ -173,17 +173,6 @@ def path_needs_conversion(path: str) -> bool:
     return _needs_conversion(path, detect_container(path))
 
 
-def _find_comicinfo_name(names: list[str]) -> Optional[str]:
-    """Case-insensitive match at the archive root only -- some writers
-    use lowercase comicinfo.xml; a handful nest one in a subfolder,
-    which is treated here as "not found" since readers that expect it
-    at the root wouldn't see it there either."""
-    for name in names:
-        if "/" not in name and name.lower() == COMICINFO_NAME.lower():
-            return name
-    return None
-
-
 @dataclass
 class CbzBook:
     """One loaded CBZ file. Construct directly (`CbzBook(path)`) --
@@ -196,6 +185,9 @@ class CbzBook:
     page_names: list = field(default_factory=list)  # image entries, filename-sorted reading order
     comicinfo_name: Optional[str] = None  # actual entry name found (original case), or None if absent
     load_error: str = ""
+    # Something worth knowing about the file that doesn't stop it loading
+    # (several nested ComicInfo.xml files and which one was read).
+    load_warning: str = ""
     save_error: str = ""
     dirty: bool = False  # set by the GUI layer when a field is edited; cleared on save()
     # What the file really is (core/archive_sniff.py), whatever its
@@ -245,10 +237,16 @@ class CbzBook:
         # A ZIP under a foreign name is read normally (it IS a CBZ in
         # all but name), just still flagged needs_conversion.
         try:
-            with zipfile.ZipFile(self.path, "r") as zf:
+            with open_zip(self.path) as zf:
                 names = zf.namelist()
                 self.page_names = sorted((n for n in names if _is_image(n)), key=page_sort_key)
-                self.comicinfo_name = _find_comicinfo_name(names)
+                found = locate_comicinfo(names)  # core/comicinfo_locate.py: the one lookup rule
+                self.comicinfo_name = found.name if found else None
+                if found and found.others:
+                    self.load_warning = (
+                        f"Several ComicInfo.xml files are in subfolders; the one in {found.name!r} was read "
+                        f"(also: {', '.join(found.others)})"
+                    )
                 if self.comicinfo_name:
                     self.metadata = parse_comicinfo_xml(zf.read(self.comicinfo_name))
                 else:
@@ -339,7 +337,7 @@ class CbzBook:
         if not self.first_page_name:
             return None
         try:
-            with zipfile.ZipFile(self.path, "r") as zf:
+            with open_zip(self.path) as zf:
                 return zf.read(self.first_page_name)
         except _ZIP_ERRORS:
             return None
@@ -381,10 +379,12 @@ class CbzBook:
         self.metadata.page_count = str(self.actual_page_count)
         new_xml_bytes = serialize_comicinfo_xml(self.metadata)
         target = output_path or self.path
-        # Preserve the original entry's name/case if there was one;
-        # otherwise write the spec-correct name fresh.
-        write_name = self.comicinfo_name or COMICINFO_NAME
+        # Preserve the original entry's name/case if it was at the archive root;
+        # otherwise (none, or a nested one) write the spec-correct name at the
+        # root. A nested source is dropped, so there are never two. A nested
+        # copy beside an existing root one is not the source and is left alone.
         old_name = self.comicinfo_name
+        write_name = old_name if old_name and "/" not in old_name else COMICINFO_NAME
 
         # The archive comment (e.g. the cover fingerprint stamp, core/cover_stamp.py)
         # is carried over by the helper. ComicInfo.xml is rewritten last, with
@@ -410,6 +410,7 @@ class CbzBook:
         if output_path is None or output_path == self.path:
             self.path = target
             self.comicinfo_name = write_name
+            self.load_warning = ""  # a promoted nested ComicInfo.xml is the only one now
             self.dirty = False
             self._refresh_stamp_staleness()
 
@@ -453,7 +454,11 @@ class CbzBook:
             if entry.name in remove:
                 return Action(drop=True)
             if entry.name == self.comicinfo_name:
-                return Action(data=serialize_comicinfo_xml(metadata), date_time=now_date_time())
+                # Rewritten with the updated bytes; a nested one moves to the root, as on Save.
+                return Action(
+                    rename=COMICINFO_NAME if "/" in entry.name else None,
+                    data=serialize_comicinfo_xml(metadata), date_time=now_date_time(),
+                )
             return None
 
         rewrite_archive(
@@ -463,6 +468,9 @@ class CbzBook:
 
         self.page_names = new_pages
         if self.comicinfo_name:
+            if "/" in self.comicinfo_name:
+                self.comicinfo_name = COMICINFO_NAME
+                self.load_warning = ""
             self.metadata = metadata
             if self.stamp_only_dirty:
                 self.dirty = False  # the pending stamp was written with ComicInfo.xml
@@ -477,7 +485,7 @@ class CbzBook:
         """What Clean Up Archive Contents would change (nothing written)."""
         from core.archive_contents import plan_cleanup
 
-        with zipfile.ZipFile(self.path, "r") as zf:
+        with open_zip(self.path) as zf:
             return plan_cleanup(zf.namelist(), self.page_names, self.comicinfo_name)
 
     def clean_contents(self, dispose_original: Optional[Callable[[str], None]] = None):
@@ -631,7 +639,7 @@ class CbzBook:
                 # Entries may have been renamed to a new extension --
                 # re-read the page list rather than guess at it.
                 # comicinfo_name/metadata are unchanged.
-                with zipfile.ZipFile(self.path, "r") as zf:
+                with open_zip(self.path) as zf:
                     self.page_names = sorted((n for n in zf.namelist() if _is_image(n)), key=page_sort_key)
             # Re-encoded pages change their CRCs: an earlier stamp is now stale.
             self._refresh_stamp_staleness()

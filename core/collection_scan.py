@@ -50,7 +50,9 @@ from typing import Callable, Iterator, Optional
 from core.archive_sniff import CONTAINER_ZIP, detect_container, extension_label
 from core.cbz_file import _is_image, page_sort_key
 from core.comicinfo import ComicInfoError, parse_comicinfo_xml
+from core.comicinfo_locate import find_comicinfo_entry
 from core.cover_stamp import make_stamp, read_stamp, write_comment
+from core.zip_names import open_zip
 
 SCAN_FILE_NAME = "collection_scan.zip"
 CSV_NAME = "collection_scan.csv"
@@ -229,17 +231,16 @@ def _read_comic(root: str, listed: Listed, cover: bool = False,
     if row.container != CONTAINER_ZIP:
         return row
     try:
-        with zipfile.ZipFile(path) as archive:
+        with open_zip(path) as archive:
             names = archive.namelist()
             row.pages = str(sum(1 for n in names if _is_image(n)))
             if cover:
                 row.cover, row.cover_key = cover_fingerprint(archive, names, known_covers)
-            info_names = [n for n in names if posixpath.basename(n).lower() == "comicinfo.xml"]
-            if not info_names:
+            info_name = find_comicinfo_entry(names)  # the same lookup the editor makes (core/comicinfo_locate.py)
+            if info_name is None:
                 row.comicinfo = "no"
                 return row
-            info_names.sort(key=lambda n: n.count("/"))  # the one at the top level first
-            data = archive.read(info_names[0])
+            data = archive.read(info_name)
     except (zipfile.BadZipFile, OSError, RuntimeError, ValueError, EOFError, zlib.error) as exc:
         # zlib.error / EOFError: a damaged or cut-off ComicInfo.xml entry.
         # Raised here, it ended the whole collection scan.

@@ -40,6 +40,8 @@ from typing import Callable, Optional, Union
 
 from redactor_common.core.save_errors import describe_save_error
 
+from core.zip_names import RawNameInfo, legacy_raw_name, open_zip, raw_names_supported
+
 try:  # a Python built without lzma has no LZMAError to catch
     from lzma import LZMAError as _LZMAError
 except ImportError:  # pragma: no cover
@@ -233,7 +235,18 @@ def safe_extra(extra: bytes) -> bytes:
 
 def _make_info(name: str, source: Optional[zipfile.ZipInfo], date_time: Optional[tuple] = None) -> zipfile.ZipInfo:
     """A fresh ZipInfo for the output, with `source`'s metadata."""
-    info = zipfile.ZipInfo(name, date_time=date_time or (source.date_time if source else _now()))
+    when = date_time or (source.date_time if source else _now())
+    raw = legacy_raw_name(source) if source is not None and name == source.filename else None
+    if raw is not None:
+        # A legacy-encoded name kept under its own name: its bytes go back as they were.
+        if not raw_names_supported():
+            raise RewriteError(
+                "Cannot rewrite the archive: its entry names use an old encoding that this Python "
+                "version can't keep exactly"
+            )
+        info = RawNameInfo(name, when, raw)
+    else:
+        info = zipfile.ZipInfo(name, date_time=when)
     if source is None:
         info.external_attr = 0o600 << 16  # what ZipFile.writestr(name, data) gives a new file
     else:
@@ -309,7 +322,7 @@ def _write_temp(src_path, tmp_path, plan: RewritePlan, progress, should_cancel) 
         result.entries_written += 1
         result.bytes_out += len(data)
 
-    with zipfile.ZipFile(src_path, "r") as src, zipfile.ZipFile(tmp_path, "w") as dst:
+    with open_zip(src_path) as src, zipfile.ZipFile(tmp_path, "w") as dst:
         dst.comment = src.comment if plan.comment is None else plan.comment
         entries = [Entry(info.filename, info) for info in src.infolist()]
         if plan.begin is not None:

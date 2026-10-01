@@ -1044,6 +1044,8 @@ class MainWindow(QMainWindow):
             note = {True: "The archive's pages changed since this scan.",
                     None: "Can't tell whether the pages changed since this scan."}.get(book.stamp_stale, "")
             status_item.setToolTip(stamp.tooltip(note))
+        if book.load_warning and not book.load_error:
+            status_item.setToolTip("\n\n".join(filter(None, [status_item.toolTip(), book.load_warning])))
         self.table.setItem(row, self._col_index["status"], status_item)
         # Only already-measured sizes here, never a scan -- see
         # _load_lazy_cells_for_rows().
