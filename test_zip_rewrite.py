@@ -96,7 +96,7 @@ def test_begin_sees_every_entry_first(tmp_path):
     assert seen == ["a.txt", "b.txt", "c.txt"]
 
 
-def test_deferred_decisions_are_resolved_in_order_per_window(tmp_path):
+def test_deferred_decisions_are_resolved_in_order_in_a_sliding_window(tmp_path):
     src = _make(tmp_path / "x.zip", [(f"{i}.txt", b"x") for i in range(5)])
     log = []
 
@@ -106,8 +106,12 @@ def test_deferred_decisions_are_resolved_in_order_per_window(tmp_path):
 
     _rewrite(src, RewritePlan(decide=decide, window=2))
     assert [d for n, d in _read_all(src)] == [f"{i}.txt".encode() for i in range(5)]
-    # both entries of a window are decided before the first is finished
-    assert log[:4] == [("decide", "0.txt"), ("decide", "1.txt"), ("finish", "0.txt"), ("finish", "1.txt")]
+    # a window of two is decided up front; each time one is finished the next is decided,
+    # so the window never drains (the workers stay busy) and never exceeds two
+    assert log[:6] == [
+        ("decide", "0.txt"), ("decide", "1.txt"), ("finish", "0.txt"),
+        ("decide", "2.txt"), ("finish", "1.txt"), ("decide", "3.txt"),
+    ]
 
 
 def test_progress_reports_every_source_entry(tmp_path):

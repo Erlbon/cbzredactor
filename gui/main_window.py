@@ -20,6 +20,7 @@ import posixpath
 import zipfile
 import shutil
 import threading
+import time
 
 from PyQt6.QtCore import QSize, Qt, QTimer
 from PyQt6.QtGui import QColor, QIcon, QImage
@@ -111,6 +112,7 @@ from core.cbz_file import CbzBook, CbzError, ResizeCancelled, path_needs_convers
 from core.comicinfo_check import SCAN_ISSUES, check_book, scan_status
 from core.foreign_archive_convert import relabel_mislabeled_cbz
 from redactor_common.core.trash import TrashError, move_to_trash
+from core.image_resize import ResizeOptions
 from core.page_dimensions import SIZE_LOW, SIZE_OK, SIZE_OVERSIZED, PageSizeStats
 from core.scan_quality_tag import LOW_RES_TAG, add_tag, has_tag, remove_tag
 from core.scene_name import parse_filename, proposed_fields
@@ -139,6 +141,7 @@ from gui.page_size_scanner import PageSizeScanner
 from gui.settings_adapter import CbzSettingsAdapter
 from redactor_common.gui.settings_bundle_dialogs import export_settings as run_export_settings
 from redactor_common.gui.settings_bundle_dialogs import import_settings as run_import_settings
+from gui.convert_resize_dialog import ConvertResizeDialog
 from gui.resize_dialog import ResizeImagesDialog
 from gui.metadata_panel import (
     CREDIT_FIELDS,
@@ -284,6 +287,20 @@ SAVE_PROGRESS_THRESHOLD = 3
 # every oversized page, so even a single large file is worth a
 # cancellable progress dialog, unlike a routine metadata save.
 RESIZE_PROGRESS_THRESHOLD = 1
+
+
+def _trash_retrying(path: str, attempts: int = 8, delay: float = 0.25) -> None:
+    """move_to_trash(), tried again for a moment on failure: the app's own background
+    cover and page-size scans (or a virus scanner) may hold the file open for an instant,
+    which fails the move on Windows. A real, lasting failure still raises TrashError."""
+    for attempt in range(attempts):
+        try:
+            move_to_trash(path)
+            return
+        except TrashError:
+            if attempt == attempts - 1:
+                raise
+            time.sleep(delay)
 # Slim strip, not zero -- keeps the panel's own toggle button reachable
 # (same convention as epubredactor's TAG_PANEL_COLLAPSED_WIDTH). Not
 # 32 (redactor_common's own doc-comment default): ComicInfoPanel's
@@ -948,7 +965,30 @@ class MainWindow(QMainWindow):
             return FOREIGN_CONVERT, app_settings.load_recycle_originals()
         return FOREIGN_UNCONVERTED, False
 
-    def _convert_path(self, path: str, delete_original: bool, errors: list[str]) -> str | None:
+    def _resize_for_convert(self, file_count: int) -> ResizeOptions | None:
+        """Whether this batch of conversions also resizes the pages, and how: asked ONCE
+        per batch, never per file. Tools > Preferences > Conversion decides: Always
+        resizes with the saved Resize defaults, Never doesn't, Ask shows the one
+        question (gui/convert_resize_dialog.py), whose "Remember my choice" turns it
+        into Always/Never. Returns the options, or None for no resize."""
+        saved = app_settings.load_resize_on_convert()
+        if saved == app_settings.RESIZE_ON_CONVERT_YES:
+            return app_settings.load_resize_options()
+        if saved == app_settings.RESIZE_ON_CONVERT_NO:
+            return None
+        dialog = ConvertResizeDialog(file_count, app_settings.load_resize_options(), self)
+        dialog.exec()
+        if dialog.resize_pages:
+            app_settings.save_resize_options(dialog.options())  # what was edited here is kept
+        if dialog.remember():
+            app_settings.save_resize_on_convert(
+                app_settings.RESIZE_ON_CONVERT_YES if dialog.resize_pages else app_settings.RESIZE_ON_CONVERT_NO
+            )
+        return dialog.options() if dialog.resize_pages else None
+
+    def _convert_path(
+        self, path: str, delete_original: bool, errors: list[str], resize: ResizeOptions | None = None
+    ) -> str | None:
         """Converts one file to a real .cbz (see core/foreign_archive_convert.py
         -- the method follows the file's real content, and the result is
         verified before this returns). A ".cbz" that's really a RAR/7z/tar
@@ -956,13 +996,14 @@ class MainWindow(QMainWindow):
         take the .cbz name. With `delete_original`, the source goes to the
         Recycle Bin afterwards -- never permanently deleted, and never if
         anything failed. Returns the new path, or None (with the reason
-        appended to `errors`)."""
+        appended to `errors`). With `resize`, the pages are resized in the same pass
+        (see convert_to_cbz)."""
         name = os.path.basename(path)
         source = path
         try:
             if os.path.splitext(path)[1].lower() == ".cbz":
                 source = relabel_mislabeled_cbz(path)
-            new_path = self._convert_file(source)
+            new_path = self._convert_file(source, resize)
         except ConversionCancelled:
             # Not an error: the user stopped it (the run's Cancel flag ends the
             # batch). Nothing half-written is left; only the name needs undoing.
@@ -991,23 +1032,27 @@ class MainWindow(QMainWindow):
         except OSError as rename_exc:
             errors.append(f"{name}: could not restore its name from {os.path.basename(source)}: {rename_exc}")
 
-    def _convert_file(self, source: str) -> str:
+    def _convert_file(self, source: str, resize: ResizeOptions | None = None) -> str:
         """convert_to_cbz(source) on a worker thread under a progress dialog
         (gui/conversion_progress.py): the batch's own dialog when one is
         running, else a dialog just for this file. Raises what convert_to_cbz
         raises, ConversionCancelled included."""
+        extra = {} if resize is None else {"resize": resize}
         run = self._conversion_run
         if run is not None:
-            return run.convert(convert_to_cbz, source)
+            return run.convert(convert_to_cbz, source, **extra)
         with ConversionRun(self, 1) as single:
             single.begin(0, f"Converting: {os.path.basename(source)}")
-            return single.convert(convert_to_cbz, source)
+            return single.convert(convert_to_cbz, source, **extra)
 
-    def _convert_for_redact(self, source: str, output_path: str | None = None) -> str:
+    def _convert_for_redact(
+        self, source: str, output_path: str | None = None, resize: ResizeOptions | None = None
+    ) -> str:
         """The Convert step of Redact: same worker thread and dialog, one file at a time."""
+        extra = {} if resize is None else {"resize": resize}
         with ConversionRun(self, 1) as single:
             single.begin(0, f"Converting: {os.path.basename(source)}")
-            return single.convert(convert_to_cbz, source, output_path=output_path)
+            return single.convert(convert_to_cbz, source, output_path=output_path, **extra)
 
     def _run_conversions(self, items: list, step, label_for) -> bool:
         """run_with_progress() for batches that convert files: one dialog with
@@ -1023,6 +1068,9 @@ class MainWindow(QMainWindow):
     def _load_paths(self, paths: list[str]) -> None:
         errors: list[str] = []
         choice, should_delete = self._resolve_foreign_choice(paths)
+        foreign_count = sum(1 for p in paths if path_needs_conversion(p))
+        # Converting while loading: one question per batch -- resize the pages in the same step?
+        resize = self._resize_for_convert(foreign_count) if choice == FOREIGN_CONVERT and foreign_count else None
 
         def _step(path: str, _index: int) -> None:
             resolved_path = path
@@ -1030,7 +1078,7 @@ class MainWindow(QMainWindow):
                 if choice == FOREIGN_SKIP:
                     return  # declined for this whole batch -- skip, don't load
                 if choice == FOREIGN_CONVERT:
-                    resolved_path = self._convert_path(path, should_delete, errors)
+                    resolved_path = self._convert_path(path, should_delete, errors, resize)
                     if resolved_path is None:
                         return
                 # FOREIGN_UNCONVERTED: listed as-is, read-only
@@ -2178,6 +2226,10 @@ class MainWindow(QMainWindow):
             oversized_count=len(oversized_books),
             default_max_height=app_settings.load_resize_max_height(),
             default_output_format=app_settings.load_resize_output_format() or None,
+            default_in_place=app_settings.load_resize_in_place(),
+            default_recycle_original=app_settings.load_resize_recycle_original(),
+            default_oversized_only=app_settings.load_resize_oversized_only(),
+            default_export_folder=app_settings.load_resize_export_folder(),
         )
         if dialog.exec() != dialog.DialogCode.Accepted:
             return
@@ -2186,11 +2238,19 @@ class MainWindow(QMainWindow):
         max_height = dialog.max_height()
         output_format = dialog.output_format()
         jpeg_quality = dialog.jpeg_quality()
+        # Everything chosen is remembered: the next run opens the way this one was left.
         app_settings.save_resize_max_width(max_width)
         app_settings.save_resize_max_height(max_height or 0)
         app_settings.save_resize_output_format(output_format or "")
         app_settings.save_resize_jpeg_quality(jpeg_quality)
         export_mode = dialog.is_export_mode()
+        recycle = dialog.recycle_original()
+        app_settings.save_resize_in_place(not export_mode)
+        app_settings.save_resize_oversized_only(dialog.oversized_only())
+        if export_mode and dialog.output_folder:
+            app_settings.save_resize_export_folder(dialog.output_folder)
+        if not export_mode:
+            app_settings.save_resize_recycle_original(recycle)
         if dialog.oversized_only():
             target_books = oversized_books
 
@@ -2251,16 +2311,21 @@ class MainWindow(QMainWindow):
                     def _on_page(done: int, total: int) -> None:
                         live["done"], live["total"] = done, total
 
+                    # Replacing the original (in place, or an export onto the file itself): it goes
+                    # to the Recycle Bin just as the finished, checked file takes its place.
+                    replaces_original = output_path is None or os.path.normcase(
+                        os.path.abspath(output_path)) == os.path.normcase(os.path.abspath(book.path))
                     try:
                         summary = call_in_background(
                             book.resize_images,
                             max_width, jpeg_quality, output_path,
                             max_height=max_height, output_format=output_format,
                             progress=_on_page, should_cancel=cancelled.is_set,
+                            dispose_original=_trash_retrying if (recycle and replaces_original) else None,
                         )
                     except ResizeCancelled:
                         break
-                    except CbzError as exc:
+                    except (CbzError, TrashError) as exc:
                         errors.append(f"{os.path.basename(book.path)}: {exc}")
                     else:
                         _apply(book, output_path, summary)
@@ -2662,6 +2727,11 @@ class MainWindow(QMainWindow):
             known_credits=self._known_credits,
             sample_values=self._redact_sample_values(),
             convert=self._convert_for_redact,
+            # Redact never asks: it resizes while converting only when that is saved as Always.
+            convert_resize=(
+                app_settings.load_resize_options()
+                if app_settings.load_resize_on_convert() == app_settings.RESIZE_ON_CONVERT_YES else None
+            ),
         )
 
     def _redact_sample_values(self) -> dict[str, str]:
@@ -3036,11 +3106,12 @@ class MainWindow(QMainWindow):
         errors: list[str] = []
         converted = 0
         index = {row.path: i for i, row in enumerate(rows)}
+        resize = self._resize_for_convert(len(conversions))
 
         def _convert(fix, _index: int) -> None:
             nonlocal converted
             source = scan.full_path(info.root, fix.path)
-            new_path = self._convert_path(scan.long_path(source), True, errors)
+            new_path = self._convert_path(scan.long_path(source), True, errors, resize)
             if new_path is None:
                 failed.add(fix.path)
                 return
@@ -3228,12 +3299,13 @@ class MainWindow(QMainWindow):
         # the Recycle Bin choice comes from Settings like every other
         # conversion.
         should_delete = app_settings.load_recycle_originals()
+        resize = self._resize_for_convert(len(paths))
 
         errors: list[str] = []
         converted: list[str] = []
 
         def _step(path: str, _index: int) -> None:
-            new_path = self._convert_path(path, should_delete, errors)
+            new_path = self._convert_path(path, should_delete, errors, resize)
             if new_path:
                 converted.append(new_path)
 
@@ -3271,7 +3343,7 @@ class MainWindow(QMainWindow):
         )
         if reply != QMessageBox.StandardButton.Yes:
             return
-        self._convert_books(books, recycle)
+        self._convert_books(books, recycle, self._resize_for_convert(len(books)))
 
     def open_preferences_dialog(self) -> None:
         """Tools > Preferences... (Ctrl+,): see gui/preferences.py."""
@@ -3346,13 +3418,15 @@ class MainWindow(QMainWindow):
 
         GcdAccountDialog(self).exec()
 
-    def _convert_books(self, books: list[CbzBook], delete_originals: bool) -> None:
+    def _convert_books(
+        self, books: list[CbzBook], delete_originals: bool, resize: ResizeOptions | None = None
+    ) -> None:
         errors: list[str] = []
         converted = 0
 
         def _step(book: CbzBook, _index: int) -> None:
             nonlocal converted
-            new_path = self._convert_path(book.path, delete_originals, errors)
+            new_path = self._convert_path(book.path, delete_originals, errors, resize)
             if new_path is None:
                 return
             try:

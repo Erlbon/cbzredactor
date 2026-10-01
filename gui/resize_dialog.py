@@ -47,6 +47,7 @@ from PyQt6.QtWidgets import (
     QVBoxLayout,
 )
 
+from core.image_resize import ResizeOptions
 from core.page_dimensions import OVERSIZED_FROM
 
 # Named target widths (single page). "Wide" is the default -- see
@@ -66,52 +67,19 @@ OUTPUT_FORMAT_CHOICES: list[tuple[str, Optional[str]]] = [
 ]
 
 
-class ResizeImagesDialog(QDialog):
-    def __init__(
-        self,
-        file_count: int,
-        default_max_width: int,
-        default_jpeg_quality: int,
-        parent=None,
-        oversized_count: Optional[int] = None,
-        default_max_height: int = 0,
-        default_output_format: Optional[str] = None,
-    ):
-        super().__init__(parent)
-        self.setWindowTitle("Resize Images")
-        self.setMinimumWidth(460)
-        self.output_folder: Optional[str] = None
+class ResizeOptionsForm(QGroupBox):
+    """The Target box: max width (with presets), optional max height, output
+    format and quality. Shared by the Resize Images dialog and the "Resize
+    pages in the same step?" question a conversion asks (gui/convert_resize_dialog.py),
+    so both offer the same choices and read them the same way."""
 
-        outer = QVBoxLayout(self)
-
-        intro = QLabel(
-            "Shrinks oversized page images down to a target maximum width. "
-            "A page detected as a double-page spread (wider than it is tall) "
-            "gets DOUBLE that width, so each half keeps the same effective "
-            "resolution a single page would -- it won't be crushed down to "
-            "half the detail."
-        )
-        intro.setWordWrap(True)
-        outer.addWidget(intro)
-
-        scope_box = QGroupBox("Files")
-        scope_layout = QVBoxLayout(scope_box)
-        self.all_files_radio = QRadioButton(f"All {file_count} file(s)")
-        self.oversized_only_radio = QRadioButton(
-            f"Only files marked Oversized ({OVERSIZED_FROM}px or wider) -- "
-            f"{oversized_count if oversized_count is not None else 0} of {file_count}"
-        )
-        scope_group = QButtonGroup(self)
-        scope_group.addButton(self.all_files_radio)
-        scope_group.addButton(self.oversized_only_radio)
-        self.all_files_radio.setChecked(True)
-        self.oversized_only_radio.setEnabled(bool(oversized_count))
-        scope_layout.addWidget(self.all_files_radio)
-        scope_layout.addWidget(self.oversized_only_radio)
-        outer.addWidget(scope_box)
-
-        form_box = QGroupBox("Target")
-        form = QFormLayout(form_box)
+    def __init__(self, options: ResizeOptions, parent=None, title: str = "Target"):
+        super().__init__(title, parent)
+        default_max_width = options.max_width
+        default_max_height = options.max_height or 0
+        default_output_format = options.output_format
+        default_jpeg_quality = options.jpeg_quality
+        form = QFormLayout(self)
 
         self.preset_combo = QComboBox()
         for label, width in WIDTH_PRESETS:
@@ -165,7 +133,93 @@ class ResizeImagesDialog(QDialog):
         self.jpeg_quality_spin.setToolTip("Used for JPEG and WebP pages; PNG pages keep lossless quality.")
         form.addRow("Quality:", self.jpeg_quality_spin)
 
-        outer.addWidget(form_box)
+    def _on_preset_chosen(self, index: int) -> None:
+        width = self.preset_combo.itemData(index)
+        if width is not None:
+            self.max_width_spin.setValue(width)
+
+    def _sync_preset_to_width(self, width: int) -> None:
+        """Shows the preset matching `width`, or "Custom" for any other
+        value typed into the width box."""
+        index = self.preset_combo.findData(width)
+        if index < 0:
+            index = self.preset_combo.count() - 1  # "Custom"
+        self.preset_combo.blockSignals(True)
+        self.preset_combo.setCurrentIndex(index)
+        self.preset_combo.blockSignals(False)
+
+    def options(self) -> ResizeOptions:
+        return ResizeOptions(
+            max_width=self.max_width_spin.value(),
+            jpeg_quality=self.jpeg_quality_spin.value(),
+            max_height=self.max_height_spin.value() if self.max_height_check.isChecked() else None,
+            output_format=self.format_combo.currentData(),
+        )
+
+
+class ResizeImagesDialog(QDialog):
+    def __init__(
+        self,
+        file_count: int,
+        default_max_width: int,
+        default_jpeg_quality: int,
+        parent=None,
+        oversized_count: Optional[int] = None,
+        default_max_height: int = 0,
+        default_output_format: Optional[str] = None,
+        default_in_place: bool = False,
+        default_recycle_original: bool = True,
+        default_oversized_only: bool = False,
+        default_export_folder: str = "",
+    ):
+        """The `default_*` values are what the last run chose (gui/app_settings.py),
+        so the dialog opens the way it was left."""
+        super().__init__(parent)
+        self.setWindowTitle("Resize Images")
+        self.setMinimumWidth(460)
+        self.output_folder: Optional[str] = None
+
+        outer = QVBoxLayout(self)
+
+        intro = QLabel(
+            "Shrinks oversized page images down to a target maximum width. "
+            "A page detected as a double-page spread (wider than it is tall) "
+            "gets DOUBLE that width, so each half keeps the same effective "
+            "resolution a single page would -- it won't be crushed down to "
+            "half the detail."
+        )
+        intro.setWordWrap(True)
+        outer.addWidget(intro)
+
+        scope_box = QGroupBox("Files")
+        scope_layout = QVBoxLayout(scope_box)
+        self.all_files_radio = QRadioButton(f"All {file_count} file(s)")
+        self.oversized_only_radio = QRadioButton(
+            f"Only files marked Oversized ({OVERSIZED_FROM}px or wider) -- "
+            f"{oversized_count if oversized_count is not None else 0} of {file_count}"
+        )
+        scope_group = QButtonGroup(self)
+        scope_group.addButton(self.all_files_radio)
+        scope_group.addButton(self.oversized_only_radio)
+        self.all_files_radio.setChecked(True)
+        self.oversized_only_radio.setEnabled(bool(oversized_count))
+        if default_oversized_only and oversized_count:
+            self.oversized_only_radio.setChecked(True)
+        scope_layout.addWidget(self.all_files_radio)
+        scope_layout.addWidget(self.oversized_only_radio)
+        outer.addWidget(scope_box)
+
+        self.form = ResizeOptionsForm(
+            ResizeOptions(default_max_width, default_jpeg_quality, default_max_height or None, default_output_format)
+        )
+        # The form's widgets, under the names this dialog always had.
+        self.preset_combo = self.form.preset_combo
+        self.max_width_spin = self.form.max_width_spin
+        self.max_height_check = self.form.max_height_check
+        self.max_height_spin = self.form.max_height_spin
+        self.format_combo = self.form.format_combo
+        self.jpeg_quality_spin = self.form.jpeg_quality_spin
+        outer.addWidget(self.form)
 
         note = QLabel(
             "A page already within its target size (or its doubled target "
@@ -178,9 +232,12 @@ class ResizeImagesDialog(QDialog):
 
         mode_box = QGroupBox("Action")
         mode_layout = QVBoxLayout(mode_box)
-        self.in_place_radio = QRadioButton("Resize files in place (overwrites the loaded files)")
+        self.in_place_radio = QRadioButton("Resize files in place (replaces the loaded files)")
         self.export_radio = QRadioButton("Export resized copies to a folder (originals untouched)")
-        self.export_radio.setChecked(True)
+        self.in_place_radio.setChecked(default_in_place)
+        self.export_radio.setChecked(not default_in_place)
+        if default_export_folder and os.path.isdir(default_export_folder):
+            self.output_folder = default_export_folder
         group = QButtonGroup(self)
         group.addButton(self.in_place_radio)
         group.addButton(self.export_radio)
@@ -190,12 +247,25 @@ class ResizeImagesDialog(QDialog):
         self.choose_folder_btn = QPushButton("Choose Folder…")
         self.choose_folder_btn.clicked.connect(self._choose_folder)
         export_row.addWidget(self.choose_folder_btn)
-        self.folder_label = QLabel("(no folder chosen)")
+        self.folder_label = QLabel(self.output_folder or "(no folder chosen)")
         self.folder_label.setStyleSheet("color: palette(mid); font-size: 11px;")
         export_row.addWidget(self.folder_label, 1)
         mode_layout.addLayout(export_row)
 
         mode_layout.addWidget(self.in_place_radio)
+        self.recycle_check = QCheckBox("Send the original to the Recycle Bin (recommended)")
+        self.recycle_check.setChecked(default_recycle_original)
+        self.recycle_check.setToolTip(
+            "The resized file replaces the original only after it was written and checked, and the "
+            "original goes to the Recycle Bin, never deleted for good. Untick to overwrite it directly "
+            "(faster for huge files, but the original pixels are gone)."
+        )
+        recycle_row = QHBoxLayout()
+        recycle_row.addSpacing(22)
+        recycle_row.addWidget(self.recycle_check)
+        mode_layout.addLayout(recycle_row)
+        self.in_place_radio.toggled.connect(self.recycle_check.setEnabled)
+        self.recycle_check.setEnabled(default_in_place)
         outer.addWidget(mode_box)
 
         self.warning_label = QLabel(
@@ -221,19 +291,7 @@ class ResizeImagesDialog(QDialog):
         self._update_ok_enabled()
 
     def _on_preset_chosen(self, index: int) -> None:
-        width = self.preset_combo.itemData(index)
-        if width is not None:
-            self.max_width_spin.setValue(width)
-
-    def _sync_preset_to_width(self, width: int) -> None:
-        """Shows the preset matching `width`, or "Custom" for any other
-        value typed into the width box."""
-        index = self.preset_combo.findData(width)
-        if index < 0:
-            index = self.preset_combo.count() - 1  # "Custom"
-        self.preset_combo.blockSignals(True)
-        self.preset_combo.setCurrentIndex(index)
-        self.preset_combo.blockSignals(False)
+        self.form._on_preset_chosen(index)
 
     def _choose_folder(self) -> None:
         folder = QFileDialog.getExistingDirectory(self, "Choose Export Folder")
@@ -270,6 +328,13 @@ class ResizeImagesDialog(QDialog):
 
     def jpeg_quality(self) -> int:
         return self.jpeg_quality_spin.value()
+
+    def recycle_original(self) -> bool:
+        """In place only: the original goes to the Recycle Bin as the resized file replaces it."""
+        return self.recycle_check.isChecked()
+
+    def options(self) -> ResizeOptions:
+        return self.form.options()
 
     def oversized_only(self) -> bool:
         return self.oversized_only_radio.isChecked()

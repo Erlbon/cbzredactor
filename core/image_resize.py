@@ -51,6 +51,17 @@ OUTPUT_FORMAT_EXTENSIONS = {"JPEG": ".jpg", "WEBP": ".webp"}
 DEFAULT_MAX_WIDTH = 1440
 
 
+@dataclass(frozen=True)
+class ResizeOptions:
+    """What a resize does to every page (the Resize dialog's choices; also what a
+    conversion applies when it resizes in the same step)."""
+
+    max_width: int = DEFAULT_MAX_WIDTH
+    jpeg_quality: int = 90
+    max_height: Optional[int] = None  # None: no height limit
+    output_format: Optional[str] = None  # "JPEG", "WEBP" or None to keep each page's format
+
+
 @dataclass
 class ResizeResult:
     data: bytes  # the (possibly unchanged) image bytes to write back
@@ -106,30 +117,46 @@ def resize_page(
     couldn't be checked/resized.
     """
     try:
+        # Opening only reads the header: the size is known before any pixel is decoded.
         image = Image.open(io.BytesIO(data))
-        image.load()  # force the full decode now, not lazily at save time
+        width, height = image.size
+        source_format = image.format or "JPEG"
     except (UnidentifiedImageError, OSError, ValueError, Image.DecompressionBombError) as exc:
         return ResizeResult(data=data, resized=False, error=str(exc))
     except Exception as exc:  # a decoder bug on one page must not sink the batch
         return ResizeResult(data=data, resized=False, error=f"{type(exc).__name__}: {exc}")
 
-    width, height = image.size
     spread = is_double_page_spread(width, height)
     new_size = target_size(width, height, max_width, max_height)
-    source_format = image.format or "JPEG"
     converting = bool(output_format) and output_format != source_format
 
     if new_size == (width, height) and not converting:
         # Already small enough -- return the ORIGINAL bytes unchanged,
         # not a re-encoded copy, so a page that didn't need touching
         # doesn't silently lose quality (or gain file size) to a
-        # pointless re-save at the same dimensions.
+        # pointless re-save at the same dimensions. (It is not even
+        # decoded: a page within its limits costs a header read.)
         return ResizeResult(
             data=data, resized=False, was_spread=spread,
             original_size=(width, height), new_size=(width, height),
         )
 
-    out_image = image if new_size == (width, height) else image.resize(new_size, Image.LANCZOS)
+    try:
+        if new_size != (width, height) and source_format == "JPEG":
+            # Let the JPEG decoder shrink by 1/2, 1/4 or 1/8 while it decodes (never below
+            # the target size): far less to decode and to resample, same result to the eye.
+            image.draft(image.mode, new_size)
+        image.load()  # force the full decode now, not lazily at save time
+    except (UnidentifiedImageError, OSError, ValueError, Image.DecompressionBombError) as exc:
+        return ResizeResult(data=data, resized=False, error=str(exc))
+    except Exception as exc:
+        return ResizeResult(data=data, resized=False, error=f"{type(exc).__name__}: {exc}")
+
+    if new_size == image.size:
+        out_image = image
+    else:
+        # reducing_gap lets Pillow shrink by a cheap integer factor first, then Lanczos the rest.
+        out_image = image.resize(new_size, Image.LANCZOS, reducing_gap=3.0)
     save_format = output_format if converting else source_format
 
     save_kwargs: dict = {}
@@ -141,7 +168,9 @@ def resize_page(
         if out_image.mode not in ("RGB", "L", "CMYK"):
             out_image = out_image.convert("RGB")
         save_kwargs["quality"] = jpeg_quality
-        save_kwargs["optimize"] = True
+        # No optimize=True (custom Huffman tables, about 6% smaller): Pillow's JPEG encoder
+        # holds the GIL, so that second pass ran one page at a time and was a third of the
+        # time of a whole resize -- the encoder is the one step the thread pool cannot overlap.
     elif save_format == "WEBP":
         if out_image.mode not in ("RGB", "RGBA"):
             has_alpha = out_image.mode in ("RGBA", "LA", "PA") or "transparency" in out_image.info

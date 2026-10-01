@@ -113,6 +113,8 @@ def test_resize_images_runs_off_thread_and_updates_rows(window, tmp_path, monkey
         def output_format(self): return None
         def jpeg_quality(self): return 85
         def is_export_mode(self): return False
+        def recycle_original(self): return False
+        output_folder = None
         def oversized_only(self): return False
         def output_path_for(self, p): return None
 

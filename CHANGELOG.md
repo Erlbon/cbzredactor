@@ -1,5 +1,39 @@
 # Changelog
 
+## 2026-10-01#07 -- Resize: remembered choices, Recycle Bin, much faster; resize while converting
+
+- **Resize Images remembers what you chose.** Besides width, height, format and
+  quality (already kept), the dialog now keeps *in place or export*, the export
+  folder, "Only files marked Oversized" and a new **Send the original to the
+  Recycle Bin** box, and opens the way you left it. They are all in Tools >
+  Preferences > Resize defaults and in Export/Import Settings.
+- **Resizing in place now sends the original to the Recycle Bin** (on by
+  default; untick to overwrite directly). The resized file is written beside it,
+  checked, and only then takes its place; if the Recycle Bin refuses, the
+  original is left exactly as it was and the error is shown. Redact's resize
+  step already worked this way (its saved file replaces the original, which goes
+  to the Recycle Bin).
+- **Resize is much faster.** 300 pages of 2400x3600 took 17.5 s here, now
+  10.0 s (from a deflated archive 24.9 s, now 11.8 s). The slow parts were:
+  the Pillow JPEG "optimize" pass, which ran one page at a time and took about a
+  third of the time (files come out about 6% larger without it); a pause between
+  batches of pages while the next batch started; resized pages being deflated
+  again when the archive was packed (they are stored now, like converted ones);
+  every page being fully decoded even when it was already within its limits
+  (only its header is read now); and big JPEGs being decoded at full size (the
+  decoder now shrinks them while decoding). More page threads are used on bigger
+  machines (up to 12). Cancel still stops it and leaves no half-written file.
+- **Converting can resize in the same step.** When a batch converts CBR/CBT/CB7
+  files to CBZ (on load, the table's Convert, Convert from disk, the Collection
+  report's Convert) you are asked *once per batch* "Resize pages in the same
+  step?", with your Resize defaults shown and editable. It is one pass (extract,
+  resize each page as it is packed, one check), not a conversion followed by a
+  second rewrite: 100 pages took 4.4 s instead of 8.2 s. "Remember my choice" is
+  saved as Tools > Preferences > Conversion > Resize pages while converting
+  (Ask / Always / Never), so the convert-on-load flow does not ask forever.
+  Redact never asks: it resizes while converting only when that is set to
+  Always. Progress and Cancel work as before.
+
 ## 2026-10-01#06 -- Converting CBR/CBT/CB7 to CBZ: progress, Cancel, and much faster
 
 - **No more frozen window while converting.** Every conversion (on load, from

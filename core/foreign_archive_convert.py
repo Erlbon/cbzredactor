@@ -43,6 +43,8 @@ import threading
 import time
 import zipfile
 import zlib
+from collections import deque
+from dataclasses import fields
 from typing import Callable, Optional
 
 from core.archive_sniff import (
@@ -54,18 +56,22 @@ from core.archive_sniff import (
     detect_container,
 )
 
-from core.cbz_file import IMAGE_EXTENSIONS
+from core.cbz_file import (
+    IMAGE_EXTENSIONS,
+    STORED_EXTENSIONS,
+    PageResizer,
+    ResizeCancelled,
+    ResizeSummary,
+    _is_image,
+    resize_zip,
+)
+from core.image_resize import ResizeOptions
+from core.zip_rewrite import CbzError
 
 FOREIGN_ARCHIVE_EXTENSIONS = (".cbr", ".cbt", ".cb7")
 
-# Page formats that are already compressed: deflating them again costs a lot
-# of CPU (the bulk of a conversion's time, measured at ~14 of 16 seconds for a
-# 450 MB archive) and saves next to nothing, so they are stored as they are
-# -- which is also how comic archives are normally packed. Everything else
-# (ComicInfo.xml, text, bitmaps) is still deflated.
-STORED_EXTENSIONS = frozenset({
-    ".jpg", ".jpeg", ".jpe", ".jfif", ".png", ".gif", ".webp", ".avif", ".heic", ".heif", ".jxl",
-})
+# STORED_EXTENSIONS (page formats stored, not deflated again) lives in core/cbz_file.py,
+# shared with Resize; re-exported here.
 
 _CHUNK = 1024 * 1024
 _REPORT_INTERVAL = 0.1  # seconds between progress callbacks
@@ -130,6 +136,8 @@ def convert_to_cbz(
     output_path: Optional[str] = None,
     progress: Optional[ProgressCallback] = None,
     should_cancel: Optional[Callable[[], bool]] = None,
+    resize: Optional[ResizeOptions] = None,
+    resize_summary: Optional[ResizeSummary] = None,
 ) -> str:
     """Converts a comic archive to a .cbz at `output_path` (default: same
     name/location with a .cbz extension) -- the original file is left
@@ -158,6 +166,12 @@ def convert_to_cbz(
     at the very end). Extracting a CBR with an external RAR tool is one call
     that cannot be interrupted (nor can py7zr's), so a cancel there takes
     effect when the extraction ends; tar stops between files.
+
+    With `resize` (a ResizeOptions) the pages are resized in the SAME pass --
+    extract, then each page is resized as it is packed (core/image_resize.py's
+    rules, on a thread pool), then one check -- instead of converting and
+    rewriting the whole archive a second time. `resize_summary`, when given, is
+    filled in with what the resize did.
     """
     report = _Progress(progress, should_cancel)
     ext = os.path.splitext(source_path)[1].lower()
@@ -178,6 +192,10 @@ def convert_to_cbz(
         raise ForeignArchiveConversionError(
             f"{os.path.basename(output_path)} already exists -- not overwriting it."
         )
+
+    if container == CONTAINER_ZIP and resize is not None:
+        _resize_copy(source_path, output_path, resize, report, resize_summary)
+        return output_path
 
     if container == CONTAINER_ZIP:
         report.expected = _file_size(source_path)
@@ -211,7 +229,9 @@ def convert_to_cbz(
         )
 
         try:
-            _write_zip(tmp_dir, tmp_output, report)
+            summary = _write_zip(tmp_dir, tmp_output, report, resize)
+            if resize_summary is not None and summary is not None:
+                _copy_summary(summary, resize_summary)
             _verify_cbz(tmp_output, extracted_pages, report)
             report.check()
             os.replace(tmp_output, output_path)
@@ -225,6 +245,52 @@ def convert_to_cbz(
             raise ForeignArchiveConversionError(f"Could not write CBZ file: {exc}") from exc
 
     return output_path
+
+
+def _copy_summary(source: ResizeSummary, target: ResizeSummary) -> None:
+    for f in fields(ResizeSummary):
+        setattr(target, f.name, getattr(source, f.name))
+
+
+def _resize_copy(source_path: str, output_path: str, resize: ResizeOptions, report: "_Progress",
+                 resize_summary: Optional[ResizeSummary]) -> None:
+    """A mislabeled .cbz (already a ZIP) that is also to be resized: one rewrite of the
+    source into the new file, never a copy followed by a rewrite."""
+    report.expected = _file_size(source_path)
+    _verify_cbz(source_path, None, report, stage=0)
+    with zipfile.ZipFile(source_path) as zf:
+        expected_pages = sum(1 for n in zf.namelist() if _is_page_name(n))
+    tmp_output = output_path + ".tmp_convert"
+
+    def on_entry(done: int, total: int) -> None:
+        report.report(1, int(report.expected * done / max(total, 1)), "Resizing")
+
+    try:
+        summary = resize_zip(
+            source_path, tmp_output, resize, progress=on_entry,
+            should_cancel=lambda: report._should_cancel is not None and report._should_cancel(),
+            temp_suffix=".tmp_resize", error_prefix="Could not write CBZ file",
+        )
+        _verify_cbz(tmp_output, expected_pages, report)
+        report.check()
+        os.replace(tmp_output, output_path)
+    except ResizeCancelled as exc:
+        _remove_quietly(tmp_output)
+        raise ConversionCancelled("Conversion cancelled.") from exc
+    except (OSError, zipfile.BadZipFile, CbzError, ForeignArchiveConversionError) as exc:
+        _remove_quietly(tmp_output)
+        if isinstance(exc, ForeignArchiveConversionError):
+            raise
+        raise ForeignArchiveConversionError(f"Could not write CBZ file: {exc}") from exc
+    if resize_summary is not None:
+        _copy_summary(summary, resize_summary)
+
+
+def _remove_quietly(path: str) -> None:
+    try:
+        os.remove(path)
+    except OSError:
+        pass
 
 
 def _file_size(path: str) -> int:
@@ -249,31 +315,68 @@ def _copy_file(source: str, target: str, report: "_Progress") -> None:
     shutil.copystat(source, target)
 
 
-def _write_zip(tmp_dir: str, tmp_output: str, report: "_Progress") -> None:
+def _write_zip(
+    tmp_dir: str, tmp_output: str, report: "_Progress", resize: Optional[ResizeOptions] = None
+) -> Optional[ResizeSummary]:
     """Packs everything under `tmp_dir` into a new zip, streaming each file in
     chunks (never a whole page in memory) and storing already-compressed page
-    images instead of deflating them again."""
-    with zipfile.ZipFile(tmp_output, "w", zipfile.ZIP_DEFLATED) as zf:
-        done = 0
-        for root, _dirs, files in os.walk(tmp_dir):
-            for name in files:
-                full_path = os.path.join(root, name)
-                arcname = os.path.relpath(full_path, tmp_dir)
-                # zf.write(full_path, arcname) would use the extracted
-                # file's own mtime -- and ZIP can't represent anything
-                # before 1980, which a source archive's entries can easily
-                # be (tar in particular often defaults to the epoch, 1970,
-                # when nothing else was specified). Stamping the current
-                # time instead (what writestr() with a plain string arcname
-                # did) sidesteps that entirely; per-page timestamps aren't
-                # meaningful for a comic archive's contents anyway.
-                info = zipfile.ZipInfo(arcname, date_time=time.localtime(time.time())[:6])
-                info.compress_type = (
-                    zipfile.ZIP_STORED if os.path.splitext(name)[1].lower() in STORED_EXTENSIONS
-                    else zipfile.ZIP_DEFLATED
-                )
-                info.external_attr = 0o600 << 16
+    images instead of deflating them again.
+
+    With `resize`, each page image is resized on its way in (a bounded window of
+    pages in flight on a thread pool, written in order) and the ResizeSummary is
+    returned; everything else is packed as it is."""
+    files: list[tuple[str, str]] = []
+    for root, _dirs, names in os.walk(tmp_dir):
+        for name in names:
+            full_path = os.path.join(root, name)
+            files.append((full_path, os.path.relpath(full_path, tmp_dir).replace(os.sep, "/")))
+
+    resizer = (
+        PageResizer(resize, [arc for _full, arc in files if _is_image(arc)]) if resize is not None else None
+    )
+    pending: deque = deque()  # (arcname, finish, source size) of pages being resized, oldest first
+    done = 0
+
+    def new_info(arcname: str, compress_type: Optional[int] = None) -> zipfile.ZipInfo:
+        # zf.write(full_path, arcname) would use the extracted file's own mtime --
+        # and ZIP can't represent anything before 1980, which a source archive's
+        # entries can easily be (tar in particular often defaults to the epoch,
+        # 1970, when nothing else was specified). Stamping the current time
+        # instead (what writestr() with a plain string arcname did) sidesteps that
+        # entirely; per-page timestamps aren't meaningful for a comic archive's
+        # contents anyway.
+        info = zipfile.ZipInfo(arcname, date_time=time.localtime(time.time())[:6])
+        if compress_type is None:
+            compress_type = (
+                zipfile.ZIP_STORED if os.path.splitext(arcname)[1].lower() in STORED_EXTENSIONS
+                else zipfile.ZIP_DEFLATED
+            )
+        info.compress_type = compress_type
+        info.external_attr = 0o600 << 16
+        return info
+
+    def write_resized(zf: zipfile.ZipFile) -> None:
+        nonlocal done
+        arcname, finish, size = pending.popleft()
+        new_name, data, compress_type = finish()
+        zf.writestr(new_info(new_name or arcname, compress_type), data)
+        done += size
+        report.report(1, done, "Resizing")
+
+    try:
+        with zipfile.ZipFile(tmp_output, "w", zipfile.ZIP_DEFLATED) as zf:
+            for full_path, arcname in files:
+                report.check()
                 size = os.path.getsize(full_path)
+                if resizer is not None and _is_image(arcname):
+                    with open(full_path, "rb") as src:
+                        original = src.read()
+                    pending.append((arcname, resizer.submit(arcname, original), size))
+                    while len(pending) >= resizer.window:
+                        write_resized(zf)
+                        report.check()
+                    continue
+                info = new_info(arcname)
                 with open(full_path, "rb") as src, zf.open(info, "w", force_zip64=size >= 0x3FFFFFFF) as dst:
                     while True:
                         report.check()
@@ -283,6 +386,15 @@ def _write_zip(tmp_dir: str, tmp_output: str, report: "_Progress") -> None:
                         dst.write(chunk)
                         done += len(chunk)
                         report.report(1, done)
+                if resizer is not None:
+                    resizer.passed_through(size)
+            while pending:
+                report.check()
+                write_resized(zf)
+    finally:
+        if resizer is not None:
+            resizer.close()
+    return resizer.summary if resizer is not None else None
 
 
 def relabel_mislabeled_cbz(path: str) -> str:

@@ -76,7 +76,7 @@ from core.comicvine_lookup import (
 from core.credit_pages import KnownCreditPages, credit_matches, hamming, scan_book
 from core.foreign_archive_convert import ForeignArchiveConversionError, convert_to_cbz
 from core.gcd_local import GcdLocalError, normalize_name, open_database
-from core.image_resize import DEFAULT_MAX_WIDTH, target_size
+from core.image_resize import DEFAULT_MAX_WIDTH, ResizeOptions, target_size
 from core.page_dimensions import SIZE_LOW, scan_page_sizes
 from core.scan_quality_tag import LOW_RES_TAG, add_tag, has_tag, remove_tag
 from core.zip_names import open_zip
@@ -128,6 +128,8 @@ class RedactEnv:
     open_database: Callable[[str], object] = open_database
     comicvine_down: bool = False  # set by the first network failure, skips the rest of the run
     convert: Callable[..., str] | None = None  # convert(source, output_path=...): None = convert_to_cbz directly; the app supplies a threaded one with progress
+
+    convert_resize: ResizeOptions | None = None  # resize the pages in the same pass as the conversion (None: don't); read from the saved setting, never asked
 
     def begin(self) -> None:
         """Call before each run."""
@@ -370,7 +372,9 @@ class ConvertStep(Step):
     description = (
         "Converts a CBR, CB7 or CBT (or a file whose extension doesn't match what it really is) to a real "
         "CBZ, checked before anything else happens. The finished file is saved under the .cbz name and the "
-        "foreign original goes to the Recycle Bin. Needs rarfile + an unrar tool for CBR and py7zr for CB7."
+        "foreign original goes to the Recycle Bin. If Tools > Preferences > Conversion says to always resize "
+        "pages while converting, the pages are also shrunk in the same pass (Redact never asks). "
+        "Needs rarfile + an unrar tool for CBR and py7zr for CB7."
     )
 
     def run(self, ctx: CbzCtx) -> StepResult:
@@ -382,7 +386,8 @@ class ConvertStep(Step):
         scratch = _side_path(ctx.original, "redact-work")
         ctx.temps.append(scratch)
         try:
-            (ctx.env.convert or convert_to_cbz)(ctx.original, output_path=scratch)
+            extra = {} if ctx.env.convert_resize is None else {"resize": ctx.env.convert_resize}
+            (ctx.env.convert or convert_to_cbz)(ctx.original, output_path=scratch, **extra)
         except ForeignArchiveConversionError as exc:
             return StepResult.failed(str(exc))
         work = CbzBook(scratch)
@@ -391,7 +396,8 @@ class ConvertStep(Step):
         ctx.work, ctx.scratch, ctx.target_path, ctx.converted = work, scratch, target, True
         ctx.baseline = _xml_ignoring_stamp(work.metadata)
         ext = os.path.splitext(ctx.original)[1].lower().lstrip(".") or "archive"
-        return StepResult.applied(f"converted {ext.upper()} to CBZ, {work.actual_page_count} page(s)")
+        resized = ", pages resized in the same pass" if ctx.env.convert_resize is not None else ""
+        return StepResult.applied(f"converted {ext.upper()} to CBZ{resized}, {work.actual_page_count} page(s)")
 
 
 class CleanContentsStep(Step):

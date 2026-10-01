@@ -29,6 +29,7 @@ import copy
 import os
 import posixpath
 import re
+import zipfile
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from typing import Callable, Optional
@@ -38,7 +39,7 @@ from redactor_common.core.scan_stamp import ScanStamp, make_stamp, parse_stamp
 from core.cbz_fingerprint import cbz_fingerprint
 from core.archive_sniff import CONTAINER_UNKNOWN, CONTAINER_ZIP, detect_container
 from core.comicinfo import ComicInfoError, ComicInfoMetadata, parse_comicinfo_xml, serialize_comicinfo_xml
-from core.image_resize import OUTPUT_FORMAT_EXTENSIONS, resize_page
+from core.image_resize import OUTPUT_FORMAT_EXTENSIONS, ResizeOptions, resize_page
 from core.comicinfo_locate import locate_comicinfo
 from core.zip_names import open_zip
 from core.zip_rewrite import (
@@ -64,6 +65,15 @@ _FORMAT_EXTENSION_FAMILY = {"JPEG": (".jpg", ".jpeg"), "WEBP": (".webp",)}
 # counted as a page.
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp"}
 COMICINFO_NAME = "ComicInfo.xml"
+
+# Page formats that are already compressed: deflating them again costs a lot
+# of CPU (the bulk of a conversion's time, measured at ~14 of 16 seconds for a
+# 450 MB archive) and saves next to nothing, so they are stored as they are
+# -- which is also how comic archives are normally packed. Everything else
+# (ComicInfo.xml, text, bitmaps) is still deflated.
+STORED_EXTENSIONS = frozenset({
+    ".jpg", ".jpeg", ".jpe", ".jfif", ".png", ".gif", ".webp", ".avif", ".heic", ".heif", ".jxl",
+})
 
 _ZIP_ERRORS = ZIP_ERRORS  # see core/zip_rewrite.py
 
@@ -160,6 +170,128 @@ def _remap_pages_element(metadata: ComicInfoMetadata, removed_positions: list[in
                 element.remove(page)
             else:
                 page.set("Image", str(position - sum(1 for r in removed_positions if r < position)))
+
+
+def default_resize_workers() -> int:
+    """Page threads for a resize: most of the cores (measured: 4 threads 16 s, 8 13.7 s,
+    12 11.1 s, 16 9.3 s for 300 pages of 2400x3600), leaving two for the window, capped
+    at 12 because each thread holds one decoded page (about 26 MB at 2400x3600)."""
+    return max(1, min(12, (os.cpu_count() or 2) - 2))
+
+
+class PageResizer:
+    """Resizes pages on a small thread pool (Pillow releases the GIL while it
+    decodes and resamples) and keeps the ResizeSummary. Used by CbzBook's
+    Resize and by a conversion that resizes in the same step, so both do the
+    same thing to a page.
+
+    submit(name, bytes) starts a page and returns finish(), which waits for it
+    and gives (new entry name or None, bytes, compress_type or None). Callers
+    keep a bounded number of pages in flight (`window`) so memory stays small."""
+
+    def __init__(self, options: ResizeOptions, page_names: list[str], workers: Optional[int] = None):
+        self.options = options
+        self.summary = ResizeSummary()
+        self.workers = workers or default_resize_workers()
+        self.window = self.workers * 2
+        self.convertible = _renamable_pages(page_names, options.output_format)
+        self._pool = ThreadPoolExecutor(max_workers=self.workers)
+
+    def __enter__(self) -> "PageResizer":
+        return self
+
+    def __exit__(self, *_exc) -> None:
+        self.close()
+
+    def close(self) -> None:
+        # On a cancel or an error the pages still queued are dropped, not finished.
+        self._pool.shutdown(wait=True, cancel_futures=True)
+
+    def submit(self, name: str, original: bytes) -> Callable[[], tuple]:
+        options = self.options
+        fmt = options.output_format if name in self.convertible else None
+        future = self._pool.submit(
+            resize_page, original, options.max_width, options.jpeg_quality, options.max_height, fmt
+        )
+
+        def finish() -> tuple:
+            result = future.result()
+            write_name = None
+            if result.extension and _needs_rename(name, options.output_format):
+                write_name = _renamed_for_format(name, options.output_format)
+            if result.error:
+                self.summary.pages_failed += 1
+            elif result.resized:
+                self.summary.pages_resized += 1
+            else:
+                self.summary.pages_skipped += 1
+            self.summary.original_bytes += len(original)
+            self.summary.new_bytes += len(result.data)
+            compress = None
+            if result.resized and posixpath.splitext(write_name or name)[1].lower() in STORED_EXTENSIONS:
+                compress = zipfile.ZIP_STORED  # a re-encoded JPEG/WebP/PNG: deflating it again only costs time
+            return write_name, result.data, compress
+
+        return finish
+
+    def passed_through(self, size: int) -> None:
+        """A non-page entry, copied as it is."""
+        self.summary.original_bytes += size
+        self.summary.new_bytes += size
+
+
+def resize_zip(
+    src_path: str,
+    dst_path: str,
+    options: ResizeOptions,
+    *,
+    dispose_original: Optional[Callable[[str], None]] = None,
+    workers: Optional[int] = None,
+    progress: Optional[Callable[[int, int], None]] = None,
+    should_cancel: Optional[Callable[[], bool]] = None,
+    temp_suffix: str = ".tmp_resize",
+    error_prefix: str = "Could not resize CBZ file",
+) -> ResizeSummary:
+    """Rewrites the ZIP at `src_path` with every page resized as `options` say
+    (see CbzBook.resize_images for the details), into `dst_path` (the same path
+    for in place). ONE pass: pages are read, resized on the thread pool and
+    written in order; everything else is copied as it is, and the archive
+    comment and every entry's metadata are kept (core/zip_rewrite.py).
+    `dispose_original(path)` runs on the destination just before the new file
+    replaces it (the Recycle Bin). Raises ResizeCancelled on cancel, CbzError
+    otherwise; the temp file is removed in every case."""
+    resizer: Optional[PageResizer] = None
+    workers = workers or default_resize_workers()
+
+    def begin(entries) -> None:
+        nonlocal resizer
+        resizer = PageResizer(options, [entry.name for entry in entries if _is_image(entry.name)], workers)
+
+    def decide(entry, read):
+        if not _is_image(entry.name):
+            resizer.passed_through(entry.info.file_size)
+            return None  # copied untouched
+        finish = resizer.submit(entry.name, read())
+
+        def done() -> Action:
+            write_name, data, compress = finish()
+            return Action(rename=write_name, data=data, compress_type=compress)
+
+        return done
+
+    plan = RewritePlan(decide=decide, begin=begin, window=workers * 2)
+    try:
+        try:
+            rewrite_archive(
+                src_path, dst_path, plan, dispose_original=dispose_original, temp_suffix=temp_suffix,
+                error_prefix=error_prefix, progress=progress, should_cancel=should_cancel,
+            )
+        finally:
+            if resizer is not None:
+                resizer.close()
+    except RewriteCancelled as exc:
+        raise ResizeCancelled("Resize cancelled") from exc
+    return resizer.summary if resizer is not None else ResizeSummary()
 
 
 def _needs_conversion(path: str, container: str) -> bool:
@@ -562,6 +694,7 @@ class CbzBook:
         workers: Optional[int] = None,
         progress: Optional[Callable[[int, int], None]] = None,
         should_cancel: Optional[Callable[[], bool]] = None,
+        dispose_original: Optional[Callable[[str], None]] = None,
     ) -> ResizeSummary:
         """Rewrites every page image down to `max_width` (see
         core/image_resize.py for the double-page-spread doubling rule),
@@ -580,6 +713,10 @@ class CbzBook:
         releases the GIL while it works), a bounded window at a time so
         a huge book is never held in memory all at once. Output order
         always matches the source's.
+
+        `dispose_original(path)` (in place only) is called on the original
+        just before the resized file replaces it -- the GUI passes "move to
+        the Recycle Bin"; if it raises, nothing is replaced.
 
         `progress(done, total)` is called after each entry is written
         (safe to call from a worker thread: this method touches no GUI).
@@ -601,51 +738,12 @@ class CbzBook:
         if self.needs_conversion:
             raise CbzError("Cannot resize, this file needs converting to CBZ first (Convert to CBZ)")
 
-        summary = ResizeSummary()
         target = output_path or self.path
-        workers = workers or min(8, os.cpu_count() or 1)
-        convertible: set[str] = set()
-
-        def begin(entries) -> None:
-            convertible.update(_renamable_pages([entry.name for entry in entries], output_format))
-
-        def decide(entry, read):
-            name = entry.name
-            if not _is_image(name):
-                summary.original_bytes += entry.info.file_size
-                summary.new_bytes += entry.info.file_size
-                return None  # copied untouched
-            original = read()
-            fmt = output_format if name in convertible else None
-            future = pool.submit(resize_page, original, max_width, jpeg_quality, max_height, fmt)
-
-            def finish() -> Action:
-                result = future.result()
-                write_name = None
-                if result.extension and _needs_rename(name, output_format):
-                    write_name = _renamed_for_format(name, output_format)
-                if result.error:
-                    summary.pages_failed += 1
-                elif result.resized:
-                    summary.pages_resized += 1
-                else:
-                    summary.pages_skipped += 1
-                summary.original_bytes += len(original)
-                summary.new_bytes += len(result.data)
-                return Action(rename=write_name, data=result.data)
-
-            return finish
-
-        # A bounded window of pages is in flight at a time (see RewritePlan.window).
-        plan = RewritePlan(decide=decide, begin=begin, window=workers * 2)
-        try:
-            with ThreadPoolExecutor(max_workers=workers) as pool:
-                rewrite_archive(
-                    self.path, target, plan, temp_suffix=".tmp_resize", error_prefix="Could not resize CBZ file",
-                    progress=progress, should_cancel=should_cancel,
-                )
-        except RewriteCancelled as exc:
-            raise ResizeCancelled("Resize cancelled") from exc
+        options = ResizeOptions(max_width, jpeg_quality, max_height, output_format)
+        summary = resize_zip(
+            self.path, target, options, dispose_original=dispose_original, workers=workers,
+            progress=progress, should_cancel=should_cancel,
+        )
 
         if output_path is None or output_path == self.path:
             self.path = target

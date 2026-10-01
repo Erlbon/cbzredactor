@@ -38,6 +38,11 @@ _ON_LOAD_CHOICES = (
     app_settings.FOREIGN_LOAD_CONVERT,
     app_settings.FOREIGN_LOAD_ASK,
 )
+_RESIZE_ON_CONVERT_CHOICES = (
+    app_settings.RESIZE_ON_CONVERT_ASK,
+    app_settings.RESIZE_ON_CONVERT_YES,
+    app_settings.RESIZE_ON_CONVERT_NO,
+)
 _OUTPUT_FORMATS = ("", "JPEG", "WEBP")
 
 
@@ -159,6 +164,10 @@ class CbzSettingsAdapter(sb.SettingsAdapter):
                 "recycle_originals": (
                     app_settings.load_recycle_originals, app_settings.save_recycle_originals, _bool,
                 ),
+                "resize_on_convert": (
+                    app_settings.load_resize_on_convert, app_settings.save_resize_on_convert,
+                    _choice(_RESIZE_ON_CONVERT_CHOICES),
+                ),
             },
             "resize": {
                 "max_width": (app_settings.load_resize_max_width, app_settings.save_resize_max_width, _int(1, 20000)),
@@ -172,6 +181,13 @@ class CbzSettingsAdapter(sb.SettingsAdapter):
                     app_settings.load_resize_output_format, app_settings.save_resize_output_format,
                     _choice(_OUTPUT_FORMATS),
                 ),
+                "in_place": (app_settings.load_resize_in_place, app_settings.save_resize_in_place, _bool),
+                "recycle_original": (
+                    app_settings.load_resize_recycle_original, app_settings.save_resize_recycle_original, _bool,
+                ),
+                "oversized_only": (
+                    app_settings.load_resize_oversized_only, app_settings.save_resize_oversized_only, _bool,
+                ),
             },
             "paths": {
                 "gcd_local_database": (
@@ -181,6 +197,9 @@ class CbzSettingsAdapter(sb.SettingsAdapter):
                     app_settings.load_comicrack_database, app_settings.save_comicrack_database, _path,
                 ),
                 "library_root": (app_settings.load_library_root, app_settings.save_library_root, _path),
+                "resize_export_folder": (
+                    app_settings.load_resize_export_folder, app_settings.save_resize_export_folder, _path,
+                ),
                 "last_directory": (app_settings.load_last_directory, self._write_last_directory, _path),
             },
         }

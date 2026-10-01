@@ -39,6 +39,11 @@ KEY_RESIZE_MAX_WIDTH = "resize_max_width"
 KEY_RESIZE_MAX_HEIGHT = "resize_max_height"
 KEY_RESIZE_JPEG_QUALITY = "resize_jpeg_quality"
 KEY_RESIZE_OUTPUT_FORMAT = "resize_output_format"
+KEY_RESIZE_IN_PLACE = "resize_in_place"
+KEY_RESIZE_RECYCLE_ORIGINAL = "resize_recycle_original"
+KEY_RESIZE_OVERSIZED_ONLY = "resize_oversized_only"
+KEY_RESIZE_EXPORT_FOLDER = "resize_export_folder"
+KEY_RESIZE_ON_CONVERT = "conversion_resize_on_convert"
 KEY_GCD_LOCAL_DB = "gcd_local_database"
 KEY_COMICRACK_DB = "comicrack_database"
 KEY_LIBRARY_ROOT = "library_root"
@@ -68,6 +73,18 @@ def preference_sections() -> list[PrefSection]:
                 KEY_RECYCLE_ORIGINALS, "Move originals to the Recycle Bin after a conversion", "bool", False,
                 help="An original is only moved after its new .cbz opened cleanly with the "
                      "same number of pages: never deleted permanently, never after a failure.",
+            ),
+            PrefSpec(
+                KEY_RESIZE_ON_CONVERT, "Resize pages while converting", "choice",
+                app_settings.RESIZE_ON_CONVERT_ASK,
+                help="Converting a CBR/CBT/CB7 can shrink its pages in the same step, with the "
+                     "Resize defaults below (one pass, not a conversion and then a rewrite). "
+                     "Ask: one question per batch. Redact never asks: it resizes only on Always.",
+                choices=(
+                    (app_settings.RESIZE_ON_CONVERT_ASK, "Ask once per batch"),
+                    (app_settings.RESIZE_ON_CONVERT_YES, "Always resize"),
+                    (app_settings.RESIZE_ON_CONVERT_NO, "Never resize"),
+                ),
             ),
         ),
         "What happens when a file is not a real CBZ.",
@@ -100,8 +117,29 @@ def preference_sections() -> list[PrefSection]:
                     ("WEBP", "WebP (smaller files; most modern readers support it)"),
                 ),
             ),
+            PrefSpec(
+                KEY_RESIZE_IN_PLACE, "Replace the files in place (instead of exporting copies)", "bool", False,
+                help="Resize Images starts on 'Resize files in place'. Off: it exports resized "
+                     "copies to a folder and leaves the originals alone.",
+            ),
+            PrefSpec(
+                KEY_RESIZE_RECYCLE_ORIGINAL, "Send the original to the Recycle Bin when replacing in place",
+                "bool", True,
+                help="The resized file replaces the original only after it was written and checked; "
+                     "the original goes to the Recycle Bin, never deleted for good.",
+            ),
+            PrefSpec(
+                KEY_RESIZE_OVERSIZED_ONLY, "Only files marked Oversized", "bool", False,
+                help="Resize Images starts with 'Only files marked Oversized' chosen.",
+            ),
+            PrefSpec(
+                KEY_RESIZE_EXPORT_FOLDER, "Export folder", "path", "",
+                help="Where Resize Images exports copies to.",
+                path_mode="folder",
+            ),
         ),
-        "What the Resize Images dialog starts with. You can still change them there each time.",
+        "What the Resize Images dialog starts with (and remembers from the last run). "
+        "You can still change them there each time.",
     )
     paths = PrefSection(
         "paths", "Paths",
@@ -156,6 +194,11 @@ _READERS = {
     KEY_RESIZE_MAX_HEIGHT: app_settings.load_resize_max_height,
     KEY_RESIZE_JPEG_QUALITY: app_settings.load_resize_jpeg_quality,
     KEY_RESIZE_OUTPUT_FORMAT: app_settings.load_resize_output_format,
+    KEY_RESIZE_IN_PLACE: app_settings.load_resize_in_place,
+    KEY_RESIZE_RECYCLE_ORIGINAL: app_settings.load_resize_recycle_original,
+    KEY_RESIZE_OVERSIZED_ONLY: app_settings.load_resize_oversized_only,
+    KEY_RESIZE_EXPORT_FOLDER: app_settings.load_resize_export_folder,
+    KEY_RESIZE_ON_CONVERT: app_settings.load_resize_on_convert,
     KEY_GCD_LOCAL_DB: app_settings.load_gcd_local_database,
     KEY_COMICRACK_DB: app_settings.load_comicrack_database,
     KEY_LIBRARY_ROOT: app_settings.load_library_root,
@@ -172,6 +215,11 @@ _WRITERS = {
     KEY_RESIZE_MAX_HEIGHT: app_settings.save_resize_max_height,
     KEY_RESIZE_JPEG_QUALITY: app_settings.save_resize_jpeg_quality,
     KEY_RESIZE_OUTPUT_FORMAT: app_settings.save_resize_output_format,
+    KEY_RESIZE_IN_PLACE: app_settings.save_resize_in_place,
+    KEY_RESIZE_RECYCLE_ORIGINAL: app_settings.save_resize_recycle_original,
+    KEY_RESIZE_OVERSIZED_ONLY: app_settings.save_resize_oversized_only,
+    KEY_RESIZE_EXPORT_FOLDER: app_settings.save_resize_export_folder,
+    KEY_RESIZE_ON_CONVERT: app_settings.save_resize_on_convert,
     KEY_GCD_LOCAL_DB: app_settings.save_gcd_local_database,
     KEY_COMICRACK_DB: app_settings.save_comicrack_database,
     KEY_LIBRARY_ROOT: app_settings.save_library_root,

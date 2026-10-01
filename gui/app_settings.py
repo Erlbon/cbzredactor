@@ -25,7 +25,7 @@ import os
 from core.app_paths import base_dir
 from core.comic_genres import COMMON_COMIC_GENRES
 from core.comic_languages import DEFAULT_LANGUAGES
-from core.image_resize import DEFAULT_MAX_WIDTH
+from core.image_resize import DEFAULT_MAX_WIDTH, ResizeOptions
 from redactor_common.core import managed_list, pattern_history, secret_store
 
 _SETTINGS_FILENAME = "cbzredactor_settings.ini"
@@ -53,6 +53,10 @@ _RESIZE_MAX_WIDTH_KEY = "resize/max_width"
 _RESIZE_JPEG_QUALITY_KEY = "resize/jpeg_quality"
 _RESIZE_MAX_HEIGHT_KEY = "resize/max_height"  # 0 = no height limit
 _RESIZE_OUTPUT_FORMAT_KEY = "resize/output_format"  # "" = keep each page's format
+_RESIZE_IN_PLACE_KEY = "resize/in_place"  # False = export copies to a folder
+_RESIZE_RECYCLE_ORIGINAL_KEY = "resize/recycle_original"  # in place: original to the Recycle Bin
+_RESIZE_OVERSIZED_ONLY_KEY = "resize/oversized_only"
+_RESIZE_EXPORT_FOLDER_KEY = "resize/export_folder"
 _DEFAULT_RESIZE_MAX_WIDTH = DEFAULT_MAX_WIDTH  # see core/image_resize.py
 _DEFAULT_RESIZE_JPEG_QUALITY = 90
 
@@ -352,6 +356,78 @@ def load_resize_output_format() -> str:
 
 def save_resize_output_format(output_format: str) -> None:
     _settings().setValue(_RESIZE_OUTPUT_FORMAT_KEY, output_format or "")
+
+
+def load_resize_options() -> ResizeOptions:
+    """The saved Resize choices as one object: what the Resize dialog starts
+    with, and what a conversion resizes with when it resizes in the same step."""
+    return ResizeOptions(
+        max_width=load_resize_max_width(),
+        jpeg_quality=load_resize_jpeg_quality(),
+        max_height=load_resize_max_height() or None,
+        output_format=load_resize_output_format() or None,
+    )
+
+
+def save_resize_options(options: ResizeOptions) -> None:
+    save_resize_max_width(options.max_width)
+    save_resize_max_height(options.max_height or 0)
+    save_resize_output_format(options.output_format or "")
+    save_resize_jpeg_quality(options.jpeg_quality)
+
+
+def load_resize_in_place() -> bool:
+    """Resize Images: replace the loaded files (True) or export copies to a folder
+    (False, the default: nothing is overwritten until the user chooses to)."""
+    return _settings().value(_RESIZE_IN_PLACE_KEY, False, type=bool)
+
+
+def save_resize_in_place(enabled: bool) -> None:
+    _settings().setValue(_RESIZE_IN_PLACE_KEY, bool(enabled))
+
+
+def load_resize_recycle_original() -> bool:
+    """Resizing in place sends the original to the Recycle Bin (default on): the
+    resized file replaces it, and the pixels cannot be recovered any other way."""
+    return _settings().value(_RESIZE_RECYCLE_ORIGINAL_KEY, True, type=bool)
+
+
+def save_resize_recycle_original(enabled: bool) -> None:
+    _settings().setValue(_RESIZE_RECYCLE_ORIGINAL_KEY, bool(enabled))
+
+
+def load_resize_oversized_only() -> bool:
+    return _settings().value(_RESIZE_OVERSIZED_ONLY_KEY, False, type=bool)
+
+
+def save_resize_oversized_only(enabled: bool) -> None:
+    _settings().setValue(_RESIZE_OVERSIZED_ONLY_KEY, bool(enabled))
+
+
+def load_resize_export_folder() -> str:
+    return str(_settings().value(_RESIZE_EXPORT_FOLDER_KEY, ""))
+
+
+def save_resize_export_folder(folder: str) -> None:
+    _settings().setValue(_RESIZE_EXPORT_FOLDER_KEY, folder or "")
+
+
+# Resizing in the same step as a conversion to CBZ (CBR/CBT/CB7 -> CBZ).
+RESIZE_ON_CONVERT_ASK = "ask"  # one question per batch
+RESIZE_ON_CONVERT_YES = "yes"  # always, with the saved Resize defaults
+RESIZE_ON_CONVERT_NO = "no"  # never
+_RESIZE_ON_CONVERT_CHOICES = (RESIZE_ON_CONVERT_ASK, RESIZE_ON_CONVERT_YES, RESIZE_ON_CONVERT_NO)
+_RESIZE_ON_CONVERT_KEY = "conversion/resize_on_convert"
+
+
+def load_resize_on_convert() -> str:
+    value = str(_settings().value(_RESIZE_ON_CONVERT_KEY, RESIZE_ON_CONVERT_ASK))
+    return value if value in _RESIZE_ON_CONVERT_CHOICES else RESIZE_ON_CONVERT_ASK
+
+
+def save_resize_on_convert(choice: str) -> None:
+    if choice in _RESIZE_ON_CONVERT_CHOICES:
+        _settings().setValue(_RESIZE_ON_CONVERT_KEY, choice)
 
 
 # ------------------------------------------------------------------

@@ -35,6 +35,7 @@ import struct
 import time
 import zipfile
 import zlib
+from collections import deque
 from dataclasses import dataclass, field
 from typing import Callable, Optional, Union
 
@@ -155,12 +156,15 @@ class Action:
     """What to do with one source entry. The default keeps it as it is.
     `drop` leaves it out; `rename` writes it under another name; `data`
     writes these bytes instead of its own (its other metadata is kept;
-    `date_time` stamps a replaced entry that is really new content)."""
+    `date_time` stamps a replaced entry that is really new content;
+    `compress_type` overrides how it is stored -- Resize stores re-encoded
+    pages instead of deflating a JPEG a second time)."""
 
     drop: bool = False
     rename: Optional[str] = None
     data: Optional[bytes] = None
     date_time: Optional[tuple] = None
+    compress_type: Optional[int] = None
 
 
 @dataclass
@@ -187,8 +191,9 @@ class RewritePlan:
     comment: Optional[bytes] = None  # None keeps the source's archive comment; b"" clears it
     order: Optional[Callable[[list], list]] = None  # entries (source order) -> the order to write them
     begin: Optional[Callable[[list], None]] = None  # called once with every Entry, before any decision
-    # Entries are decided `window` at a time, then written in order. A decision
-    # that returns a callable lets the caller start slow work for a whole window
+    # Up to `window` entries are decided ahead of the one being written (a sliding
+    # window), and they are written in order. A decision that returns a callable
+    # lets the caller start slow work for those entries
     # (Resize runs its page encoders on a thread pool) and finish it when the
     # entry's turn to be written comes.
     window: int = 1
@@ -290,7 +295,7 @@ def rewrite_archive(
     `dispose_original(path)` runs on the destination just before that move
     (the GUI passes "move to the Recycle Bin"); if it raises, nothing is
     replaced. `progress(done, total)` follows each source entry;
-    `should_cancel()` is polled before each window of entries.
+    `should_cancel()` is polled before each entry is written.
 
     Raises RewriteError (a CbzError, message starting with `error_prefix`)
     for any zip-level failure, RewriteCancelled on cancel; any other
@@ -335,35 +340,46 @@ def _write_temp(src_path, tmp_path, plan: RewritePlan, progress, should_cancel) 
 
         window = max(1, plan.window)
         done = 0
-        for start in range(0, len(entries), window):
+        # A sliding window: up to `window` entries are decided ahead of the one being
+        # written, and a new one is decided as soon as one is written, so the caller's
+        # workers never sit idle waiting for a whole window to drain.
+        pending: deque = deque()
+        upcoming = iter(entries)
+        while True:
             if should_cancel is not None and should_cancel():
                 raise RewriteCancelled("Cancelled")
-            pending = []
-            for entry in entries[start:start + window]:
+            while len(pending) < window:
+                entry = next(upcoming, None)
+                if entry is None:
+                    break
                 reader = _Reader(src, entry.info)
                 pending.append((entry, reader, plan.decide(entry, reader) if plan.decide else None))
-            for entry, reader, decision in pending:
-                action = decision() if callable(decision) else decision
-                action = action or Action()
-                done += 1
-                if action.drop:
-                    result.dropped.append(entry.name)
-                else:
-                    new_name = action.rename or entry.name
-                    data = reader() if action.data is None else action.data
-                    info = _make_info(new_name, entry.info, action.date_time)
-                    put(info, data, new_name == entry.name, dst)
-                    renamed = new_name != entry.name
-                    replaced = action.data is not None and action.data != reader.peek()
-                    if renamed:
-                        result.renamed[entry.name] = new_name
-                    if replaced:
-                        result.replaced.append(entry.name)
-                    if not renamed and not replaced:
-                        result.kept += 1
-                result.bytes_in += reader.size_read
-                if progress is not None:
-                    progress(done, len(entries))
+            if not pending:
+                break
+            entry, reader, decision = pending.popleft()
+            action = decision() if callable(decision) else decision
+            action = action or Action()
+            done += 1
+            if action.drop:
+                result.dropped.append(entry.name)
+            else:
+                new_name = action.rename or entry.name
+                data = reader() if action.data is None else action.data
+                info = _make_info(new_name, entry.info, action.date_time)
+                if action.compress_type is not None:
+                    info.compress_type = action.compress_type
+                put(info, data, new_name == entry.name, dst)
+                renamed = new_name != entry.name
+                replaced = action.data is not None and action.data != reader.peek()
+                if renamed:
+                    result.renamed[entry.name] = new_name
+                if replaced:
+                    result.replaced.append(entry.name)
+                if not renamed and not replaced:
+                    result.kept += 1
+            result.bytes_in += reader.size_read
+            if progress is not None:
+                progress(done, len(entries))
 
         for new in plan.after:
             put(_make_info(new.name, None, new.date_time), new.data, False, dst)
