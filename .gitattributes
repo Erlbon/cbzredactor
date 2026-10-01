@@ -1,0 +1,25 @@
+# Normalise line endings in the repo to LF; checkouts follow the platform.
+* text=auto eol=lf
+
+# Windows scripts must stay CRLF.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+
+# Binary files tracked here -- never touched by line-ending conversion.
+*.png binary
+*.ico binary
+*.cbz binary
+*.cb7 binary
+*.cbt binary
+*.cbr binary
+*.zip binary
+*.gz binary
+*.rar binary
+*.7z binary
+*.jpg binary
+*.jpeg binary
+*.webp binary
+*.mp3 binary
+*.db binary
+*.sqlite binary
