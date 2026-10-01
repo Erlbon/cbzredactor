@@ -2490,47 +2490,52 @@ class MainWindow(QMainWindow):
         self._update_status()
 
     def open_clean_contents_dialog(self) -> None:
-        """Operations > Clean Up Archive Contents...: plain numbered page
-        names, no page folders, no junk files inside the selected
-        archives (or all) -- see core/archive_contents.py -- reviewed
-        first, originals to the Recycle Bin."""
+        """Operations > Clean Up Archive Contents...: drops junk files, takes
+        pages out of folders and/or gives them plain numbered names inside the
+        selected archives (or all) -- three checkboxes, all on by default and
+        remembered; see core/archive_contents.py -- reviewed first, originals
+        to the Recycle Bin."""
+        from core.archive_contents import CleanupOptions, plan_cleanup
         from gui.archive_cleanup_dialog import ArchiveCleanupDialog
 
         self._commit_current_edits()
         target_books = [b for b in self._target_books() if not b.load_error and not b.needs_conversion]
         unsaved = [b for b in target_books if b.dirty and not b.stamp_only_dirty]
         target_books = [b for b in target_books if not (b.dirty and not b.stamp_only_dirty)]
-        work, errors = [], []
+        candidates, errors = [], []  # candidates: (book, entry names) of files some option would change
 
-        def _plan(book: CbzBook, _index: int) -> None:
+        def _scan(book: CbzBook, _index: int) -> None:
             try:
-                plan = book.cleanup_plan()
+                names = book.entry_names()
             except (zipfile.BadZipFile, OSError) as exc:
                 errors.append(f"{os.path.basename(book.path)}: {exc}")
                 return
-            if plan.needed:
-                work.append((book, plan))
+            # With every action on, the most a file can need: a file nothing would change even then is not offered.
+            if plan_cleanup(names, book.page_names, book.comicinfo_name, CleanupOptions()).needed:
+                candidates.append((book, names))
 
-        run_with_progress(self, target_books, _plan, "Checking archive contents...",
+        run_with_progress(self, target_books, _scan, "Checking archive contents...",
                           threshold=LOAD_PROGRESS_THRESHOLD,
                           label_for=lambda b: f"Checking: {os.path.basename(b.path)}")
         skipped = f"{len(unsaved)} file(s) with unsaved changes were skipped -- save them first." if unsaved else ""
-        if not work:
+        if not candidates:
             QMessageBox.information(
                 self, "Clean Up Archive Contents",
                 f"Nothing to clean up in {len(target_books)} file(s)." + (f"\n\n{skipped}" if skipped else ""),
             )
             return
-        dialog = ArchiveCleanupDialog(work, skipped, self)
+        dialog = ArchiveCleanupDialog(candidates, app_settings.load_cleanup_options(), skipped, self)
         if dialog.exec() != dialog.DialogCode.Accepted:
             return
+        options = dialog.options()
+        app_settings.save_cleanup_options(options)
         chosen = dialog.ticked()
         cleaned = 0
 
         def _clean(book: CbzBook, _index: int) -> None:
             nonlocal cleaned
             try:
-                book.clean_contents(dispose_original=move_to_trash)
+                book.clean_contents(dispose_original=move_to_trash, options=options)
             except (CbzError, TrashError) as exc:
                 errors.append(f"{os.path.basename(book.path)}: {exc}")
                 return

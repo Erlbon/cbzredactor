@@ -481,27 +481,39 @@ class CbzBook:
     # Cleaning up the archive's contents (core/archive_contents.py)
     # ------------------------------------------------------------------
 
-    def cleanup_plan(self):
-        """What Clean Up Archive Contents would change (nothing written)."""
-        from core.archive_contents import plan_cleanup
+    def entry_names(self) -> list[str]:
+        """Every entry name in the archive (as the app names them), for the
+        Clean Up dialog to plan against without reopening the file."""
+        with open_zip(self.path) as zf:
+            return zf.namelist()
+
+    def cleanup_plan(self, options=None):
+        """What Clean Up Archive Contents would change (nothing written).
+        `options`: core.archive_contents.CleanupOptions (default: all three
+        actions)."""
+        from core.archive_contents import CleanupOptions, plan_cleanup
 
         with open_zip(self.path) as zf:
-            return plan_cleanup(zf.namelist(), self.page_names, self.comicinfo_name)
+            return plan_cleanup(zf.namelist(), self.page_names, self.comicinfo_name, options or CleanupOptions())
 
-    def clean_contents(self, dispose_original: Optional[Callable[[str], None]] = None):
-        """Rewrites the archive with plain numbered page names, no page
-        folders and no junk files (core/archive_contents.py); the pages'
-        bytes, their order and ComicInfo.xml's content are unchanged.
-        Returns the plan that was applied (plan.needed False: nothing
-        to do, nothing written). `dispose_original` and the refusal of
-        unsaved edits work as in remove_pages()."""
+    def clean_contents(self, dispose_original: Optional[Callable[[str], None]] = None, options=None):
+        """Rewrites the archive as `options` says -- junk files dropped,
+        pages taken out of folders, pages given plain numbered names, each
+        optional and all on by default (core/archive_contents.py); the
+        pages' bytes, their order and ComicInfo.xml's content are
+        unchanged. Returns the plan that was applied (plan.needed False:
+        nothing to do, nothing written). `dispose_original` and the refusal
+        of unsaved edits work as in remove_pages()."""
+        from core.archive_contents import CleanupOptions
+
+        options = options or CleanupOptions()
         if self.load_error:
             raise CbzError(f"Cannot clean up, file failed to load: {self.load_error}")
         if self.needs_conversion:
             raise CbzError("Cannot clean up, this file needs converting to CBZ first (Convert to CBZ)")
         if self.dirty and not self.stamp_only_dirty:
             raise CbzError("Save or undo this file's unsaved changes first")
-        plan =self.cleanup_plan()
+        plan = self.cleanup_plan(options)
         if not plan.needed:
             return plan
 
@@ -521,8 +533,10 @@ class CbzBook:
         def in_reading_order(entries):
             return sorted(entries, key=lambda entry: rank.get(entry.name, len(rank)))  # stable
 
+        # A junk-only cleanup leaves the entries where they were.
+        reorder = in_reading_order if options.flatten_folders or options.rename_pages else None
         rewrite_archive(
-            self.path, self.path, RewritePlan(decide=decide, order=in_reading_order),
+            self.path, self.path, RewritePlan(decide=decide, order=reorder),
             dispose_original=dispose_original, temp_suffix=".tmp_clean", error_prefix="Could not clean up the archive",
         )
 

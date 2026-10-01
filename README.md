@@ -191,11 +191,15 @@ understands that this app now supports too).
   all) tidies the names *inside* each archive -- where release groups
   put their name too ("Zone-Empire/Batman 045 (2018) (Zone-Empire)
   p1.jpg"), and nested folders make paths too long once extracted.
-  Pages are renamed to plain numbers in reading order (001.webp,
-  002.webp, ...) and taken out of folders; junk is removed (Thumbs.db,
-  .DS_Store, __MACOSX, and scene extras like .nfo, .sfv, .url, .txt).
-  Page bytes, order and ComicInfo.xml are unchanged. Reviewed first,
-  per file; originals go to the Recycle Bin.
+  Three independent checkboxes, all on by default and remembered:
+  pages are renamed to plain numbers in reading order (001.webp,
+  002.webp, ...), pages are taken out of folders (keeping their names
+  where that is safe, a short number in front where two would clash),
+  and junk is removed (Thumbs.db, .DS_Store, __MACOSX, and scene
+  extras like .nfo, .sfv, .url, .txt). Page bytes, order and
+  ComicInfo.xml are unchanged. Reviewed first, per file; originals go
+  to the Recycle Bin. The Redact step offers the same three options
+  (page renaming is off there unless the recipe turns it on).
 - **Collection > Scan Collection Folder...** -- a snapshot of your
   whole organised collection, taken only when you press it (nothing is
   watched; cbzredactor stays a tool for incoming files). Every comic

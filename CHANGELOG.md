@@ -1,5 +1,33 @@
 # Changelog
 
+## 2026-10-01#03 -- Clean Up no longer renames pages unless asked (in Redact)
+
+- **Clean Up Archive Contents is now three separate options**, each with a
+  checkbox and a plain-language note in the dialog: *Remove junk files*, *Move
+  pages out of folders* and *Rename pages to 001, 002, ...*. The dialog opens
+  with all three ticked, exactly what the command always did, remembers your
+  choice, and the file list follows the checkboxes. A file nothing would change
+  is not listed; if every option would be a no-op the file is left untouched.
+- **Moving pages out of folders keeps their own names** where that is safe.
+  Where two pages would get the same name (compared without regard to letter
+  case) a short sequence number goes in front ("003 - 001.jpg"); if the names
+  still would not sort in reading order, every page gets its number. Page
+  order never changes. Renaming alone keeps pages in their folders ("Folder/001.jpg");
+  if that would change the order, the pages go to the top level instead and the
+  review list says so. ComicInfo.xml is moved to the top level only together
+  with folder flattening.
+- **Redact's "Clean up archive contents" step gets the same three options**
+  (recipe editor): remove junk on, move pages out of folders on, **rename pages
+  off**. A Redact run therefore no longer renames pages to 001, 002 ... unless
+  the recipe turns that on. The step still leaves an archive alone, and never
+  reports it changed, when nothing applies.
+- **Behaviour change for saved recipes:** a recipe stored before this version
+  has no options for this step, so it takes the new defaults (junk and folders
+  on, page renaming OFF). Previously such a run also renamed pages; tick *Rename
+  pages* in the recipe editor to get that back.
+- The manual command with all three ticked is unchanged. A junk-only cleanup
+  no longer reorders the entries inside the archive.
+
 ## 2026-10-01#02 -- Old-encoding page names and nested ComicInfo.xml
 
 - **Archives from older tools keep their page and folder names.** A ZIP entry

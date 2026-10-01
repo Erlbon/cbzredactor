@@ -266,6 +266,28 @@ def save_last_directory(path: str) -> None:
         _settings().setValue(_LAST_DIR_KEY, directory)
 
 
+_CLEANUP_KEYS = {
+    "remove_junk": "cleanup/remove_junk",
+    "flatten_folders": "cleanup/flatten_folders",
+    "rename_pages": "cleanup/rename_pages",
+}
+
+
+def load_cleanup_options():
+    """Clean Up Archive Contents' three checkboxes, remembered between runs.
+    All on until the user changes them (what the command always did)."""
+    from core.archive_contents import CleanupOptions
+
+    settings = _settings()
+    return CleanupOptions(**{field: bool(settings.value(key, True, type=bool)) for field, key in _CLEANUP_KEYS.items()})
+
+
+def save_cleanup_options(options) -> None:
+    settings = _settings()
+    for field, key in _CLEANUP_KEYS.items():
+        settings.setValue(key, bool(getattr(options, field)))
+
+
 def load_resize_max_width() -> int:
     return int(_settings().value(_RESIZE_MAX_WIDTH_KEY, _DEFAULT_RESIZE_MAX_WIDTH))
 

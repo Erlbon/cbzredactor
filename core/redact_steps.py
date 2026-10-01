@@ -63,6 +63,7 @@ from redactor_common.core.pipeline import (
 from redactor_common.core.rename_pattern import render_filename, unique_path, zero_pad_numeric_value
 from redactor_common.core.trash import move_to_trash
 
+from core.archive_contents import CleanupOptions
 from core.cbz_file import CbzBook, CbzError
 from core.comicinfo import TAG_TO_ATTR, serialize_comicinfo_xml
 from core.comicinfo_check import check_metadata, scan_status
@@ -396,18 +397,38 @@ class CleanContentsStep(Step):
     key = "clean_contents"
     label = "Clean up archive contents"
     description = (
-        "Removes junk inside the archive (Thumbs.db, desktop.ini, .DS_Store, __MACOSX, release-group .nfo/.sfv/"
-        ".url/.txt files) and, as Repair > Clean Up Archive Contents does, gives the pages plain numbered "
-        "names out of any folders. Page bytes, order and ComicInfo.xml content are unchanged."
+        "Tidies the names inside the archive, as Repair > Clean Up Archive Contents does, with three separate "
+        "options: remove junk files (Thumbs.db, desktop.ini, .DS_Store, __MACOSX, release-group .nfo/.sfv/.url/"
+        ".txt files), move pages out of folders (a page keeps its name unless two would clash, then a short "
+        "number goes in front; page order never changes), and rename pages to plain numbers (001.jpg, 002.jpg, "
+        "...). Junk and folders are on by default; renaming pages is off unless you turn it on here, so a Redact "
+        "run does not rename pages on its own. Page bytes, order and ComicInfo.xml content are unchanged."
+    )
+    options = (
+        OptionSpec(
+            "remove_junk", "Remove junk files", "bool", True,
+            tooltip="Thumbs.db, desktop.ini, .DS_Store, __MACOSX folders and .nfo/.sfv/.url/.txt release extras.",
+        ),
+        OptionSpec(
+            "flatten_folders", "Move pages out of folders", "bool", True,
+            tooltip="Keeps each page's name where it is unique, otherwise puts a short number in front. "
+                    "Reading order is never changed.",
+        ),
+        OptionSpec(
+            "rename_pages", "Rename pages to 001, 002, ...", "bool", False,
+            tooltip="Plain numbers in reading order; drops release-group text from page names. Off by default.",
+        ),
     )
 
     def run(self, ctx: CbzCtx) -> StepResult:
         if (missing := ctx.need_work()) is not None:
             return missing
-        if not ctx.work.cleanup_plan().needed:
+        opts = self.options_for(ctx)
+        options = CleanupOptions(opts["remove_junk"], opts["flatten_folders"], opts["rename_pages"])
+        if not options.any or not ctx.work.cleanup_plan(options).needed:
             return StepResult.nothing()
         ctx.ensure_scratch()
-        plan = ctx.work.clean_contents()
+        plan = ctx.work.clean_contents(options=options)
         ctx.structure_changed = True
         return StepResult.applied(plan.summary())
 

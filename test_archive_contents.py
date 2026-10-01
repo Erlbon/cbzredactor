@@ -122,6 +122,7 @@ def window(tmp_path, monkeypatch):
     from gui import app_settings
 
     monkeypatch.setattr(app_settings, "credit_pages_path", lambda: str(tmp_path / "known.json"))
+    monkeypatch.setattr(app_settings, "_settings_ini_path", lambda: str(tmp_path / "s.ini"))  # the dialog remembers its choices
     trashed = []
     monkeypatch.setattr("gui.main_window.move_to_trash", trashed.append)
     monkeypatch.setattr(QMessageBox, "information", lambda *a, **k: None)
