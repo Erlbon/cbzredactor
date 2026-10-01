@@ -1,5 +1,23 @@
 # Changelog
 
+## 2026-10-01#04 -- Preferences dialog (Tools > Preferences, Ctrl+,)
+
+- **New Tools > Preferences...** (shortcut Ctrl+,) gathers the everyday
+  settings on four pages, each with a plain-language note under every control,
+  OK / Cancel / Apply and "Reset to Defaults" for the page you are on:
+  *Filenames* (ASCII-safe filenames, zero-pad numbers and width up to 10
+  digits, Auto-Numbering padding), *Conversion* (what to do with CBR/CBT/CB7
+  files on load, move originals to the Recycle Bin), *Resize defaults* (max
+  width and height, quality, output format) and *Paths* (GCD local database,
+  ComicRack library database, library root folder).
+- Nothing about where settings are stored changed: older settings carry over
+  as they are and Export / Import Settings keeps working. The Comic Vine key
+  and GCD password stay in Tools > API Keys. The dialogs that check or build
+  the GCD and ComicRack databases, and Conversion Settings, are still in the
+  Tools menu.
+- Known Credit Pages' menu shortcut letter is now D (P went to Preferences).
+- Uses redactor_common 2026-10-01-06 (shared Preferences framework).
+
 ## 2026-10-01#03 -- Clean Up no longer renames pages unless asked (in Redact)
 
 - **Clean Up Archive Contents is now three separate options**, each with a

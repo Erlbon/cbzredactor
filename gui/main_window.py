@@ -527,10 +527,11 @@ class MainWindow(QMainWindow):
             MenuAction("find_duplicates", labels.FIND_DUPLICATES, self.open_find_duplicates_dialog),
         ]
         tools_items = standard_tools_items(
+            preferences=self.open_preferences_dialog,
             api_keys=self.open_api_keys_dialog,
             app_settings=[
                 Separator(),
-                MenuAction("known_credit_pages", "Known Credit &Pages…", self.open_known_credit_pages_dialog),
+                MenuAction("known_credit_pages", "Known Cre&dit Pages…", self.open_known_credit_pages_dialog),
                 MenuAction("conversion_settings", "Conversion &Settings…", self.open_conversion_settings_dialog),
                 Separator(),
                 MenuAction("gcd_local_settings", "GCD &Local Database…", self.open_gcd_local_settings_dialog),
@@ -3188,6 +3189,12 @@ class MainWindow(QMainWindow):
         if reply != QMessageBox.StandardButton.Yes:
             return
         self._convert_books(books, recycle)
+
+    def open_preferences_dialog(self) -> None:
+        """Tools > Preferences... (Ctrl+,): see gui/preferences.py."""
+        from gui.preferences import make_dialog
+
+        make_dialog(self).exec()
 
     def open_conversion_settings_dialog(self) -> None:
         ConversionSettingsDialog(self).exec()

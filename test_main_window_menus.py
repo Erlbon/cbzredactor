@@ -100,6 +100,7 @@ def test_tools_menu_structure_with_the_collection_submenu():
     window = MainWindow()
     menu = _menus(window)["Tools"]
     assert _texts(menu) == [
+        "Preferences…", "---",
         "API Keys…", "---",
         "Known Credit Pages…", "Conversion Settings…", "---",
         "GCD Local Database…", "ComicRack Library Database…", "---",
