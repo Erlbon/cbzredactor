@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-10-01#08 -- Converted pages are written in name order on every platform
+
+- Converting a CBR/CBT/CB7 to CBZ packed the pages in the order the file system listed them, which is not sorted on Linux, so a converted book could have its pages stored out of order. They are now sorted by name before packing. (Found by the Linux test run of #06/#07.)
+
 ## 2026-10-01#07 -- Resize: remembered choices, Recycle Bin, much faster; resize while converting
 
 - **Resize Images remembers what you chose.** Besides width, height, format and

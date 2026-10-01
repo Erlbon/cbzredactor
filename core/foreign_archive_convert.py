@@ -330,6 +330,9 @@ def _write_zip(
         for name in names:
             full_path = os.path.join(root, name)
             files.append((full_path, os.path.relpath(full_path, tmp_dir).replace(os.sep, "/")))
+    # os.walk order is filesystem order (unsorted on Linux): sort so the pages
+    # land in the zip in name order, whatever the platform.
+    files.sort(key=lambda item: item[1])
 
     resizer = (
         PageResizer(resize, [arc for _full, arc in files if _is_image(arc)]) if resize is not None else None
