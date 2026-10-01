@@ -29,20 +29,29 @@ import copy
 import os
 import posixpath
 import re
-import time
 import zipfile
 import zlib
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from typing import Callable, Optional
 
-from redactor_common.core.save_errors import describe_save_error
 from redactor_common.core.scan_stamp import ScanStamp, make_stamp, parse_stamp
 
 from core.cbz_fingerprint import cbz_fingerprint
 from core.archive_sniff import CONTAINER_UNKNOWN, CONTAINER_ZIP, detect_container
 from core.comicinfo import ComicInfoError, ComicInfoMetadata, parse_comicinfo_xml, serialize_comicinfo_xml
 from core.image_resize import OUTPUT_FORMAT_EXTENSIONS, resize_page
+from core.zip_rewrite import (
+    ZIP_ERRORS,
+    Action,
+    CbzError,
+    NewEntry,
+    RewriteCancelled,
+    RewritePlan,
+    RewriteError,
+    now_date_time,
+    rewrite_archive,
+)
 
 # Entry extensions that already mean "this format" -- a page named
 # .jpeg converted to JPEG keeps its name rather than becoming .jpg.
@@ -56,18 +65,10 @@ _FORMAT_EXTENSION_FAMILY = {"JPEG": (".jpg", ".jpeg"), "WEBP": (".webp",)}
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp"}
 COMICINFO_NAME = "ComicInfo.xml"
 
-# What zipfile/zlib raise for a bad archive or entry. RuntimeError is an
-# encrypted entry, NotImplementedError a compression method zipfile has
-# no codec for, ValueError a malformed header/name -- none is an OSError,
-# so all of them used to escape past the CbzError the GUI catches.
-_ZIP_ERRORS = (zipfile.BadZipFile, KeyError, OSError, zlib.error, RuntimeError, NotImplementedError, ValueError)
+_ZIP_ERRORS = ZIP_ERRORS  # see core/zip_rewrite.py
 
 
-class CbzError(Exception):
-    """Raised for a problem reading or writing a CBZ file."""
-
-
-class ResizeCancelled(CbzError):
+class ResizeCancelled(RewriteCancelled):
     """resize_images()'s `should_cancel` fired; the temp file was removed
     and the source left untouched."""
 
@@ -97,62 +98,6 @@ def page_sort_key(name: str) -> list:
     Plain text sorting put "10" before "2", and real archives number
     pages unpadded (seen 2026-09-29: "1.webp", "2.webp", "10.webp")."""
     return [int(part) if part.isdigit() else part.casefold() for part in _DIGITS_RE.split(name)]
-
-
-_REPLACE_ATTEMPTS = 5
-_REPLACE_DELAY = 0.1  # seconds between attempts
-
-
-def _replace(tmp_path: str, path: str) -> None:
-    """os.replace, retried briefly on PermissionError: on Windows another
-    reader holding the file open for a moment (the app's own cover and
-    page-size scans, a virus scanner) fails the rename, where the old
-    shutil.move silently fell back to copying over it."""
-    for attempt in range(_REPLACE_ATTEMPTS):
-        try:
-            os.replace(tmp_path, path)
-            return
-        except PermissionError:
-            if attempt == _REPLACE_ATTEMPTS - 1:
-                raise
-            time.sleep(_REPLACE_DELAY)
-
-
-class _ReplaceFailedAfterDispose(OSError):
-    """The original was already sent to the Recycle Bin when the rewritten
-    file failed to replace it; the rewrite is still at `tmp_path`."""
-
-    def __init__(self, tmp_path: str, cause: BaseException):
-        super().__init__(
-            f"the original is in the Recycle Bin and the rewritten copy was kept at "
-            f"{tmp_path} ({describe_save_error(cause)})"
-        )
-        self.tmp_path = tmp_path
-
-
-def _dispose_then_replace(dispose_original, tmp_path: str, path: str) -> None:
-    """`dispose_original(path)` (Recycle Bin) then os.replace(tmp, path).
-    If the replace fails after the original is gone, the temp file is the
-    only full copy: it is kept, and the error names it."""
-    if dispose_original is not None:
-        dispose_original(path)
-    try:
-        _replace(tmp_path, path)
-    except OSError as exc:
-        if dispose_original is not None and not os.path.exists(path):
-            raise _ReplaceFailedAfterDispose(tmp_path, exc) from exc
-        raise
-
-
-def _discard_temp(exc: BaseException, tmp_path: str) -> None:
-    """Removes a rewriter's temp file after a failure -- except when it
-    holds the only remaining copy (see _ReplaceFailedAfterDispose)."""
-    if isinstance(exc, _ReplaceFailedAfterDispose):
-        return
-    try:
-        os.remove(tmp_path)
-    except OSError:
-        pass
 
 
 def _is_image(name: str) -> bool:
@@ -436,44 +381,26 @@ class CbzBook:
         self.metadata.page_count = str(self.actual_page_count)
         new_xml_bytes = serialize_comicinfo_xml(self.metadata)
         target = output_path or self.path
-        tmp_path = target + ".tmp_write"
         # Preserve the original entry's name/case if there was one;
         # otherwise write the spec-correct name fresh.
         write_name = self.comicinfo_name or COMICINFO_NAME
+        old_name = self.comicinfo_name
 
+        # The archive comment (e.g. the cover fingerprint stamp, core/cover_stamp.py)
+        # is carried over by the helper. ComicInfo.xml is rewritten last, with
+        # the updated bytes. The helper's temp file (target + ".tmp_write") is 10
+        # characters longer than the real target, so a path-too-long error can
+        # hit here even when the final, shorter path would have just fit
+        # (describe_save_error() words that case).
+        plan = RewritePlan(
+            decide=lambda entry, read: Action(drop=True) if entry.name == old_name else None,
+            after=[NewEntry(write_name, new_xml_bytes)],
+        )
         try:
-            with zipfile.ZipFile(self.path, "r") as src:
-                names = src.namelist()
-                infos = {info.filename: info for info in src.infolist()}
-
-                with zipfile.ZipFile(tmp_path, "w") as dst:
-                    dst.comment = src.comment  # e.g. the cover fingerprint stamp (core/cover_stamp.py)
-                    for name in names:
-                        if name == self.comicinfo_name:
-                            continue  # rewritten below with updated bytes
-                        info = infos[name]
-                        new_info = zipfile.ZipInfo(name, date_time=info.date_time)
-                        new_info.compress_type = info.compress_type
-                        new_info.external_attr = info.external_attr
-                        dst.writestr(new_info, src.read(name))
-                    dst.writestr(write_name, new_xml_bytes)
-            # os.replace (via _replace), not shutil.move: move() falls back to copy +
-            # delete when the rename fails (Windows, file held open),
-            # which overwrites the original in place -- not atomic.
-            _replace(tmp_path, target)
-        except _ZIP_ERRORS as exc:
-            try:
-                os.remove(tmp_path)
-            except OSError:
-                pass
-            # describe_save_error() recognizes Windows' path-too-long
-            # limit specifically -- worth knowing here since tmp_path
-            # (target + ".tmp_write") is 10 characters longer than the
-            # real target, so this can fail even when the final,
-            # shorter path would have just barely fit.
-            message = describe_save_error(exc)
-            self.save_error = message
-            raise CbzError(f"Could not save CBZ file: {message}") from exc
+            rewrite_archive(self.path, target, plan, temp_suffix=".tmp_write", error_prefix="Could not save CBZ file")
+        except RewriteError as exc:
+            self.save_error = exc.detail
+            raise
 
         self.save_error = ""
         # Only treat this as "saved" (clear dirty, adopt new path) when
@@ -522,26 +449,17 @@ class CbzBook:
         metadata.page_count = str(len(new_pages))
         _remap_pages_element(metadata, removed_positions)
 
-        tmp_path = self.path + ".tmp_pages"
-        try:
-            with zipfile.ZipFile(self.path, "r") as src, zipfile.ZipFile(tmp_path, "w") as dst:
-                dst.comment = src.comment
-                for info in src.infolist():
-                    if info.filename in remove:
-                        continue
-                    if info.filename == self.comicinfo_name:
-                        dst.writestr(info.filename, serialize_comicinfo_xml(metadata))
-                        continue
-                    new_info = zipfile.ZipInfo(info.filename, date_time=info.date_time)
-                    new_info.compress_type = info.compress_type
-                    new_info.external_attr = info.external_attr
-                    dst.writestr(new_info, src.read(info.filename))
-            _dispose_then_replace(dispose_original, tmp_path, self.path)
-        except Exception as exc:
-            _discard_temp(exc, tmp_path)
-            if isinstance(exc, _ZIP_ERRORS):
-                raise CbzError(f"Could not remove pages: {describe_save_error(exc)}") from exc
-            raise
+        def decide(entry, read):
+            if entry.name in remove:
+                return Action(drop=True)
+            if entry.name == self.comicinfo_name:
+                return Action(data=serialize_comicinfo_xml(metadata), date_time=now_date_time())
+            return None
+
+        rewrite_archive(
+            self.path, self.path, RewritePlan(decide=decide),
+            dispose_original=dispose_original, temp_suffix=".tmp_pages", error_prefix="Could not remove pages",
+        )
 
         self.page_names = new_pages
         if self.comicinfo_name:
@@ -580,30 +498,25 @@ class CbzBook:
             return plan
 
         drop = set(plan.removals)
-        tmp_path = self.path + ".tmp_clean"
-        try:
-            with zipfile.ZipFile(self.path, "r") as src, zipfile.ZipFile(tmp_path, "w") as dst:
-                dst.comment = src.comment
-                infos = {info.filename: info for info in src.infolist()}
-                # Stored in reading order too (pages, then ComicInfo.xml,
-                # then anything else kept), not just named in it.
-                first = [*self.page_names, *([self.comicinfo_name] if self.comicinfo_name else [])]
-                seen = set(first)
-                ordered = first + [name for name in infos if name not in seen]
-                for name in ordered:
-                    info = infos[name]
-                    if name in drop or (plan.drop_folder_entries and name.endswith("/")):
-                        continue
-                    new_info = zipfile.ZipInfo(plan.renames.get(name, name), date_time=info.date_time)
-                    new_info.compress_type = info.compress_type
-                    new_info.external_attr = info.external_attr
-                    dst.writestr(new_info, src.read(name))
-            _dispose_then_replace(dispose_original, tmp_path, self.path)
-        except Exception as exc:
-            _discard_temp(exc, tmp_path)
-            if isinstance(exc, _ZIP_ERRORS):
-                raise CbzError(f"Could not clean up the archive: {describe_save_error(exc)}") from exc
-            raise
+
+        def decide(entry, read):
+            if entry.name in drop or (plan.drop_folder_entries and entry.name.endswith("/")):
+                return Action(drop=True)
+            new_name = plan.renames.get(entry.name)
+            return Action(rename=new_name) if new_name else None
+
+        # Stored in reading order too (pages, then ComicInfo.xml, then
+        # anything else kept), not just named in it.
+        first = [*self.page_names, *([self.comicinfo_name] if self.comicinfo_name else [])]
+        rank = {name: index for index, name in enumerate(first)}
+
+        def in_reading_order(entries):
+            return sorted(entries, key=lambda entry: rank.get(entry.name, len(rank)))  # stable
+
+        rewrite_archive(
+            self.path, self.path, RewritePlan(decide=decide, order=in_reading_order),
+            dispose_original=dispose_original, temp_suffix=".tmp_clean", error_prefix="Could not clean up the archive",
+        )
 
         self.page_names = [plan.renames.get(name, name) for name in self.page_names]
         if self.comicinfo_name:
@@ -668,72 +581,49 @@ class CbzBook:
 
         summary = ResizeSummary()
         target = output_path or self.path
-        tmp_path = target + ".tmp_resize"
         workers = workers or min(8, os.cpu_count() or 1)
+        convertible: set[str] = set()
 
-        def _process(name: str, original: bytes, fmt: Optional[str]):
-            return resize_page(original, max_width, jpeg_quality, max_height, fmt)
+        def begin(entries) -> None:
+            convertible.update(_renamable_pages([entry.name for entry in entries], output_format))
 
+        def decide(entry, read):
+            name = entry.name
+            if not _is_image(name):
+                summary.original_bytes += entry.info.file_size
+                summary.new_bytes += entry.info.file_size
+                return None  # copied untouched
+            original = read()
+            fmt = output_format if name in convertible else None
+            future = pool.submit(resize_page, original, max_width, jpeg_quality, max_height, fmt)
+
+            def finish() -> Action:
+                result = future.result()
+                write_name = None
+                if result.extension and _needs_rename(name, output_format):
+                    write_name = _renamed_for_format(name, output_format)
+                if result.error:
+                    summary.pages_failed += 1
+                elif result.resized:
+                    summary.pages_resized += 1
+                else:
+                    summary.pages_skipped += 1
+                summary.original_bytes += len(original)
+                summary.new_bytes += len(result.data)
+                return Action(rename=write_name, data=result.data)
+
+            return finish
+
+        # A bounded window of pages is in flight at a time (see RewritePlan.window).
+        plan = RewritePlan(decide=decide, begin=begin, window=workers * 2)
         try:
-            with zipfile.ZipFile(self.path, "r") as src:
-                names = src.namelist()
-                infos = {info.filename: info for info in src.infolist()}
-                convertible = _renamable_pages(names, output_format)
-
-                with zipfile.ZipFile(tmp_path, "w") as dst, ThreadPoolExecutor(max_workers=workers) as pool:
-                    dst.comment = src.comment
-                    window = workers * 2
-                    done = 0
-                    for start in range(0, len(names), window):
-                        if should_cancel is not None and should_cancel():
-                            raise ResizeCancelled("Resize cancelled")
-                        chunk = names[start:start + window]
-                        pending = []
-                        for name in chunk:
-                            original = src.read(name)
-                            future = None
-                            if _is_image(name):
-                                fmt = output_format if name in convertible else None
-                                future = pool.submit(_process, name, original, fmt)
-                            pending.append((name, original, future))
-
-                        for name, original, future in pending:
-                            data_to_write = original
-                            write_name = name
-                            if future is not None:
-                                result = future.result()
-                                data_to_write = result.data
-                                if result.extension and _needs_rename(name, output_format):
-                                    write_name = _renamed_for_format(name, output_format)
-                                if result.error:
-                                    summary.pages_failed += 1
-                                elif result.resized:
-                                    summary.pages_resized += 1
-                                else:
-                                    summary.pages_skipped += 1
-
-                            summary.original_bytes += len(original)
-                            summary.new_bytes += len(data_to_write)
-
-                            info = infos[name]
-                            new_info = zipfile.ZipInfo(write_name, date_time=info.date_time)
-                            new_info.compress_type = info.compress_type
-                            new_info.external_attr = info.external_attr
-                            dst.writestr(new_info, data_to_write)
-                            done += 1
-                            if progress is not None:
-                                progress(done, len(names))
-            _replace(tmp_path, target)
-        except BaseException as exc:
-            # Any failure (including Pillow's DecompressionBombError or a
-            # worker's unexpected exception) must not leave the temp behind.
-            try:
-                os.remove(tmp_path)
-            except OSError:
-                pass
-            if isinstance(exc, _ZIP_ERRORS) and not isinstance(exc, ResizeCancelled):
-                raise CbzError(f"Could not resize CBZ file: {describe_save_error(exc)}") from exc
-            raise
+            with ThreadPoolExecutor(max_workers=workers) as pool:
+                rewrite_archive(
+                    self.path, target, plan, temp_suffix=".tmp_resize", error_prefix="Could not resize CBZ file",
+                    progress=progress, should_cancel=should_cancel,
+                )
+        except RewriteCancelled as exc:
+            raise ResizeCancelled("Resize cancelled") from exc
 
         if output_path is None or output_path == self.path:
             self.path = target

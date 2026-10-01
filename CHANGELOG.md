@@ -1,5 +1,18 @@
 # Changelog
 
+## 2026-10-01#01 -- One shared archive-rewrite routine
+
+- **Save, Remove Pages, Clean Up and Resize Images now share one rewrite
+  routine** (`core/zip_rewrite.py`) instead of four near-identical loops that
+  had drifted apart. Nothing you can see changes; what it guarantees is the
+  same for all four: the original is replaced only by a finished, checked
+  copy, the temp file is removed on every kind of failure (damaged,
+  encrypted or unsupported entries, full disk, cancel), the archive comment
+  and every entry's date, attributes, compression and creating system are
+  carried over, and any zip-level problem is reported as a normal error.
+- Slightly broader error handling: a truncated or damaged compressed entry
+  (EOF/LZMA errors) is now reported as an unreadable file rather than a crash.
+
 ## 2026-09-30#20 -- Adopt redactor_common 2026-09-30-15
 
 - **Adopt redactor_common 2026-09-30-15:** Redact saves retry briefly when

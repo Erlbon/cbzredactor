@@ -10,6 +10,7 @@ import pytest
 from PIL import Image
 
 import core.cbz_file as cbz_file
+import core.zip_rewrite as zip_rewrite
 from core.cbz_file import CbzBook, CbzError
 from core.image_resize import resize_page
 from core.page_dimensions import read_image_size
@@ -34,7 +35,7 @@ def _make(path, comment=b"", pages=("001.jpg", "002.jpg")) -> str:
 
 @pytest.fixture(autouse=True)
 def _fast_retries(monkeypatch):
-    monkeypatch.setattr(cbz_file, "_REPLACE_DELAY", 0)
+    monkeypatch.setattr(zip_rewrite, "_REPLACE_DELAY", 0)  # the retry loop lives in core/zip_rewrite.py
 
 
 def _tmp_files(tmp_path):
