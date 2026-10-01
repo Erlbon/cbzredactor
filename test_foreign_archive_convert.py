@@ -263,7 +263,7 @@ def test_cbt_on_old_python_path_uses_safe_extraction(tmp_path, monkeypatch):
 
 
 def test_same_format_copy_goes_through_a_temp_file(tmp_path, monkeypatch):
-    import shutil
+    import core.foreign_archive_convert as fac
 
     src = tmp_path / "book.cbr"  # really a ZIP
     with zipfile.ZipFile(src, "w") as zf:
@@ -274,23 +274,26 @@ def test_same_format_copy_goes_through_a_temp_file(tmp_path, monkeypatch):
             f.write(b"trunc")
         raise OSError(28, "No space left on device")
 
-    monkeypatch.setattr(shutil, "copy2", partial_copy)
+    monkeypatch.setattr(fac, "_copy_file", partial_copy)
     with pytest.raises(ForeignArchiveConversionError):
         convert_to_cbz(str(src))
     assert sorted(p.name for p in tmp_path.iterdir()) == ["book.cbr"]
 
 
 def test_failed_conversion_restores_a_relabeled_file_name(tmp_path, monkeypatch):
+    from PyQt6.QtWidgets import QApplication
+
     import gui.main_window as mw
 
+    QApplication.instance() or QApplication(sys.argv)
     path = tmp_path / "book.cbz"
     _make_cbt(path, {"001.jpg": b"x"})  # a tar wearing a .cbz name
 
-    def fail(_source):
+    def fail(_source, **_kwargs):
         raise ForeignArchiveConversionError("boom")
 
     monkeypatch.setattr(mw, "convert_to_cbz", fail)
     errors: list[str] = []
-    assert mw.MainWindow._convert_path(None, str(path), False, errors) is None
+    assert mw.MainWindow()._convert_path(str(path), False, errors) is None
     assert path.exists() and not (tmp_path / "book.cbt").exists()
     assert errors == ["book.cbz: boom"]

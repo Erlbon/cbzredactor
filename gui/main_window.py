@@ -101,9 +101,11 @@ from redactor_common.core.version import REDACTOR_COMMON_REPO_URL, REDACTOR_COMM
 
 from core.foreign_archive_convert import (
     FOREIGN_ARCHIVE_EXTENSIONS,
+    ConversionCancelled,
     ForeignArchiveConversionError,
     convert_to_cbz,
 )
+from gui.conversion_progress import ConversionRun
 from core.archive_sniff import extension_label
 from core.cbz_file import CbzBook, CbzError, ResizeCancelled, path_needs_conversion
 from core.comicinfo_check import SCAN_ISSUES, check_book, scan_status
@@ -356,6 +358,7 @@ class MainWindow(QMainWindow):
         self.resize(1100, 720)
 
         self.books: list[CbzBook] = []
+        self._conversion_run: ConversionRun | None = None  # set while a batch of conversions runs
         self._selected_rows: list[int] = []
         self.undo_manager: UndoManager[CbzBook] = UndoManager()
         # Selected file's cover: read + decoded off the GUI thread, see
@@ -959,16 +962,15 @@ class MainWindow(QMainWindow):
         try:
             if os.path.splitext(path)[1].lower() == ".cbz":
                 source = relabel_mislabeled_cbz(path)
-            new_path = convert_to_cbz(source)
+            new_path = self._convert_file(source)
+        except ConversionCancelled:
+            # Not an error: the user stopped it (the run's Cancel flag ends the
+            # batch). Nothing half-written is left; only the name needs undoing.
+            self._restore_relabeled(source, path, name, errors)
+            return None
         except ForeignArchiveConversionError as exc:
             errors.append(f"{name}: {exc}")
-            if source != path:
-                # Undo the relabel, or the file stays under a name the
-                # table row (still holding `path`) doesn't know.
-                try:
-                    os.rename(source, path)
-                except OSError as rename_exc:
-                    errors.append(f"{name}: could not restore its name from {os.path.basename(source)}: {rename_exc}")
+            self._restore_relabeled(source, path, name, errors)
             return None
         if delete_original:
             try:
@@ -976,6 +978,47 @@ class MainWindow(QMainWindow):
             except TrashError as exc:
                 errors.append(f"{name}: converted to CBZ successfully, but {exc}")
         return new_path
+
+    @staticmethod
+    def _restore_relabeled(source: str, path: str, name: str, errors: list[str]) -> None:
+        """Undoes the relabel of a mislabeled ".cbz" after a failed or cancelled
+        conversion, or the file stays under a name the table row (still holding
+        `path`) doesn't know."""
+        if source == path:
+            return
+        try:
+            os.rename(source, path)
+        except OSError as rename_exc:
+            errors.append(f"{name}: could not restore its name from {os.path.basename(source)}: {rename_exc}")
+
+    def _convert_file(self, source: str) -> str:
+        """convert_to_cbz(source) on a worker thread under a progress dialog
+        (gui/conversion_progress.py): the batch's own dialog when one is
+        running, else a dialog just for this file. Raises what convert_to_cbz
+        raises, ConversionCancelled included."""
+        run = self._conversion_run
+        if run is not None:
+            return run.convert(convert_to_cbz, source)
+        with ConversionRun(self, 1) as single:
+            single.begin(0, f"Converting: {os.path.basename(source)}")
+            return single.convert(convert_to_cbz, source)
+
+    def _convert_for_redact(self, source: str, output_path: str | None = None) -> str:
+        """The Convert step of Redact: same worker thread and dialog, one file at a time."""
+        with ConversionRun(self, 1) as single:
+            single.begin(0, f"Converting: {os.path.basename(source)}")
+            return single.convert(convert_to_cbz, source, output_path=output_path)
+
+    def _run_conversions(self, items: list, step, label_for) -> bool:
+        """run_with_progress() for batches that convert files: one dialog with
+        the current file's name, "n of m", a byte-level bar and Cancel, the
+        conversions themselves on a worker thread. False if Cancel stopped it."""
+        with ConversionRun(self, len(items)) as run:
+            self._conversion_run = run
+            try:
+                return run.process(items, step, label_for)
+            finally:
+                self._conversion_run = None
 
     def _load_paths(self, paths: list[str]) -> None:
         errors: list[str] = []
@@ -997,7 +1040,15 @@ class MainWindow(QMainWindow):
             self.books.append(book)
             self._add_table_row(book)
 
-        run_with_progress(self, paths, _step, "Loading files...", threshold=LOAD_PROGRESS_THRESHOLD)
+        if choice == FOREIGN_CONVERT and any(path_needs_conversion(p) for p in paths):
+            # Converting while loading: a worker thread and its own dialog, even
+            # for a single file (see _run_conversions).
+            self._run_conversions(
+                paths, _step,
+                lambda p: f"{'Converting' if path_needs_conversion(p) else 'Loading'}: {os.path.basename(p)}",
+            )
+        else:
+            run_with_progress(self, paths, _step, "Loading files...", threshold=LOAD_PROGRESS_THRESHOLD)
 
         if errors:
             from redactor_common.core.error_summary import summarize_errors
@@ -2610,6 +2661,7 @@ class MainWindow(QMainWindow):
             ],
             known_credits=self._known_credits,
             sample_values=self._redact_sample_values(),
+            convert=self._convert_for_redact,
         )
 
     def _redact_sample_values(self) -> dict[str, str]:
@@ -3000,8 +3052,7 @@ class MainWindow(QMainWindow):
                 rows[index[fix.path]] = row
                 index[new_rel] = index.pop(fix.path)
 
-        finished = run_with_progress(self, conversions, _convert, "Converting to CBZ...",
-                                     label_for=lambda fix: f"Converting: {fix.path.rsplit('/', 1)[-1]}")
+        finished = self._run_conversions(conversions, _convert, lambda fix: f"Converting: {fix.path.rsplit('/', 1)[-1]}")
         summary.append(f"{converted} file(s) converted to CBZ; originals are in the Recycle Bin."
                        + ("" if finished else " Stopped before the rest."))
         if errors:
@@ -3186,7 +3237,7 @@ class MainWindow(QMainWindow):
             if new_path:
                 converted.append(new_path)
 
-        run_with_progress(self, paths, _step, "Converting to CBZ...", threshold=LOAD_PROGRESS_THRESHOLD)
+        self._run_conversions(paths, _step, lambda p: f"Converting: {os.path.basename(p)}")
 
         if errors:
             from redactor_common.core.error_summary import summarize_errors
@@ -3315,10 +3366,7 @@ class MainWindow(QMainWindow):
             self._refresh_table_row(row, new_book)
             converted += 1
 
-        run_with_progress(
-            self, books, _step, "Converting to CBZ...", threshold=1,
-            label_for=lambda book: f"Converting: {os.path.basename(book.path)}",
-        )
+        self._run_conversions(books, _step, lambda book: f"Converting: {os.path.basename(book.path)}")
         if errors:
             from redactor_common.core.error_summary import summarize_errors
             QMessageBox.warning(self, "Some Files Failed to Convert", summarize_errors(errors))

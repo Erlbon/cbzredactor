@@ -127,6 +127,7 @@ class RedactEnv:
     sample_values: dict[str, str] = field(default_factory=dict)  # the first loaded book's fields, for pattern previews
     open_database: Callable[[str], object] = open_database
     comicvine_down: bool = False  # set by the first network failure, skips the rest of the run
+    convert: Callable[..., str] | None = None  # convert(source, output_path=...): None = convert_to_cbz directly; the app supplies a threaded one with progress
 
     def begin(self) -> None:
         """Call before each run."""
@@ -381,7 +382,7 @@ class ConvertStep(Step):
         scratch = _side_path(ctx.original, "redact-work")
         ctx.temps.append(scratch)
         try:
-            convert_to_cbz(ctx.original, output_path=scratch)
+            (ctx.env.convert or convert_to_cbz)(ctx.original, output_path=scratch)
         except ForeignArchiveConversionError as exc:
             return StepResult.failed(str(exc))
         work = CbzBook(scratch)

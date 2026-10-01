@@ -1,5 +1,31 @@
 # Changelog
 
+## 2026-10-01#06 -- Converting CBR/CBT/CB7 to CBZ: progress, Cancel, and much faster
+
+- **No more frozen window while converting.** Every conversion (on load, from
+  the table, Tools/Repair > Convert to CBZ, the Collection report's Convert,
+  and the Convert step of Redact) now runs in the background under one
+  progress dialog that shows the file name, "n of m" for a batch, a bar driven
+  by the bytes processed (a busy bar when the archive's size can't be read
+  up front) and the same text in the status bar. Even a single huge CBR now
+  shows it.
+- **Cancel** stops the batch and never leaves a half-written file: the .cbz is
+  written under a temporary name and only renamed into place once it is
+  complete and verified; extracted files are removed. A CBR is extracted by
+  an external RAR tool in one go that cannot be interrupted, so a Cancel
+  there takes effect as soon as that extraction ends (the dialog stays up and
+  says so); CBT stops between files.
+- **Several times faster.** Page images (JPEG, PNG, WebP, ...) are now stored
+  as they are instead of being deflated a second time, which was most of the
+  time for no size gain; pages are streamed in chunks rather than read whole
+  into memory. A 450 MB, 300-page archive converts in about 5 s instead of 17
+  s here. Because stored pages are copied, not recompressed, every later
+  rewrite of the converted file (Save, Clean Up, Redact's later steps) is also
+  much faster (0.5 s instead of 10 s for the same file).
+- The same checks as before still run (the result opens, every entry passes
+  its CRC check, and it has as many pages as were extracted); errors and
+  messages are unchanged.
+
 ## 2026-10-01#05 -- Fuller right-click menu, and it works on unconverted rows
 
 - **The right-click menu now offers every command that works on the selected
