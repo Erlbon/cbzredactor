@@ -77,6 +77,9 @@ STORED_EXTENSIONS = frozenset({
 
 _ZIP_ERRORS = ZIP_ERRORS  # see core/zip_rewrite.py
 
+# The page turner never reads a single page entry bigger than this into memory.
+MAX_PREVIEW_PAGE_BYTES = 64 * 1024 * 1024
+
 
 class ResizeCancelled(RewriteCancelled):
     """resize_images()'s `should_cancel` fired; the temp file was removed
@@ -471,6 +474,24 @@ class CbzBook:
         try:
             with open_zip(self.path) as zf:
                 return zf.read(self.first_page_name)
+        except _ZIP_ERRORS:
+            return None
+
+    def read_page_bytes(self, index: int) -> Optional[bytes]:
+        """Raw bytes of page `index` (0-based, the same sorted reading order
+        as page_names) -- ONLY that one archive entry is read, nothing
+        around it. For the side panel's page turner. None if the index is
+        out of range, the entry is unreadable, or it is absurdly large
+        (MAX_PREVIEW_PAGE_BYTES), so a corrupt or hostile page can't eat
+        the memory of a preview."""
+        if not 0 <= index < len(self.page_names):
+            return None
+        name = self.page_names[index]
+        try:
+            with open_zip(self.path) as zf:
+                if zf.getinfo(name).file_size > MAX_PREVIEW_PAGE_BYTES:
+                    return None
+                return zf.read(name)
         except _ZIP_ERRORS:
             return None
 

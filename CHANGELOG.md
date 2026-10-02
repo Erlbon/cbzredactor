@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-10-02#02 -- Turn the pages in the cover preview
+
+- The preview under the metadata fields now has **previous / next** buttons with a "Page 3 / 120" counter, so you can look through a book instead of only seeing its first page. With the preview focused (click it) the **Left/Right arrow keys** turn pages too, and **Ctrl + mouse wheel** works as well.
+- Nothing is preloaded: a page is read from the archive (that one entry only) and decoded, shrunk while decoding, in the background only when you turn to it, with a "Loading" placeholder. The last 5 pages you looked at are kept so turning back is instant; selecting a different file starts again at page 1, and with several files (or none) selected the controls are off and the pages are dropped from memory.
+- A page that is corrupt, unreadable or absurdly large (over 64 MB) shows "Could not read page N" and the buttons keep working. Pages follow the same natural name order as the rest of the app. The first-page thumbnails in the file list are untouched.
+- Only CBZ files can be turned through; CBR/CB7/CBT files waiting for Convert to CBZ are not shown in the panel at all, as before.
+
 ## 2026-10-02#01 -- Apply with nothing selected writes to every loaded file
 
 - With no file selected the left-hand panel was switched off and the Apply button read "Apply to 0 Selected" and did nothing, so tags typed into the panel could not be applied. Now, with nothing selected, the panel is live and **Apply to All N Files** (button, Operations menu, Ctrl+Return) writes the fields you filled in to every loaded file (the same "nothing selected = every loaded file" rule the other actions use). Fields you left blank are not touched; it is one Undo step; Save All writes it; the status bar says "Applied to all N files".

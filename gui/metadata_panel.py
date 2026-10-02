@@ -35,7 +35,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import QEvent, Qt, pyqtSignal
 from PyQt6.QtGui import QImage, QPixmap
 from PyQt6.QtWidgets import (
     QComboBox,
@@ -122,6 +122,7 @@ class _ScrollSafeDoubleSpinBox(QDoubleSpinBox):
 
 class ComicInfoPanel(QWidget):
     fieldsChanged = pyqtSignal()
+    pageRequested = pyqtSignal(int)  # the user turned to this 0-based page of the preview
     collapseToggleRequested = pyqtSignal()
 
     def __init__(self, parent=None):
@@ -131,6 +132,8 @@ class ComicInfoPanel(QWidget):
         # True when nothing is selected and the panel edits EVERY loaded file
         # (bulk_mode is then True as well, whatever the file count).
         self.apply_all_mode = False
+        self._page_index = 0  # preview page being shown (0 = the cover)
+        self._page_total = 0  # pages the preview can turn through; 0 = no controls
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(4, 4, 4, 4)
@@ -214,6 +217,31 @@ class ComicInfoPanel(QWidget):
     def _build_cover_box(self) -> ImagePreviewBox:
         self.cover_box = ImagePreviewBox("Cover (First Page)", placeholder="No pages", minimum_size=(60, 80))
         self.cover_label = self.cover_box.image_label
+
+        # Page turner: previous / "Page 3 / 120" / next. Pages other than the
+        # cover are only loaded when asked for (MainWindow._on_page_requested).
+        self.prev_page_btn = QToolButton()
+        self.prev_page_btn.setArrowType(Qt.ArrowType.LeftArrow)
+        self.prev_page_btn.setToolTip("Previous page (Left arrow, or Ctrl+wheel up, with the preview focused)")
+        self.next_page_btn = QToolButton()
+        self.next_page_btn.setArrowType(Qt.ArrowType.RightArrow)
+        self.next_page_btn.setToolTip("Next page (Right arrow, or Ctrl+wheel down, with the preview focused)")
+        self.page_label = QLabel("")
+        self.page_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        for button in (self.prev_page_btn, self.next_page_btn):
+            button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+            button.installEventFilter(self)
+        self.prev_page_btn.clicked.connect(lambda: self.turn_page(-1))
+        self.next_page_btn.clicked.connect(lambda: self.turn_page(1))
+        page_row = QHBoxLayout()
+        page_row.addWidget(self.prev_page_btn)
+        page_row.addWidget(self.page_label, 1)
+        page_row.addWidget(self.next_page_btn)
+        self.cover_box.add_layout(page_row)
+        # Arrow keys / Ctrl+wheel work while the preview image has focus (click it).
+        self.cover_label.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        self.cover_label.installEventFilter(self)
+        self._update_page_controls()
 
         self.page_count_label = QLabel("")
         self.page_count_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -421,15 +449,80 @@ class ComicInfoPanel(QWidget):
         thread by redactor_common's AsyncPreviewLoader."""
         if image is None or image.isNull():
             self.cover_label.set_original_pixmap(None)
-            self.cover_label.setText("Could not read first page")
+            self.cover_label.setText(
+                "Could not read first page" if self._page_index == 0 else f"Could not read page {self._page_index + 1}"
+            )
             return
         self.cover_label.setText("")
         self.cover_label.set_original_pixmap(QPixmap.fromImage(image))
+
+    # ------------------------------------------------------------------
+    # Page turner (the preview below the fields)
+    # ------------------------------------------------------------------
+
+    @property
+    def page_index(self) -> int:
+        return self._page_index
+
+    @property
+    def page_total(self) -> int:
+        return self._page_total
+
+    def set_pages(self, total: int, index: int = 0) -> None:
+        """Sets how many pages the preview can turn through (0 or 1 =
+        controls disabled) and which one is showing. Does not request the
+        page: the caller shows it."""
+        self._page_total = max(0, total)
+        self._page_index = min(max(0, index), max(0, self._page_total - 1))
+        self._update_page_controls()
+
+    def turn_page(self, delta: int) -> None:
+        self.go_to_page(self._page_index + delta)
+
+    def go_to_page(self, index: int) -> None:
+        """Clamped to the page range; emits pageRequested only when the
+        page really changes."""
+        if self._page_total <= 1:
+            return
+        index = min(max(0, index), self._page_total - 1)
+        if index == self._page_index:
+            return
+        self._page_index = index
+        self._update_page_controls()
+        self.pageRequested.emit(index)
+
+    def _update_page_controls(self) -> None:
+        total = self._page_total
+        turnable = total > 1
+        self.prev_page_btn.setEnabled(turnable and self._page_index > 0)
+        self.next_page_btn.setEnabled(turnable and self._page_index < total - 1)
+        self.page_label.setText(f"Page {self._page_index + 1} / {total}" if total else "")
+        self.cover_box.setTitle("Cover (First Page)" if self._page_index == 0 else "Page Preview")
+
+    def eventFilter(self, obj, event) -> bool:  # noqa: N802 -- Qt override signature
+        kind = event.type()
+        if obj is self.cover_label and kind == QEvent.Type.KeyPress:
+            if event.key() == Qt.Key.Key_Left:
+                self.turn_page(-1)
+                return True
+            if event.key() == Qt.Key.Key_Right:
+                self.turn_page(1)
+                return True
+        elif obj is self.cover_label and kind == QEvent.Type.Wheel:
+            if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
+                dy = event.angleDelta().y()
+                if dy:
+                    self.turn_page(-1 if dy > 0 else 1)
+                return True
+        elif obj in (self.prev_page_btn, self.next_page_btn) and kind == QEvent.Type.MouseButtonRelease:
+            self.cover_label.setFocus()  # so the arrow keys work right after a click
+        return super().eventFilter(obj, event)
 
     def set_enabled(self, enabled: bool) -> None:
         self.setEnabled(enabled)
         if not enabled:
             self.set_bulk_mode(0)
+            self.set_pages(0)
             self.cover_label.set_original_pixmap(None)
             self.cover_label.setText("No file selected")
             self.page_count_label.setText("")
@@ -464,6 +557,7 @@ class ComicInfoPanel(QWidget):
         self.splitter.set_image_visible(not self.bulk_mode)
         self.bulk_info_label.setVisible(self.bulk_mode)
         if self.bulk_mode:
+            self.set_pages(0)
             self.bulk_info_label.setText(
                 self._all_info_text(count) if self.apply_all_mode else
                 f"Editing {count} selected files at once. Leave a field blank to leave it "

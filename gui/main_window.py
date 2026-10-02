@@ -108,6 +108,7 @@ from core.foreign_archive_convert import (
 )
 from gui.conversion_progress import ConversionRun
 from core.archive_sniff import extension_label
+from core.page_cache import LruCache
 from core.cbz_file import CbzBook, CbzError, ResizeCancelled, path_needs_conversion
 from core.comicinfo_check import SCAN_ISSUES, check_book, scan_status
 from core.foreign_archive_convert import relabel_mislabeled_cbz
@@ -368,6 +369,9 @@ def _format_file_size(path: str) -> str:
     return f"{size / 1024:.0f} KB"
 
 
+# Decoded preview pages kept for the page turner (each at most 900x1350).
+PAGE_CACHE_SIZE = 5
+
 # Nothing selected + Apply writes to every loaded file; above this many, ask first.
 APPLY_ALL_CONFIRM_ABOVE = 10
 
@@ -387,6 +391,13 @@ class MainWindow(QMainWindow):
         # side panel, for high-DPI screens).
         self._cover_preview = AsyncPreviewLoader(QSize(900, 1350), parent=self)
         self._cover_preview.image_ready.connect(self._on_cover_preview_ready)
+        # The panel's page turner: pages other than the cover are read (that one
+        # entry only) and decoded on demand on a worker thread, never preloaded;
+        # the last few decoded pages stay in a small LRU so turning back is instant.
+        self._page_preview = AsyncPreviewLoader(QSize(900, 1350), debounce_ms=60, parent=self)
+        self._page_preview.image_ready.connect(self._on_page_preview_ready)
+        self._page_cache: LruCache = LruCache(PAGE_CACHE_SIZE)
+        self._paged_book: CbzBook | None = None  # whose pages the panel is turning through
         # Table cover thumbnails, loaded lazily: only rows actually on
         # screen (plus a small buffer) ever read or decode a cover, off
         # the GUI thread -- redactor_common's VisibleRowsWatcher +
@@ -449,6 +460,7 @@ class MainWindow(QMainWindow):
         self.panel = ComicInfoPanel()
         self.panel.set_enabled(False)
         self.panel.fieldsChanged.connect(self._on_fields_changed)
+        self.panel.pageRequested.connect(self._on_page_requested)
         self.panel.collapseToggleRequested.connect(self._toggle_panel)
         self._sync_panel_visible_fields()
 
@@ -1332,6 +1344,7 @@ class MainWindow(QMainWindow):
                 page_count_text += f" -- ComicInfo.xml says {book.metadata.page_count}, will be corrected on save"
             self._show_book_in_panel(book, page_count_text)
         else:
+            self._release_pages()
             self.panel.set_bulk_mode(len(editable_rows))
         self._update_apply_bulk_edit_action()
 
@@ -1369,6 +1382,7 @@ class MainWindow(QMainWindow):
         count = 0 if self._selected_rows else len(self._target_books())
         if self._selected_rows and self._editable_selected_rows():
             return  # a real selection owns the panel; _on_selection_changed set it up
+        self._release_pages()
         if count:
             if self.panel.apply_all_mode:
                 self.panel.set_all_count(count)
@@ -1785,14 +1799,75 @@ class MainWindow(QMainWindow):
         change -- comic pages are often 3000x4500 px, so arrowing
         through a library stuttered on every row."""
         self.panel.load_metadata(book.metadata, None, page_count_text)
+        total = book.actual_page_count
+        # The same book re-shown after an edit keeps its page; a different one starts at page 1.
+        keep = book is self._paged_book and total == self.panel.page_total
+        index = self.panel.page_index if keep else 0
+        if not keep:
+            self._page_cache.clear()
+        self._paged_book = book
+        # Only a real CBZ can be turned through; unconverted books never reach the panel.
+        self.panel.set_pages(total if not book.needs_conversion and not book.load_error else 0, index)
         if book.first_page_name:
-            self.panel.set_cover_loading()
+            self._show_page(book, index)
+        else:
+            self._cover_preview.cancel()
+            self._page_preview.cancel()
+
+    def _release_pages(self) -> None:
+        """No single file in the panel any more: drop the page turner's decoded pages."""
+        self._paged_book = None
+        self._page_cache.clear()
+        self._page_preview.cancel()
+
+    def _page_key(self, book: CbzBook, index: int) -> tuple:
+        try:
+            st = os.stat(book.path)
+            stamp = (st.st_mtime_ns, st.st_size)
+        except OSError:
+            stamp = (0, 0)
+        return (book.path, book.page_names[index], *stamp)
+
+    def _show_page(self, book: CbzBook, index: int) -> None:
+        """Page `index` of `book` into the preview: from the LRU if it is
+        there, else a placeholder now and a lazy read + decode of just that
+        entry on a worker thread (page 1 uses the cover loader)."""
+        cached = self._page_cache.get(self._page_key(book, index))
+        if cached is not None:
+            self._cover_preview.cancel()
+            self._page_preview.cancel()
+            self.panel.set_cover_image(cached)
+            return
+        self.panel.set_cover_loading()
+        if index == 0:
+            self._page_preview.cancel()
             self._cover_preview.request(book, book.read_first_page_bytes)
         else:
             self._cover_preview.cancel()
+            self._page_preview.request((book, index), lambda: book.read_page_bytes(index))
+
+    def _on_page_requested(self, index: int) -> None:
+        if len(self._selected_rows) == 1 and self._paged_book is self.books[self._selected_rows[0]]:
+            self._show_page(self._paged_book, index)
+
+    def _remember_page(self, book: CbzBook, index: int, image: QImage) -> None:
+        if image is not None and not image.isNull() and 0 <= index < len(book.page_names):
+            self._page_cache.put(self._page_key(book, index), image)
+
+    def _on_page_preview_ready(self, token, image: QImage) -> None:
+        book, index = token
+        if len(self._selected_rows) != 1 or self.books[self._selected_rows[0]] is not book:
+            return
+        if index != self.panel.page_index:
+            return  # the user already turned elsewhere
+        self._remember_page(book, index, image)
+        self.panel.set_cover_image(image)
 
     def _on_cover_preview_ready(self, book: CbzBook, image: QImage) -> None:
         if len(self._selected_rows) == 1 and self.books[self._selected_rows[0]] is book:
+            if self.panel.page_index != 0:
+                return
+            self._remember_page(book, 0, image)
             self.panel.set_cover_image(image)
 
     def refresh_list(self) -> None:
