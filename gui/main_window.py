@@ -368,6 +368,10 @@ def _format_file_size(path: str) -> str:
     return f"{size / 1024:.0f} KB"
 
 
+# Nothing selected + Apply writes to every loaded file; above this many, ask first.
+APPLY_ALL_CONFIRM_ABOVE = 10
+
+
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -1115,6 +1119,7 @@ class MainWindow(QMainWindow):
             )
             self._rebuild_table()
 
+        self._show_idle_panel()
         self._update_status()
 
     def _add_table_row(self, book: CbzBook) -> None:
@@ -1307,10 +1312,10 @@ class MainWindow(QMainWindow):
         self._update_selection_actions()
 
         if not editable_rows:
-            # Nothing selected, or only rows waiting for Convert to CBZ
-            # (read-only -- see CbzBook.needs_conversion).
-            self.panel.set_enabled(False)
-            self._update_apply_bulk_edit_action()
+            # Nothing selected: the panel edits every loaded file (see
+            # _show_idle_panel). Or only rows waiting for Convert to CBZ are
+            # selected (read-only -- see CbzBook.needs_conversion): panel off.
+            self._show_idle_panel()
             if self._selected_rows:
                 self.statusBar().showMessage(
                     "Selected file(s) need converting before they can be edited -- "
@@ -1355,10 +1360,44 @@ class MainWindow(QMainWindow):
         if rows:
             self._quick_number_issues([self.books[r] for r in rows])
 
+    def _show_idle_panel(self) -> None:
+        """The panel's state when no single file is being shown: with files
+        loaded and NOTHING selected it is enabled and edits every loaded
+        file (the same 'nothing selected = every loaded book' rule as every
+        other action, _target_books); otherwise it is off. Typed text is
+        kept while the loaded count changes."""
+        count = 0 if self._selected_rows else len(self._target_books())
+        if self._selected_rows and self._editable_selected_rows():
+            return  # a real selection owns the panel; _on_selection_changed set it up
+        if count:
+            if self.panel.apply_all_mode:
+                self.panel.set_all_count(count)
+            else:
+                self.panel.set_enabled(True)
+                self.panel.set_bulk_mode(count, all_mode=True)
+        else:
+            self.panel.set_enabled(False)
+        self._update_apply_bulk_edit_action()
+
+    def _apply_scope_count(self) -> int:
+        """How many files Apply would write to right now (0 = none)."""
+        if not self.panel.bulk_mode:
+            return 0
+        if self.panel.apply_all_mode:
+            return len(self._target_books())
+        return len(self._editable_selected_rows())
+
     def _update_apply_bulk_edit_action(self) -> None:
-        count = len(self._editable_selected_rows()) if self.panel.bulk_mode else 0
-        set_apply_count(self.actions_["apply"], count)
-        self.actions_["apply"].setEnabled(self.panel.bulk_mode)
+        count = self._apply_scope_count()
+        action = self.actions_["apply"]
+        if self.panel.apply_all_mode and count:
+            action.setText(f"&Apply to All {count} Files")
+            action.setEnabled(True)
+        elif count:
+            set_apply_count(action, count)
+        else:
+            action.setText(labels.apply_to_selected(None))
+            action.setEnabled(False)
 
     def _commit_current_edits(self) -> None:
         """Writes the panel's current widget values back into whichever
@@ -1390,7 +1429,26 @@ class MainWindow(QMainWindow):
             QMessageBox.information(self, "Nothing to Apply", "No fields were filled in.")
             return
 
-        target_books = [self.books[row] for row in self._editable_selected_rows()]
+        all_mode = self.panel.apply_all_mode
+        if all_mode:
+            target_books = self._target_books()  # nothing selected = every loaded file
+        else:
+            target_books = [self.books[row] for row in self._editable_selected_rows()]
+        if not target_books:
+            QMessageBox.information(self, "No Files", "Load some files first.")
+            return
+        if all_mode and len(target_books) > APPLY_ALL_CONFIRM_ABOVE:
+            names = ", ".join(attr.replace("_", " ").title() for attr in changed_fields)
+            reply = QMessageBox.question(
+                self,
+                "Apply to All Files",
+                f"No file is selected, so this will write to ALL {len(target_books)} loaded files:\n\n"
+                f"{names}\n\nContinue?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if reply != QMessageBox.StandardButton.Yes:
+                return
         metadata_changes = {i: dict(changed_fields) for i in range(len(target_books))}
         metadata_changes = self._resolve_overwrite_conflicts(target_books, metadata_changes)
         if metadata_changes is None:
@@ -1404,8 +1462,11 @@ class MainWindow(QMainWindow):
             book.dirty = True
             self._refresh_table_row(self.books.index(book), book)
 
-        self.panel.set_bulk_mode(len(target_books))  # clears the fields, ready for another round
+        self.panel.set_bulk_mode(len(target_books), all_mode=all_mode)  # clears the fields, ready for another round
+        self._update_apply_bulk_edit_action()
         self._update_status()
+        if all_mode:
+            self.statusBar().showMessage(f"Applied to all {len(target_books)} files")
 
     def _toggle_panel(self) -> None:
         self._panel_collapser.toggle()
@@ -1540,7 +1601,7 @@ class MainWindow(QMainWindow):
         # row number.
         self.table.clearSelection()
         self._selected_rows = []
-        self.panel.set_enabled(False)
+        self._show_idle_panel()
 
     def _sort_key_for(self, book: CbzBook, key: str) -> tuple[int, float] | str:
         """(0, value) for a field that parses as a number on THIS row
@@ -1605,7 +1666,7 @@ class MainWindow(QMainWindow):
         self._update_undo_action()
         self._update_redo_action()
         self._rebuild_table()
-        self.panel.set_enabled(False)
+        self._show_idle_panel()
         self._update_status()
 
     def clear_list(self) -> None:
@@ -1619,7 +1680,7 @@ class MainWindow(QMainWindow):
         self._update_undo_action()
         self._update_redo_action()
         self._rebuild_table()
-        self.panel.set_enabled(False)
+        self._show_idle_panel()
         self._update_status()
 
     def _load_lazy_cells_for_rows(self, rows: list[int]) -> None:
@@ -1764,7 +1825,7 @@ class MainWindow(QMainWindow):
         self._update_undo_action()
         self._update_redo_action()
         self.table.setRowCount(0)
-        self.panel.set_enabled(False)
+        self._show_idle_panel()
         self._load_paths(all_paths)
 
     # ------------------------------------------------------------------
@@ -3257,7 +3318,7 @@ class MainWindow(QMainWindow):
             self._update_undo_action()
             self._update_redo_action()
             self._rebuild_table()
-            self.panel.set_enabled(False)
+            self._show_idle_panel()
         if errors:
             from redactor_common.core.error_summary import summarize_errors
             QMessageBox.warning(self, "Some Files Couldn't Be Moved", summarize_errors(errors))

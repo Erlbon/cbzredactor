@@ -128,6 +128,9 @@ class ComicInfoPanel(QWidget):
         super().__init__(parent)
         self._loading = False  # True while load_metadata() populates widgets, to suppress fieldsChanged
         self.bulk_mode = False  # True when editing N>1 selected files at once -- see module docstring
+        # True when nothing is selected and the panel edits EVERY loaded file
+        # (bulk_mode is then True as well, whatever the file count).
+        self.apply_all_mode = False
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(4, 4, 4, 4)
@@ -431,7 +434,22 @@ class ComicInfoPanel(QWidget):
             self.cover_label.setText("No file selected")
             self.page_count_label.setText("")
 
-    def set_bulk_mode(self, count: int) -> None:
+    def set_all_count(self, count: int) -> None:
+        """All-files mode only: the number of loaded files changed (more
+        were opened, some removed). Refreshes the explanation but leaves
+        whatever the user has typed alone."""
+        if self.apply_all_mode:
+            self.bulk_info_label.setText(self._all_info_text(count))
+
+    @staticmethod
+    def _all_info_text(count: int) -> str:
+        return (
+            f"No file is selected, so Apply writes to ALL {count} loaded file(s). Leave a "
+            "field blank to leave it unchanged on every file; fill one in to set it on all "
+            "of them. Select files first to apply to just those."
+        )
+
+    def set_bulk_mode(self, count: int, all_mode: bool = False) -> None:
         """count <= 1: normal single-file mode (the cover/page-count
         area is shown; MainWindow separately calls load_metadata() for
         that one file). count > 1: bulk mode -- every field is cleared,
@@ -439,13 +457,15 @@ class ComicInfoPanel(QWidget):
         is hidden, and only fields the user actually fills in get
         applied, to every selected file, via the toolbar/Operations
         menu's "Apply to N Selected Files" action."""
-        self.bulk_mode = count > 1
+        self.apply_all_mode = all_mode and count > 0
+        self.bulk_mode = count > 1 or self.apply_all_mode
         # Hides the whole image pane (its scroll wrapper, not just the
         # box), so no empty viewport is left taking up space.
         self.splitter.set_image_visible(not self.bulk_mode)
         self.bulk_info_label.setVisible(self.bulk_mode)
         if self.bulk_mode:
             self.bulk_info_label.setText(
+                self._all_info_text(count) if self.apply_all_mode else
                 f"Editing {count} selected files at once. Leave a field blank to leave it "
                 "unchanged on every file; fill one in to set it on all of them."
             )

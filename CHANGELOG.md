@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-10-02#01 -- Apply with nothing selected writes to every loaded file
+
+- With no file selected the left-hand panel was switched off and the Apply button read "Apply to 0 Selected" and did nothing, so tags typed into the panel could not be applied. Now, with nothing selected, the panel is live and **Apply to All N Files** (button, Operations menu, Ctrl+Return) writes the fields you filled in to every loaded file (the same "nothing selected = every loaded file" rule the other actions use). Fields you left blank are not touched; it is one Undo step; Save All writes it; the status bar says "Applied to all N files".
+- Above 10 files it asks first, naming the fields about to be written. Files still waiting for Convert to CBZ are left out.
+- With exactly one file selected the button now reads "Apply to Selected" (disabled; edits there apply live) instead of "Apply to 0 Selected". Selecting files works as before (Apply to N Selected).
+
 ## 2026-10-01#08 -- Converted pages are written in name order on every platform
 
 - Converting a CBR/CBT/CB7 to CBZ packed the pages in the order the file system listed them, which is not sorted on Linux, so a converted book could have its pages stored out of order. They are now sorted by name before packing. (Found by the Linux test run of #06/#07.)
