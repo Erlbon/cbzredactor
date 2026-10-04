@@ -1890,9 +1890,11 @@ class MainWindow(QMainWindow):
         # for .cbz/.cbr, so a CBT/CB7 dropped into a loaded folder never
         # showed up on refresh.
         existing_paths = [os.path.normpath(book.path) for book in self.books]
-        all_paths = existing_paths + find_new_files_in_loaded_folders(
-            existing_paths, comic_files_in_folder,
-        )
+        new_paths = find_new_files_in_loaded_folders(existing_paths, comic_files_in_folder)
+        # Files that are gone from disk are dropped; only present ones are shown.
+        present_paths = [p for p in existing_paths if os.path.exists(p)]
+        removed_count = len(existing_paths) - len(present_paths)
+        all_paths = present_paths + new_paths
 
         self.books = []
         self._selected_rows = []
@@ -1902,6 +1904,10 @@ class MainWindow(QMainWindow):
         self.table.setRowCount(0)
         self._show_idle_panel()
         self._load_paths(all_paths)
+        if removed_count:
+            self.statusBar().showMessage(
+                f"{removed_count} file(s) no longer on disk were removed from the list", 8000
+            )
 
     # ------------------------------------------------------------------
     # Saving

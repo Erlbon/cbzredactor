@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-10-04#01 -- Refresh drops files that are gone
+
+- Refresh List (F5) now shows only the files that are still on disk: a file that was deleted or moved since it was loaded is removed from the list instead of staying as an error row. New files in the loaded folders are still picked up.
+
 ## 2026-10-02#02 -- Turn the pages in the cover preview
 
 - The preview under the metadata fields now has **previous / next** buttons with a "Page 3 / 120" counter, so you can look through a book instead of only seeing its first page. With the preview focused (click it) the **Left/Right arrow keys** turn pages too, and **Ctrl + mouse wheel** works as well.
