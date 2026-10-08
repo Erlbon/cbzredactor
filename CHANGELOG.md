@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026-10-08#04 -- Shared Recycle Bin fix
+
+- The path normalization for the Recycle Bin now also lives in redactor_common's move_to_trash, so every caller gets it.
+- Requires redactor_common 2026-10-08-02.
+
 ## 2026-10-08#03 -- Recycle Bin: "[Errno 3] path not found" no longer fails every operation
 
 - The fix from 2026-10-08#01 (a Recycle Bin move that reported an error but had actually moved the file is no longer retried into a failure) only covered Resize Images. Convert, Remove Pages, Clean Up Archives, Move into Folders, Redact and Move Duplicates to the Recycle Bin now use the same retry, so a busy file is retried briefly and a file that is already gone counts as moved.
