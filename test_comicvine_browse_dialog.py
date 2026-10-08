@@ -199,3 +199,22 @@ def test_editing_the_series_and_searching_again_shows_the_new_results(tmp_path, 
     dialog.search_btn.click()
     assert net["search"] == 2
     assert dialog.volume_table.rowCount() == 2
+
+
+def test_finish_applies_the_issue_selected_for_the_current_file(tmp_path, net):
+    books = [_book(tmp_path, "Batman 002 (2017).cbz"), _book(tmp_path, "Batman 003 (2017).cbz", number="3")]
+    dialog = ComicVineBrowseDialog(books)
+    _select_volume(dialog, "1")
+    dialog.use_btn.click()  # to the issue step, file 1 not yet applied
+    dialog.finish_btn.click()
+    assert dialog.result() == dialog.DialogCode.Accepted
+    assert sorted(dialog.accepted_metadata()) == [0]  # file 1's issue was applied, file 2 untouched
+
+
+def test_finish_with_nothing_chosen_stays_open_and_says_so(tmp_path, net, monkeypatch):
+    from PyQt6.QtWidgets import QMessageBox
+    shown = []
+    monkeypatch.setattr(QMessageBox, "information", lambda *a, **k: shown.append(a[2]))
+    dialog = ComicVineBrowseDialog([_book(tmp_path)])
+    dialog.finish_btn.click()
+    assert shown and dialog.result() != dialog.DialogCode.Accepted

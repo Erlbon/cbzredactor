@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-10-08#05 -- Comic Vine: Finish applies the issue you have selected
+
+- Finish in the Comic Vine lookup used to close the dialog and drop the issue selected for the current file unless Use This Issue had been pressed first, so nothing was applied. It now applies that issue too, then closes. With nothing chosen at all it stays open and says so.
+
 ## 2026-10-08#04 -- Shared Recycle Bin fix
 
 - The path normalization for the Recycle Bin now also lives in redactor_common's move_to_trash, so every caller gets it.

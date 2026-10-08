@@ -206,7 +206,10 @@ class ComicVineBrowseDialog(QDialog):
         self.back_btn.clicked.connect(self._back_to_series)
         self.skip_btn.clicked.connect(self._next_book)
         self.use_btn.clicked.connect(self._use_current)
-        self.finish_btn.clicked.connect(self.accept)
+        self.finish_btn.clicked.connect(self._finish)
+        self.finish_btn.setToolTip(
+            "Apply everything chosen so far, including the issue selected for this file, and close."
+        )
         self.cancel_btn.clicked.connect(self.reject)
 
     @staticmethod
@@ -504,21 +507,36 @@ class ComicVineBrowseDialog(QDialog):
             self._prior_volume_ids.discard(self._current_volume.volume_id)  # and no longer a favourite
         self._search_volumes()
 
-    def _use_issue(self) -> None:
+    def _finish(self) -> None:
+        """Finish applies the issue selected for the current file too (pressing it
+        without having pressed Use This Issue used to drop that choice), then closes."""
+        if self.stack.currentIndex() == STEP_ISSUES and self._selected_issue() is not None:
+            if not self._use_issue(advance=False):
+                return  # the lookup failed and was reported; stay open
+        if not self._results:
+            QMessageBox.information(
+                self, "Comic Vine", "Nothing has been chosen yet. Pick an issue, or press Cancel."
+            )
+            return
+        self.accept()
+
+    def _use_issue(self, advance: bool = True) -> bool:
         issue = self._selected_issue()
         if issue is None:
             QMessageBox.information(self, "Comic Vine", "Select an issue first, or Skip This File.")
-            return
+            return False
         volume = self._current_volume
         candidate = candidate_for(volume, issue)
         try:
             details = self._bg(fetch_issue_details, self._api_key, candidate.detail_url)
         except ComicVineLookupError as exc:
             self._warn(exc)
-            return
+            return False
         details.publisher = volume.publisher
         self._results[self._index] = details.as_dict()
-        self._next_book()
+        if advance:
+            self._next_book()
+        return True
 
     def _use_current(self) -> None:
         if self.stack.currentIndex() == STEP_SERIES:
