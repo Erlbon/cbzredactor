@@ -218,3 +218,13 @@ def test_finish_with_nothing_chosen_stays_open_and_says_so(tmp_path, net, monkey
     dialog = ComicVineBrowseDialog([_book(tmp_path)])
     dialog.finish_btn.click()
     assert shown and dialog.result() != dialog.DialogCode.Accepted
+
+
+def test_selecting_a_series_shows_the_issue_with_the_files_number_without_choosing_it(tmp_path, net):
+    dialog = ComicVineBrowseDialog([_book(tmp_path)])  # the file is #2
+    _select_volume(dialog, "1")
+    assert dialog.stack.currentIndex() == STEP_SERIES  # still choosing the series
+    assert "Batman #2" in dialog.info_label.text()
+    _select_volume(dialog, "2")  # this series only has #1
+    assert "No issue #2" in dialog.info_label.text()
+    assert net["issues"].count("1") == 1  # fetched once, then cached

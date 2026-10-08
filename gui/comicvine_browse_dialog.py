@@ -406,15 +406,44 @@ class ComicVineBrowseDialog(QDialog):
         volume = self._selected_volume()
         if volume is None:
             return
+        bits = [bit for bit in (volume.publisher, f"started {volume.start_year}" if volume.start_year else "") if bit]
+        bits.append(f"{volume.issue_count} issue(s)")
+        summary = " · ".join(bits)
+        # Show the cover of the issue with the file's number straight away, so the series can be
+        # judged (and another one picked) without choosing it first. Falls back to the series cover.
+        issue, have = self._issue_for_file(volume)
+        number = self.number_edit.text().strip()
+        if issue is not None and issue.image_url:
+            image_url, note = issue.image_url, f"{volume.name} #{issue.number}" + (f' – "{issue.name}"' if issue.name else "")
+        else:
+            image_url = volume.image_url
+            note = f"No issue #{number} in this series. It has: {have}." if number and have is not None else ""
         try:
-            data = self._image_for(volume.image_url)
+            data = self._image_for(image_url)
         except ComicVineLookupError:
             data = None
         self._show_cover(self.cover_found, data, "No cover available")
-        self._show_match(data and volume.image_url)
-        bits = [bit for bit in (volume.publisher, f"started {volume.start_year}" if volume.start_year else "") if bit]
-        bits.append(f"{volume.issue_count} issue(s)")
-        self.info_label.setText(" · ".join(bits))
+        self._show_match(data and image_url)
+        if issue is not None and data and self._local_hash is not None:
+            rows = self.volume_table.selectionModel().selectedRows()
+            if rows:  # the table's Cover column now says how this series' #N compares
+                score = similarity(self._local_hash, self._hash_for(image_url))
+                self.volume_table.item(rows[0].row(), 4).setText(f"{score:.0%}")
+        self.info_label.setText(summary + ("\n" + note if note else ""))
+
+    def _issue_for_file(self, volume: ComicVineVolume):
+        """(the volume's issue with the file's number or None, a summary of the numbers it
+        does have or None if they could not be fetched). Issues are cached per volume."""
+        number = self.number_edit.text().strip()
+        if not number or not self._api_key:
+            return None, None
+        try:
+            if volume.volume_id not in self._issue_cache:
+                self._issue_cache[volume.volume_id] = self._bg(fetch_volume_issues, self._api_key, volume.volume_id)
+        except ComicVineLookupError:
+            return None, None
+        issues = self._issue_cache[volume.volume_id]
+        return find_issue_by_number(issues, number), (number_summary(issues) or "none")
 
     def _show_match(self, url) -> None:
         if not url or self._local_hash is None:
