@@ -15,7 +15,7 @@ Apache 2.0; the code is our own):
 
 Cover matching (core/cover_hash.py) only PRESELECTS: the volume whose cover
 looks like the file's is selected first, and a "Cover match" figure is shown;
-nothing is applied until "Use This Issue" is pressed.
+nothing is applied until "Yes – Use This Issue" is pressed.
 
 Within a batch the chosen volume is remembered: the next file with the same
 series goes straight to step 2 with that volume (Back to Series changes it).
@@ -192,10 +192,10 @@ class ComicVineBrowseDialog(QDialog):
 
         buttons = QHBoxLayout()
         self.back_btn = QPushButton("◀ Back to Series")
-        self.skip_btn = QPushButton("Skip This File")
+        self.skip_btn = QPushButton("No – Skip This File")
         self.use_btn = QPushButton("Choose This Series ▶")
         self.use_btn.setDefault(True)
-        self.finish_btn = QPushButton("Finish")
+        self.finish_btn = QPushButton("Stop Here")
         self.cancel_btn = QPushButton("Cancel")
         for button in (self.back_btn, self.skip_btn):
             buttons.addWidget(button)
@@ -206,9 +206,9 @@ class ComicVineBrowseDialog(QDialog):
         self.back_btn.clicked.connect(self._back_to_series)
         self.skip_btn.clicked.connect(self._next_book)
         self.use_btn.clicked.connect(self._use_current)
-        self.finish_btn.clicked.connect(self._finish)
+        self.finish_btn.clicked.connect(self._stop)
         self.finish_btn.setToolTip(
-            "Apply everything chosen so far, including the issue selected for this file, and close."
+            "Stop the lookup here. Files you answered Yes to keep their metadata; this file and the rest are left alone."
         )
         self.cancel_btn.clicked.connect(self.reject)
 
@@ -536,23 +536,14 @@ class ComicVineBrowseDialog(QDialog):
             self._prior_volume_ids.discard(self._current_volume.volume_id)  # and no longer a favourite
         self._search_volumes()
 
-    def _finish(self) -> None:
-        """Finish applies the issue selected for the current file too (pressing it
-        without having pressed Use This Issue used to drop that choice), then closes."""
-        if self.stack.currentIndex() == STEP_ISSUES and self._selected_issue() is not None:
-            if not self._use_issue(advance=False):
-                return  # the lookup failed and was reported; stay open
-        if not self._results:
-            QMessageBox.information(
-                self, "Comic Vine", "Nothing has been chosen yet. Pick an issue, or press Cancel."
-            )
-            return
+    def _stop(self) -> None:
+        """Stop here: keep the files already answered Yes, leave this one and the rest alone."""
         self.accept()
 
     def _use_issue(self, advance: bool = True) -> bool:
         issue = self._selected_issue()
         if issue is None:
-            QMessageBox.information(self, "Comic Vine", "Select an issue first, or Skip This File.")
+            QMessageBox.information(self, "Comic Vine", "Select an issue first, or press No.")
             return False
         volume = self._current_volume
         candidate = candidate_for(volume, issue)
@@ -580,7 +571,7 @@ class ComicVineBrowseDialog(QDialog):
         self.stack.setCurrentIndex(step)
         in_issues = step == STEP_ISSUES
         self.back_btn.setVisible(in_issues)
-        self.use_btn.setText("Use This Issue" if in_issues else "Choose This Series ▶")
+        self.use_btn.setText("Yes – Use This Issue" if in_issues else "Choose This Series ▶")
         self.step_label.setText(
             "Step 2 of 2: choose the issue (the covers are side by side)." if in_issues
             else "Step 1 of 2: choose the series (best fit first; the covers are side by side)."

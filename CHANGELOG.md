@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-10-08#07 -- Comic Vine: Yes / No / Stop
+
+- The Comic Vine lookup asks one question per file: **Yes – Use This Issue** applies the metadata and moves on, **No – Skip This File** moves on without it. **Stop Here** (was Finish) ends the chain: files already answered Yes keep their metadata, the current file and the rest are left alone. Cancel still discards everything.
+
 ## 2026-10-08#06 -- Comic Vine: see the right issue's cover while choosing the series
 
 - Selecting a series in step 1 now shows the cover of the issue with the file's number straight away (with its cover-match figure in the table), or says which numbers the series does have. You can compare series by moving through the list instead of choosing each one first. The series' issues are fetched when it is selected and cached.
