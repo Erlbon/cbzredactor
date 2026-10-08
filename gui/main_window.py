@@ -293,12 +293,16 @@ RESIZE_PROGRESS_THRESHOLD = 1
 def _trash_retrying(path: str, attempts: int = 8, delay: float = 0.25) -> None:
     """move_to_trash(), tried again for a moment on failure: the app's own background
     cover and page-size scans (or a virus scanner) may hold the file open for an instant,
-    which fails the move on Windows. A real, lasting failure still raises TrashError."""
+    which fails the move on Windows. A real, lasting failure still raises TrashError.
+    A file that is gone after a failed attempt has already been moved (the shell can
+    report an error after doing the move): retrying it only fails with "path not found"."""
     for attempt in range(attempts):
         try:
             move_to_trash(path)
             return
         except TrashError:
+            if attempt > 0 and not os.path.exists(path):
+                return
             if attempt == attempts - 1:
                 raise
             time.sleep(delay)
@@ -1115,8 +1119,8 @@ class MainWindow(QMainWindow):
             run_with_progress(self, paths, _step, "Loading files...", threshold=LOAD_PROGRESS_THRESHOLD)
 
         if errors:
-            from redactor_common.core.error_summary import summarize_errors
-            QMessageBox.warning(self, "Some Files Failed to Load", summarize_errors(errors))
+            from redactor_common.core.error_summary import wrapped_errors
+            QMessageBox.warning(self, "Some Files Failed to Load", wrapped_errors(errors))
 
         # Newly loaded files were just appended to the end of the table
         # above -- if a column sort is currently active, keep it applied
@@ -1960,8 +1964,8 @@ class MainWindow(QMainWindow):
         )
 
         if errors:
-            from redactor_common.core.error_summary import summarize_errors
-            QMessageBox.warning(self, "Some Files Failed to Save", summarize_errors(errors))
+            from redactor_common.core.error_summary import wrapped_errors
+            QMessageBox.warning(self, "Some Files Failed to Save", wrapped_errors(errors))
         self._update_status()
 
     # ------------------------------------------------------------------
@@ -2028,8 +2032,8 @@ class MainWindow(QMainWindow):
         for book in target_books:
             self._refresh_table_row(self.books.index(book), book)
         if errors:
-            from redactor_common.core.error_summary import summarize_errors
-            QMessageBox.warning(self, "Some Files Failed", summarize_errors(errors))
+            from redactor_common.core.error_summary import wrapped_errors
+            QMessageBox.warning(self, "Some Files Failed", wrapped_errors(errors))
         self._update_status()
 
     def _move_into_folders(self, planned) -> None:
@@ -2250,8 +2254,8 @@ class MainWindow(QMainWindow):
         _rename_log().record("Search/Replace (filename)", renamed)
 
         if errors:
-            from redactor_common.core.error_summary import summarize_errors
-            QMessageBox.warning(self, "Some Files Failed", summarize_errors(errors))
+            from redactor_common.core.error_summary import wrapped_errors
+            QMessageBox.warning(self, "Some Files Failed", wrapped_errors(errors))
         self._update_status()
 
     def open_case_conversion_dialog(self) -> None:
@@ -2477,8 +2481,8 @@ class MainWindow(QMainWindow):
         self.statusBar().clearMessage()
 
         if errors:
-            from redactor_common.core.error_summary import summarize_errors
-            QMessageBox.warning(self, "Some Files Failed to Resize", summarize_errors(errors))
+            from redactor_common.core.error_summary import wrapped_errors
+            QMessageBox.warning(self, "Some Files Failed to Resize", wrapped_errors(errors))
 
         processed = totals["resized"] + totals["skipped"] + totals["failed"]
         if processed:
@@ -2683,8 +2687,8 @@ class MainWindow(QMainWindow):
             label_for=lambda entry: f"Rewriting: {os.path.basename(entry[0].path)}",
         )
         if errors:
-            from redactor_common.core.error_summary import summarize_errors
-            QMessageBox.warning(self, "Some Files Failed", summarize_errors(errors))
+            from redactor_common.core.error_summary import wrapped_errors
+            QMessageBox.warning(self, "Some Files Failed", wrapped_errors(errors))
         self._visible_rows.schedule()
         self._update_status()
         if removed_total:
@@ -2840,8 +2844,8 @@ class MainWindow(QMainWindow):
         run_with_progress(self, chosen, _clean, "Cleaning up archives...", threshold=1,
                           label_for=lambda b: f"Rewriting: {os.path.basename(b.path)}")
         if errors:
-            from redactor_common.core.error_summary import summarize_errors
-            QMessageBox.warning(self, "Some Files Failed", summarize_errors(errors))
+            from redactor_common.core.error_summary import wrapped_errors
+            QMessageBox.warning(self, "Some Files Failed", wrapped_errors(errors))
         self._visible_rows.schedule()
         self._update_status()
         if cleaned:
@@ -3401,8 +3405,8 @@ class MainWindow(QMainWindow):
             self._rebuild_table()
             self._show_idle_panel()
         if errors:
-            from redactor_common.core.error_summary import summarize_errors
-            QMessageBox.warning(self, "Some Files Couldn't Be Moved", summarize_errors(errors))
+            from redactor_common.core.error_summary import wrapped_errors
+            QMessageBox.warning(self, "Some Files Couldn't Be Moved", wrapped_errors(errors))
         self._update_status()
         if gone:
             self.statusBar().showMessage(f"Moved {len(gone)} duplicate(s) to the Recycle Bin.", 10000)
@@ -3454,8 +3458,8 @@ class MainWindow(QMainWindow):
         self._run_conversions(paths, _step, lambda p: f"Converting: {os.path.basename(p)}")
 
         if errors:
-            from redactor_common.core.error_summary import summarize_errors
-            QMessageBox.warning(self, "Some Files Failed to Convert", summarize_errors(errors))
+            from redactor_common.core.error_summary import wrapped_errors
+            QMessageBox.warning(self, "Some Files Failed to Convert", wrapped_errors(errors))
         if converted:
             QMessageBox.information(
                 self, "Conversion Complete", f"Converted {len(converted)} file(s) to .cbz."
@@ -3584,8 +3588,8 @@ class MainWindow(QMainWindow):
 
         self._run_conversions(books, _step, lambda book: f"Converting: {os.path.basename(book.path)}")
         if errors:
-            from redactor_common.core.error_summary import summarize_errors
-            QMessageBox.warning(self, "Some Files Failed to Convert", summarize_errors(errors))
+            from redactor_common.core.error_summary import wrapped_errors
+            QMessageBox.warning(self, "Some Files Failed to Convert", wrapped_errors(errors))
         self._visible_rows.schedule()
         self._on_selection_changed()
         self._update_status()

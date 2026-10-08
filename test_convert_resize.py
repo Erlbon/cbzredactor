@@ -425,6 +425,29 @@ def test_a_recycle_bin_failure_keeps_the_original_and_is_reported(window, tmp_pa
     assert not [n for n in os.listdir(tmp_path) if n.startswith(("a.cbz.", "b.cbz."))]
 
 
+def test_a_move_that_happened_despite_an_error_is_not_retried_into_a_failure(tmp_path, monkeypatch):
+    path = tmp_path / "a.cbz"
+    path.write_bytes(b"x")
+    calls = []
+
+    def moves_then_errors(p):
+        calls.append(p)
+        if len(calls) == 1:
+            os.remove(p)  # the shell moved it, then reported an error
+            raise TrashError("couldn't move it to the Recycle Bin: [Errno 5] odd")
+        raise TrashError("couldn't move it to the Recycle Bin: [Errno 3] The system cannot find the path specified")
+
+    monkeypatch.setattr(mw, "move_to_trash", moves_then_errors)
+    monkeypatch.setattr(mw.time, "sleep", lambda _s: None)
+    mw._trash_retrying(str(path))  # does not raise: the original is gone, which is the goal
+    assert len(calls) == 2
+
+    path.write_bytes(b"x")
+    monkeypatch.setattr(mw, "move_to_trash", lambda p: (_ for _ in ()).throw(TrashError("locked")))
+    with pytest.raises(TrashError):
+        mw._trash_retrying(str(path), attempts=3)  # a lasting failure with the file still there still raises
+
+
 def test_exporting_does_not_touch_the_originals_and_remembers_the_folder(window, tmp_path, monkeypatch):
     paths = _load_two(window, tmp_path)
     out = tmp_path / "out"

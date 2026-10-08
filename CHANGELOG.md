@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-10-08#01 -- Error messages fit the dialog; a Recycle Bin move that already happened is no longer retried into a failure
+
+- The "Some Files Failed to ..." warnings (load, save, resize, convert, move, clean up...) now wrap each error over several lines, one error per paragraph, so the whole reason is readable instead of running off the dialog's right edge. Up to 5 errors are shown, then "... and N more".
+- Resize with "send the original to the Recycle Bin": if the Recycle Bin move reported an error but had actually moved the file, the retry failed with "[Errno 3] path not found" and the whole file was reported as failed. A file that is already gone after a failed attempt is now treated as moved, and the resize completes.
+- Requires redactor_common 2026-10-08-01 (wrapped_errors).
+
 ## 2026-10-06#01 -- Shared library update
 
 - No change to how the app works. Updates the shared redactor_common library to 2026-10-05-01 so all four Redactor apps ship the same version.
