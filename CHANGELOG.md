@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026-10-08#03 -- Recycle Bin: "[Errno 3] path not found" no longer fails every operation
+
+- The fix from 2026-10-08#01 (a Recycle Bin move that reported an error but had actually moved the file is no longer retried into a failure) only covered Resize Images. Convert, Remove Pages, Clean Up Archives, Move into Folders, Redact and Move Duplicates to the Recycle Bin now use the same retry, so a busy file is retried briefly and a file that is already gone counts as moved.
+- The real cause of the "[Errno 3] path not found" on Resize: the path reached the Recycle Bin in the extended-length form with mixed slashes (D:/Download with a long-path prefix), which the Windows shell rejects although the file exists. The path is now normalized to a plain one before the move.
+
 ## 2026-10-08#02 -- Comic Vine: choose the series and issue while looking at the covers
 
 - **Import > Look Up via Comic Vine** is rebuilt. The old list of ranked issues that you ticked afterwards is gone; each file is now decided as you browse, in two steps like the ComicRack "Comic Vine Scraper" plugin:

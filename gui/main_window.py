@@ -290,12 +290,26 @@ SAVE_PROGRESS_THRESHOLD = 3
 RESIZE_PROGRESS_THRESHOLD = 1
 
 
+def _shell_path(path: str) -> str:
+    """The plain form of a path the Windows shell (the Recycle Bin) accepts: no
+    extended-length prefix and one kind of slash. A path like \\\\?\\D:/Download\\x.cbz
+    makes the move fail with "[Errno 3] path not found" although the file is there."""
+    path = str(path)
+    ext = chr(92) * 2 + "?" + chr(92)
+    if path.startswith(ext):
+        rest = path[len(ext):]
+        unc = "UNC" + chr(92)
+        path = chr(92) * 2 + rest[len(unc):] if rest.startswith(unc) else rest
+    return os.path.normpath(path)
+
+
 def _trash_retrying(path: str, attempts: int = 8, delay: float = 0.25) -> None:
     """move_to_trash(), tried again for a moment on failure: the app's own background
     cover and page-size scans (or a virus scanner) may hold the file open for an instant,
     which fails the move on Windows. A real, lasting failure still raises TrashError.
     A file that is gone after a failed attempt has already been moved (the shell can
     report an error after doing the move): retrying it only fails with "path not found"."""
+    path = _shell_path(path)
     for attempt in range(attempts):
         try:
             move_to_trash(path)
@@ -1035,7 +1049,7 @@ class MainWindow(QMainWindow):
             return None
         if delete_original:
             try:
-                move_to_trash(source)
+                _trash_retrying(source)
             except TrashError as exc:
                 errors.append(f"{name}: converted to CBZ successfully, but {exc}")
         return new_path
@@ -2043,7 +2057,7 @@ class MainWindow(QMainWindow):
         so File > Undo Last Rename puts them back. A cross-volume move sends its
         original to the Recycle Bin."""
         summary = run_planned_moves(
-            self, planned, copy=False, rename_log=_rename_log(), label="Move into Folders", trash=move_to_trash,
+            self, planned, copy=False, rename_log=_rename_log(), label="Move into Folders", trash=_trash_retrying,
         )
         for book, _old_path, new_path in summary.done:
             book.path = new_path
@@ -2670,7 +2684,7 @@ class MainWindow(QMainWindow):
             book, names = entry
             before = _file_size_bytes(book.path) or 0
             try:
-                removed_total += book.remove_pages(names, dispose_original=move_to_trash)
+                removed_total += book.remove_pages(names, dispose_original=_trash_retrying)
             except (CbzError, TrashError) as exc:
                 errors.append(f"{os.path.basename(book.path)}: {exc}")
                 return
@@ -2830,7 +2844,7 @@ class MainWindow(QMainWindow):
         def _clean(book: CbzBook, _index: int) -> None:
             nonlocal cleaned
             try:
-                book.clean_contents(dispose_original=move_to_trash, options=options)
+                book.clean_contents(dispose_original=_trash_retrying, options=options)
             except (CbzError, TrashError) as exc:
                 errors.append(f"{os.path.basename(book.path)}: {exc}")
                 return
@@ -2861,7 +2875,7 @@ class MainWindow(QMainWindow):
         """What one Redact run shares, read from the settings now."""
         return RedactEnv(
             rename_log=_rename_log(),
-            trash=move_to_trash,
+            trash=_trash_retrying,
             pattern_history=app_settings.load_pattern_history(),
             ascii_filenames=app_settings.load_ascii_filenames(),
             zero_pad=app_settings.load_rename_zero_pad(),
@@ -3391,7 +3405,7 @@ class MainWindow(QMainWindow):
         gone: list[CbzBook] = []
         for book in doomed:
             try:
-                move_to_trash(book.path)
+                _trash_retrying(book.path)
                 gone.append(book)
             except TrashError as exc:
                 errors.append(f"{os.path.basename(book.path)}: {exc}")

@@ -659,3 +659,12 @@ def test_the_dialog_class_is_the_one_the_window_asks_with():
     other.remember_check.setChecked(True)
     other.no_button.click()
     assert not other.resize_pages and other.remember()
+
+
+def test_trash_gets_a_plain_path_not_the_extended_length_form(monkeypatch):
+    seen = []
+    monkeypatch.setattr(mw, "move_to_trash", seen.append)
+    ext = chr(92) * 2 + "?" + chr(92)
+    mw._trash_retrying(ext + "D:/Download" + chr(92) + "a.cbz")
+    assert seen == ["D:" + chr(92) + "Download" + chr(92) + "a.cbz"] or os.name != "nt"
+    assert not seen[0].startswith(ext)
