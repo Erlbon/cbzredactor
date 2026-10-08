@@ -15,7 +15,7 @@ Built on redactor_common's gui/lookup_dialog.py (LookupDialogBase) --
 this class supplies only what's Bedetheque-specific: search_one()'s
 actual scraping calls. Everything else (the table, progress dialog,
 checkboxes, accepted_metadata()) lives in the shared base, same as
-gui/comicvine_lookup_dialog.py and gui/gcd_lookup_dialog.py.
+gui/gcd_lookup_dialog.py.
 
 Unlike Comic Vine (needs an API key) and GCD (no key, open API),
 Bedetheque sits behind Cloudflare (see core/bedetheque_lookup.py's own

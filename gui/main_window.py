@@ -135,7 +135,7 @@ from core.duplicates import BookFacts, find_duplicates, fingerprint_book
 from core.version import APP_NAME, APP_REPO_URL, APP_VERSION, RELEASE_LABEL
 from gui import app_settings
 from gui.bedetheque_lookup_dialog import BedethequeLookupDialog
-from gui.comicvine_lookup_dialog import ComicVineLookupDialog
+from gui.comicvine_browse_dialog import ComicVineBrowseDialog
 from gui.conversion_settings_dialog import ConversionSettingsDialog
 from gui.gcd_lookup_dialog import GcdLookupDialog
 from gui.page_size_scanner import PageSizeScanner
@@ -3609,7 +3609,7 @@ class MainWindow(QMainWindow):
         """Shared flow for every online lookup dialog (Comic Vine, GCD,
         ...): they all take (target_books, parent) and expose the same
         accepted_metadata() -> {index: {field: value}} shape (see
-        gui/comicvine_lookup_dialog.py / gui/gcd_lookup_dialog.py), so
+        gui/comicvine_browse_dialog.py / gui/gcd_lookup_dialog.py), so
         opening one, applying its results, and refreshing the affected
         rows is identical regardless of which source it is. `label`
         names the source for the undo-stack entry (e.g. "Comic Vine
@@ -3669,7 +3669,7 @@ class MainWindow(QMainWindow):
         return resolve_overwrite_conflicts(self, target_books, metadata_changes, _field_label)
 
     def open_comicvine_lookup_dialog(self) -> None:
-        self._run_lookup_dialog(ComicVineLookupDialog, "Comic Vine lookup")
+        self._run_lookup_dialog(ComicVineBrowseDialog, "Comic Vine lookup")
 
     def open_gcd_lookup_dialog(self) -> None:
         self._run_lookup_dialog(GcdLookupDialog, "Grand Comics Database lookup")

@@ -1,5 +1,16 @@
 # Changelog
 
+## 2026-10-08#02 -- Comic Vine: choose the series and issue while looking at the covers
+
+- **Import > Look Up via Comic Vine** is rebuilt. The old list of ranked issues that you ticked afterwards is gone; each file is now decided as you browse, in two steps like the ComicRack "Comic Vine Scraper" plugin:
+  - **Series:** Comic Vine's matching volumes (series), best fit first -- name words, an issue count that can hold the file's number, a start year not after the file's year, a small penalty for foreign mirror publishers -- with the file's own cover next to the selected series' cover.
+  - **Issue:** that series' issues in number order (1, 2, 10, then Annual 1) with the file's number selected. If the series has no such number, the dialog says so and lists the numbers it does have ("1-12, 14").
+- **Cover Match:** the file's first page is compared with Comic Vine's covers (a perceptual hash; a wraparound cover is compared by its front half). The look-alike series is preselected and the figure is shown next to each series and issue. It only preselects: nothing is applied until you press Use This Issue.
+- The series you choose is remembered for the next file of the same series (it goes straight to step 2; Back to Series changes it). Series, Number and Year can be edited and searched again at any time.
+- Skip This File moves on; Finish applies what you have chosen so far. Applying still goes through the overwrite review and Undo as before.
+- Removed: the old Comic Vine dialog, its Publisher / Series Year filter fields and "Other Matches" list (the series list replaces them). The Redact step's own Comic Vine lookup is unchanged.
+- Requires redactor_common 2026-10-08-01.
+
 ## 2026-10-08#01 -- Error messages fit the dialog; a Recycle Bin move that already happened is no longer retried into a failure
 
 - The "Some Files Failed to ..." warnings (load, save, resize, convert, move, clean up...) now wrap each error over several lines, one error per paragraph, so the whole reason is readable instead of running off the dialog's right edge. Up to 5 errors are shown, then "... and N more".

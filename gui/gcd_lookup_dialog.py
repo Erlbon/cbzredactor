@@ -14,7 +14,7 @@ Built on redactor_common's gui/lookup_dialog.py (LookupDialogBase) --
 this class supplies only what's GCD-specific: search_one()'s actual
 API calls. Everything else (the table, progress dialog, checkboxes,
 accepted_metadata()) lives in the shared base, same as
-gui/comicvine_lookup_dialog.py.
+gui/bedetheque_lookup_dialog.py.
 
 No API key needed, unlike Comic Vine -- GCD's API is open. But GCD's
 own endpoint shape requires BOTH a series name and an issue number

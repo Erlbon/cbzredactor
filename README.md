@@ -261,13 +261,20 @@ understands that this app now supports too).
   are no longer low-res. Other tags are kept, `ScanInformation` (the
   scan group's credit) is never touched; undoable, written on Save.
   There's deliberately no upscaling: plain resampling can't add detail.
-- `Import > Look Up via Comic Vine...` searches [Comic Vine](https://comicvine.gamespot.com/api/)
-  by Series + Number (guessed from the filename when Series is blank)
-  and offers to fill in series, issue title, summary, date, full
-  creator credits, characters/teams/locations, and publisher -- review
-  and untick anything before Apply, same pattern as epubredactor's
-  Google Books/Calibre/Open Library lookups. Needs a free Comic Vine
-  API key (Settings > Comic Vine API Key...).
+- `Import > Look Up via Comic Vine...` goes through the files one at a
+  time and you decide while looking at the covers, in two steps, after the
+  ComicRack "Comic Vine Scraper" plugin. **1. Series:** the matching
+  [Comic Vine](https://comicvine.gamespot.com/api/) volumes, best fit
+  first (name words, an issue count that can hold the number, a start year
+  not after the file's year), your file's cover beside the selected volume's.
+  **2. Issue:** that volume's issues in number order with your number
+  selected, or a note of which numbers it does have. A "Cover Match"
+  figure compares your first page with Comic Vine's cover and preselects the
+  look-alike; nothing is applied until you press Use This Issue. The series
+  you choose is remembered for the next file of the same series. Fills in
+  series, title, summary, date, credits, characters/teams/locations and
+  publisher (then the usual overwrite review). Needs a free Comic Vine API
+  key (Settings > Comic Vine API Key...).
 - `Import > Look Up via Grand Comics Database...` -- same Series +
   Number search and review-then-Apply flow, against
   [comics.org](https://www.comics.org/)'s open API (no key needed).
