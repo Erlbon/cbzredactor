@@ -233,3 +233,23 @@ def test_yes_applies_straight_from_the_series_list_when_the_series_has_the_numbe
     assert dialog.stack.currentIndex() == STEP_SERIES  # never went to the issue list
     assert dialog.accepted_metadata()[0]["publisher"] == "DC Comics"
     assert dialog.result() == dialog.DialogCode.Accepted
+
+
+def test_the_series_and_issue_tables_sort_by_header_numerically(tmp_path, net):
+    from PyQt6.QtCore import Qt
+    dialog = ComicVineBrowseDialog([_book(tmp_path)])
+    ranked = [dialog.volume_table.item(r, 2).text() for r in range(2)]
+    dialog.volume_table.sortByColumn(2, Qt.SortOrder.AscendingOrder)
+    assert [dialog.volume_table.item(r, 2).text() for r in range(2)] == ["52", "140"]  # not "140" first
+    dialog.volume_table.sortByColumn(2, Qt.SortOrder.DescendingOrder)
+    assert [dialog.volume_table.item(r, 2).text() for r in range(2)] == ["140", "52"]
+    # a new search goes back to the ranked order
+    dialog.volume_table.sortByColumn(2, Qt.SortOrder.AscendingOrder)
+    dialog._search_volumes()
+    assert [dialog.volume_table.item(r, 2).text() for r in range(2)] == ranked
+    # the issue table too: 10 sorts after 9
+    _select_volume(dialog, "1")
+    dialog.browse_btn.click()
+    dialog.issue_table.sortByColumn(0, Qt.SortOrder.DescendingOrder)
+    assert [dialog.issue_table.item(r, 0).text() for r in range(4)] == ["5", "3", "2", "1"]
+    assert dialog._selected_issue() is not None  # the file's issue stays selected through the sort

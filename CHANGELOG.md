@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026-10-09#02 -- Comic Vine: sortable tables, clearer Stop and Cancel
+
+- The series and issue tables in the Comic Vine lookup sort by clicking a header (Year, Issues, # and Cover Match sort as numbers, not text). A new search or series goes back to the ranked / numbered order.
+- The buttons say what they do with your answers so far: **Stop – Keep Matches So Far** and **Cancel – Discard All**.
+
 ## 2026-10-09#01 -- Comic Vine: Yes straight from the series list
 
 - When the selected series has the file's number, its cover is already shown, so **Yes – Use This Issue** now applies it right there; the separate "Choose This Series" click is gone. A series without that number leaves Yes greyed out. **Browse Issues** (new, series step only) opens the issue list to pick a different issue, and **Back to Series** returns from it.

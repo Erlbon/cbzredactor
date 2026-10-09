@@ -53,6 +53,7 @@ from PyQt6.QtWidgets import (
 from redactor_common.core.error_summary import wrapped_errors
 from redactor_common.gui.background_call import call_in_background
 from redactor_common.gui.image_label import AspectRatioImageLabel
+from redactor_common.gui.sortable_table import NumericTableWidgetItem, suspend_sorting
 
 from core.cbz_file import CbzBook
 from core.comicvine_browse import (
@@ -197,8 +198,8 @@ class ComicVineBrowseDialog(QDialog):
         self.use_btn = QPushButton("Yes – Use This Issue")
         self.browse_btn = QPushButton("Browse Issues ▶")
         self.use_btn.setDefault(True)
-        self.finish_btn = QPushButton("Stop Here")
-        self.cancel_btn = QPushButton("Cancel")
+        self.finish_btn = QPushButton("Stop – Keep Matches So Far")
+        self.cancel_btn = QPushButton("Cancel – Discard All")
         for button in (self.back_btn, self.browse_btn):
             buttons.addWidget(button)
         buttons.addStretch(1)
@@ -214,6 +215,17 @@ class ComicVineBrowseDialog(QDialog):
             "Stop the lookup here. Files you answered Yes to keep their metadata; this file and the rest are left alone."
         )
         self.cancel_btn.clicked.connect(self.reject)
+        self.cancel_btn.setToolTip("Close the lookup and apply nothing, not even the files you answered Yes to.")
+
+    @staticmethod
+    def _reset_sort(table: QTableWidget) -> None:
+        """Back to the ranked / numbered order the rows are filled in."""
+        table.horizontalHeader().setSortIndicator(-1, Qt.SortOrder.AscendingOrder)
+
+    @staticmethod
+    def _set_score(item: QTableWidgetItem, score: float) -> None:
+        item.setText(f"{score:.0%}")
+        item._sort_value = score  # the NumericTableWidgetItem sorts on this, not the text
 
     @staticmethod
     def _make_table(headers: list[str]) -> QTableWidget:
@@ -223,6 +235,10 @@ class ComicVineBrowseDialog(QDialog):
         table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         table.verticalHeader().setVisible(False)
+        # Click a header to sort. The rows start in the ranked order (indicator -1 = unsorted), and
+        # every repopulate goes back to it (see _reset_sort).
+        table.setSortingEnabled(True)
+        table.horizontalHeader().setSortIndicator(-1, Qt.SortOrder.AscendingOrder)
         table.horizontalHeader().setStretchLastSection(False)
         table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         for column in range(1, len(headers)):
@@ -256,8 +272,9 @@ class ComicVineBrowseDialog(QDialog):
         label.setText("" if pixmap else empty)
 
     @staticmethod
-    def _read_only(text: str, align_center: bool = False) -> QTableWidgetItem:
-        item = QTableWidgetItem(text)
+    def _read_only(text: str, align_center: bool = False, numeric: bool = False,
+                   sort_value: Optional[float] = None) -> QTableWidgetItem:
+        item = NumericTableWidgetItem(text, sort_value) if numeric else QTableWidgetItem(text)
         item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
         if align_center:
             item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -379,22 +396,24 @@ class ComicVineBrowseDialog(QDialog):
             return
 
         best_row, best_similarity = 0, 0.0
-        self.volume_table.setRowCount(len(volumes))
-        for row, volume in enumerate(volumes):
-            name_item = self._read_only(volume.name)
-            name_item.setData(Qt.ItemDataRole.UserRole, volume)
-            self.volume_table.setItem(row, 0, name_item)
-            self.volume_table.setItem(row, 1, self._read_only(volume.start_year, True))
-            self.volume_table.setItem(row, 2, self._read_only(str(volume.issue_count), True))
-            self.volume_table.setItem(row, 3, self._read_only(volume.publisher))
-            score = similarity(self._local_hash, self._hash_for(volume.image_url)) if row < HASH_TOP_VOLUMES else 0.0
-            shown = f"{score:.0%}" if row < HASH_TOP_VOLUMES and self._local_hash is not None and score else "–"
-            cell = self._read_only(shown, True)
-            if score >= MATCH_THRESHOLD:
-                cell.setForeground(_GOOD)
-            self.volume_table.setItem(row, 4, cell)
-            if score > best_similarity:
-                best_row, best_similarity = row, score
+        self._reset_sort(self.volume_table)
+        with suspend_sorting(self.volume_table):
+            self.volume_table.setRowCount(len(volumes))
+            for row, volume in enumerate(volumes):
+                name_item = self._read_only(volume.name)
+                name_item.setData(Qt.ItemDataRole.UserRole, volume)
+                self.volume_table.setItem(row, 0, name_item)
+                self.volume_table.setItem(row, 1, self._read_only(volume.start_year, True, numeric=True))
+                self.volume_table.setItem(row, 2, self._read_only(str(volume.issue_count), True, numeric=True))
+                self.volume_table.setItem(row, 3, self._read_only(volume.publisher))
+                score = similarity(self._local_hash, self._hash_for(volume.image_url)) if row < HASH_TOP_VOLUMES else 0.0
+                shown = f"{score:.0%}" if row < HASH_TOP_VOLUMES and self._local_hash is not None and score else "–"
+                cell = self._read_only(shown, True, numeric=True, sort_value=score if shown != "–" else 0.0)
+                if score >= MATCH_THRESHOLD:
+                    cell.setForeground(_GOOD)
+                self.volume_table.setItem(row, 4, cell)
+                if score > best_similarity:
+                    best_row, best_similarity = row, score
         # Preselect only: the look-alike cover if there is one, else the best-fitting name.
         self.volume_table.selectRow(best_row if best_similarity >= MATCH_THRESHOLD else 0)
         self.volume_table.setFocus()
@@ -435,7 +454,7 @@ class ComicVineBrowseDialog(QDialog):
             rows = self.volume_table.selectionModel().selectedRows()
             if rows:  # the table's Cover column now says how this series' #N compares
                 score = similarity(self._local_hash, self._hash_for(image_url))
-                self.volume_table.item(rows[0].row(), 4).setText(f"{score:.0%}")
+                self._set_score(self.volume_table.item(rows[0].row(), 4), score)
         self.info_label.setText(summary + ("\n" + note if note else ""))
 
     def _issue_for_file(self, volume: ComicVineVolume):
@@ -486,17 +505,19 @@ class ComicVineBrowseDialog(QDialog):
 
         number = self.number_edit.text().strip()
         match = find_issue_by_number(issues, number) if number else None
-        self.issue_table.setRowCount(len(issues))
-        match_row = -1
-        for row, issue in enumerate(issues):
-            number_item = self._read_only(issue.number, True)
-            number_item.setData(Qt.ItemDataRole.UserRole, issue)
-            self.issue_table.setItem(row, 0, number_item)
-            self.issue_table.setItem(row, 1, self._read_only(issue.name))
-            self.issue_table.setItem(row, 2, self._read_only(issue.cover_date, True))
-            self.issue_table.setItem(row, 3, self._read_only("", True))
-            if issue is match:
-                match_row = row
+        self._reset_sort(self.issue_table)
+        with suspend_sorting(self.issue_table):
+            self.issue_table.setRowCount(len(issues))
+            match_row = -1
+            for row, issue in enumerate(issues):
+                number_item = self._read_only(issue.number, True, numeric=True)
+                number_item.setData(Qt.ItemDataRole.UserRole, issue)
+                self.issue_table.setItem(row, 0, number_item)
+                self.issue_table.setItem(row, 1, self._read_only(issue.name))
+                self.issue_table.setItem(row, 2, self._read_only(issue.cover_date, True))
+                self.issue_table.setItem(row, 3, self._read_only("", True, numeric=True, sort_value=0.0))
+                if issue is match:
+                    match_row = row
 
         self.issue_table.clearSelection()
         if match_row >= 0:
@@ -529,7 +550,7 @@ class ComicVineBrowseDialog(QDialog):
         rows = self.issue_table.selectionModel().selectedRows()
         if rows and data and self._local_hash is not None:
             score = similarity(self._local_hash, self._hash_for(issue.image_url))
-            self.issue_table.item(rows[0].row(), 3).setText(f"{score:.0%}")
+            self._set_score(self.issue_table.item(rows[0].row(), 3), score)
         volume = self._current_volume
         self.info_label.setText(
             f"{volume.name} #{issue.number}" + (f' – "{issue.name}"' if issue.name else "")
