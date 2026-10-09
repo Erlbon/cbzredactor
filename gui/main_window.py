@@ -290,6 +290,19 @@ SAVE_PROGRESS_THRESHOLD = 3
 RESIZE_PROGRESS_THRESHOLD = 1
 
 
+def _add_review_checkbox(dialog) -> QCheckBox | None:
+    """A "Review changes before applying" tick box at the bottom of a lookup dialog, just above
+    its button row. Remembered; read back with `.isChecked()` after the dialog closes."""
+    layout = dialog.layout() if hasattr(dialog, "layout") else None
+    if not isinstance(layout, QVBoxLayout):
+        return None
+    check = QCheckBox("Review changes before applying (opens a page to tick the fields to apply)")
+    check.setChecked(app_settings.load_review_lookup_changes())
+    check.toggled.connect(app_settings.save_review_lookup_changes)
+    layout.insertWidget(max(layout.count() - 1, 0), check)
+    return check
+
+
 def _shell_path(path: str) -> str:
     """The plain form of a path the Windows shell (the Recycle Bin) accepts: no
     extended-length prefix and one kind of slash. A path like \\\\?\\D:/Download\\x.cbz
@@ -3639,6 +3652,7 @@ class MainWindow(QMainWindow):
             return
 
         dialog = factory(target_books) if factory else dialog_class(target_books, self)
+        review_check = _add_review_checkbox(dialog)
         if dialog.exec() != dialog_class.DialogCode.Accepted:
             return
 
@@ -3646,9 +3660,12 @@ class MainWindow(QMainWindow):
         if not metadata_changes:
             return
 
-        metadata_changes = self._resolve_overwrite_conflicts(target_books, metadata_changes)
-        if metadata_changes is None:
-            return  # user cancelled outright
+        if review_check is not None and review_check.isChecked():
+            metadata_changes = self._resolve_overwrite_conflicts(target_books, metadata_changes)
+            if metadata_changes is None:
+                return  # user cancelled outright
+            if not metadata_changes:
+                return  # every field was unticked
 
         self._push_undo(label, target_books)
         for index, fields in metadata_changes.items():

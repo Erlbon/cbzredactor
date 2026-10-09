@@ -699,3 +699,50 @@ def test_the_save_after_lookup_setting_can_be_turned_off(window, tmp_path, monke
     window._run_lookup_dialog(_FakeLookupDialog, "Fake lookup")
     assert window.books[0].dirty  # left for Save All
     assert CbzBook(paths[0]).metadata.series == ""
+
+
+class _Ticked:
+    def __init__(self, on):
+        self.on = on
+
+    def isChecked(self):
+        return self.on
+
+
+def _book_with_series(window, tmp_path):
+    paths = _load_two(window, tmp_path)
+    window.books[0].metadata.series = "Old Name"
+    window.books[0].dirty = True
+    window.table.selectAll()
+    return paths
+
+
+def test_a_lookup_overwrites_without_review_when_the_box_is_unticked(window, tmp_path, monkeypatch):
+    paths = _book_with_series(window, tmp_path)
+    monkeypatch.setattr(mw, "_add_review_checkbox", lambda d: _Ticked(False))
+    monkeypatch.setattr(window, "_resolve_overwrite_conflicts", lambda *a: pytest.fail("review page opened"))
+    window._run_lookup_dialog(_FakeLookupDialog, "Fake lookup")
+    assert CbzBook(paths[0]).metadata.series == "Saga"
+
+
+def test_a_lookup_opens_the_review_page_when_the_box_is_ticked(window, tmp_path, monkeypatch):
+    paths = _book_with_series(window, tmp_path)
+    monkeypatch.setattr(mw, "_add_review_checkbox", lambda d: _Ticked(True))
+    reviewed = []
+    monkeypatch.setattr(window, "_resolve_overwrite_conflicts", lambda books, changes: reviewed.append(changes) or {})
+    window._run_lookup_dialog(_FakeLookupDialog, "Fake lookup")
+    assert reviewed == [{0: {"series": "Saga"}}]
+    assert CbzBook(paths[0]).metadata.series == ""  # everything unticked on the page: nothing applied
+
+
+def test_the_review_tick_box_is_remembered_and_added_to_a_dialog():
+    from PyQt6.QtWidgets import QDialog, QPushButton, QVBoxLayout
+    dialog = QDialog()
+    layout = QVBoxLayout(dialog)
+    layout.addWidget(QPushButton("Apply"))
+    check = mw._add_review_checkbox(dialog)
+    assert check is not None and not check.isChecked()
+    assert layout.itemAt(0).widget() is check  # above the button row
+    check.setChecked(True)
+    assert app_settings.load_review_lookup_changes() is True
+    assert mw._add_review_checkbox(QDialog()) is None  # no layout to add it to

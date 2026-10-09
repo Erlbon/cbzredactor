@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-10-09#05 -- Lookups: "Review changes" is a tick box
+
+- The Review Changes page no longer opens by itself after a lookup. Every lookup dialog (Comic Vine, GCD, Bedetheque, ComicRack...) has a **Review changes before applying** tick box above its buttons; ticked, the page opens to choose the fields to apply, unticked (the default, remembered between runs) the results are applied as they stand, overwriting existing values. Undo still restores them. Parse Filename and the other paths keep their review.
+
 ## 2026-10-09#04 -- Lookups: a match without a cover says so
 
 - In the GCD (and every other) lookup dialog, the Found cover preview stays empty when the source has no cover image, which looked like no match at all. It now shows a green "Match found (this source has no cover image)"; a search without a match says "No match" and a failed one "Lookup failed".
