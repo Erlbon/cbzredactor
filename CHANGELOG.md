@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-10-09#07 -- Loading a CBR that was already converted
+
+- Converting while loading used to fail every CBR/CB7/CBT whose .cbz of the same name already existed ("... already exists -- not overwriting it"). It now loads that existing .cbz instead and says so in the status bar; the original is left alone (never recycled in this case) and the .cbz is not listed twice when it is in the same batch. Nothing is overwritten.
+
 ## 2026-10-09#06 -- Rename / Export / Move macros
 
 - Five macro slots, run from the keyboard: **Ctrl+Alt+1** to **Ctrl+Alt+5** (also File > Rename / Export / Move Macros). A macro remembers everything in the Rename / Export / Move window: the pattern, the action (rename in place, export copies to a folder, or move into folders under the library root), the export folder / library root, zero-padding and the ASCII option.

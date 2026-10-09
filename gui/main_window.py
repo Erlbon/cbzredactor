@@ -290,6 +290,15 @@ SAVE_PROGRESS_THRESHOLD = 3
 RESIZE_PROGRESS_THRESHOLD = 1
 
 
+def _existing_conversion(path: str) -> str | None:
+    """The .cbz that converting `path` would write, if it is already there (an earlier
+    conversion), else None. A file that already is a .cbz has no such sibling."""
+    if os.path.splitext(path)[1].lower() == ".cbz":
+        return None
+    target = os.path.splitext(path)[0] + ".cbz"
+    return target if os.path.isfile(target) else None
+
+
 _MACRO_MODE_WORDS = {"rename": "Rename", "export": "Export", "move": "Move"}
 
 
@@ -1141,15 +1150,29 @@ class MainWindow(QMainWindow):
         # Converting while loading: one question per batch -- resize the pages in the same step?
         resize = self._resize_for_convert(foreign_count) if choice == FOREIGN_CONVERT and foreign_count else None
 
+        already_converted: list[str] = []
+        listed = {os.path.normcase(os.path.abspath(p)) for p in paths} | {
+            os.path.normcase(os.path.abspath(b.path)) for b in self.books
+        }
+
         def _step(path: str, _index: int) -> None:
             resolved_path = path
             if path_needs_conversion(path):
                 if choice == FOREIGN_SKIP:
                     return  # declined for this whole batch -- skip, don't load
                 if choice == FOREIGN_CONVERT:
-                    resolved_path = self._convert_path(path, should_delete, errors, resize)
-                    if resolved_path is None:
-                        return
+                    existing = _existing_conversion(path)
+                    if existing is not None:
+                        # A .cbz of that name is already there (converted earlier): use it instead of
+                        # failing; the original is left alone. Not listed twice if it is in the list.
+                        already_converted.append(os.path.basename(path))
+                        if os.path.normcase(os.path.abspath(existing)) in listed:
+                            return
+                        resolved_path = existing
+                    else:
+                        resolved_path = self._convert_path(path, should_delete, errors, resize)
+                        if resolved_path is None:
+                            return
                 # FOREIGN_UNCONVERTED: listed as-is, read-only
             book = CbzBook(resolved_path)
             if book.load_error:
@@ -1186,6 +1209,11 @@ class MainWindow(QMainWindow):
 
         self._show_idle_panel()
         self._update_status()
+        if already_converted:
+            self.statusBar().showMessage(
+                f"{len(already_converted)} file(s) already had a .cbz of the same name: that one was used "
+                "instead of converting again, and the originals are untouched.", 12000,
+            )
 
     def _add_table_row(self, book: CbzBook) -> None:
         row = self.table.rowCount()

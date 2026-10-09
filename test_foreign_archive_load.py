@@ -311,3 +311,32 @@ def test_zip_mislabeled_as_cbr_shows_both_names(window, tmp_path, monkeypatch):
     window._load_paths([str(fake_cbr)])
     assert window.table.item(0, window._col_index["ext"]).text() == "CBR → ZIP"
     assert window.books[0].metadata.title == "Hidden"
+
+
+def test_a_cbr_whose_cbz_already_exists_loads_that_cbz_instead_of_failing(window, tmp_path, monkeypatch):
+    cbt_path = tmp_path / "book.cbt"
+    _make_cbt(cbt_path, {"page001.jpg": b"data"})
+    cbz_path = tmp_path / "book.cbz"
+    _make_real_cbz(cbz_path)  # converted earlier
+    warnings = []
+    monkeypatch.setattr(QMessageBox, "warning", lambda *a, **k: warnings.append(a[2]))
+    monkeypatch.setattr(window, "_prompt_convert_foreign_archives", lambda paths: (FOREIGN_CONVERT, True))
+
+    window._load_paths([str(cbt_path)])
+
+    assert warnings == []  # no "already exists -- not overwriting it" failure
+    assert [os.path.basename(b.path) for b in window.books] == ["book.cbz"]
+    assert window.books[0].metadata.title == "Native"  # the existing file, not a new conversion
+    assert cbt_path.exists()  # the original is left alone even though "delete" was asked
+
+
+def test_the_existing_cbz_is_not_listed_twice_when_it_is_in_the_same_batch(window, tmp_path, monkeypatch):
+    cbt_path = tmp_path / "book.cbt"
+    _make_cbt(cbt_path, {"page001.jpg": b"data"})
+    cbz_path = tmp_path / "book.cbz"
+    _make_real_cbz(cbz_path)
+    monkeypatch.setattr(window, "_prompt_convert_foreign_archives", lambda paths: (FOREIGN_CONVERT, False))
+
+    window._load_paths([str(cbt_path), str(cbz_path)])
+
+    assert [os.path.basename(b.path) for b in window.books] == ["book.cbz"]
