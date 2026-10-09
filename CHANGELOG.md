@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026-10-09#11 -- Command line on the shared building blocks
+
+- No change in what the commands do. `rename`, `move` and `redact` now run on the implementations shared with the other Redactor apps (redactor_common.cli.commands), so they behave the same in every app and are written once.
+- Requires redactor_common 2026-10-09-05.
+
 ## 2026-10-09#10 -- The command line is the one exe
 
 - The command line of 2026-10-09#09 is now part of `cbzredactor.exe` itself, with no second program: `cbzredactor info ...`, `set`, `convert`, `rename`, `move` and `redact` run the command and never open the window; with no command, or with a file to open, the window starts as before. The separate `cbzredactor-cli.exe` build is gone (it was never released).
