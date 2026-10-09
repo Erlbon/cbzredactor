@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-10-09#06 -- Rename / Export / Move macros
+
+- Five macro slots, run from the keyboard: **Ctrl+Alt+1** to **Ctrl+Alt+5** (also File > Rename / Export / Move Macros). A macro remembers everything in the Rename / Export / Move window: the pattern, the action (rename in place, export copies to a folder, or move into folders under the library root), the export folder / library root, zero-padding and the ASCII option.
+- Fill a slot from the Rename / Export / Move window: set it up, then **Save as Macro** > Save as Macro 1..5 (it shows what a slot already holds; Clear Macro empties it).
+- Pressing a hotkey runs the macro immediately on the **selected** files (never on the whole list when nothing is selected), with the usual progress, the rename log for Undo Last Rename, and the same checks as the window (an export macro with no folder says so and does nothing).
+- Requires redactor_common 2026-10-09-02.
+
 ## 2026-10-09#05 -- Lookups: "Review changes" is a tick box
 
 - The Review Changes page no longer opens by itself after a lookup. Every lookup dialog (Comic Vine, GCD, Bedetheque, ComicRack...) has a **Review changes before applying** tick box above its buttons; ticked, the page opens to choose the fields to apply, unticked (the default, remembered between runs) the results are applied as they stand, overwriting existing values. Undo still restores them. Parse Filename and the other paths keep their review.

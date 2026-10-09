@@ -746,3 +746,72 @@ def test_the_review_tick_box_is_remembered_and_added_to_a_dialog():
     check.setChecked(True)
     assert app_settings.load_review_lookup_changes() is True
     assert mw._add_review_checkbox(QDialog()) is None  # no layout to add it to
+
+
+# -- Rename / Export / Move macros (Ctrl+Alt+1..5) -----------------------------------------------------
+
+
+def _macro_window(window, tmp_path):
+    paths = _load_two(window, tmp_path)
+    for number, book in enumerate(window.books, start=1):
+        book.metadata.series = "Saga"
+        book.metadata.number = str(number)
+    return paths
+
+
+def test_a_saved_macro_labels_its_menu_item_and_survives_a_reload(window):
+    assert window.actions_["rename_macro_1"].text() == "1: (empty)"
+    window._save_rename_macro(0, {"pattern": "%series% %number%", "mode": "rename"})
+    assert window.actions_["rename_macro_1"].text() == "1: Rename: %series% %number%"
+    assert window.actions_["rename_macro_1"].shortcut().toString() == "Ctrl+Alt+1"
+    assert app_settings.load_rename_macros()[0]["pattern"] == "%series% %number%"
+    window._save_rename_macro(0, {})
+    assert app_settings.load_rename_macros()[0] == {} and window.actions_["rename_macro_1"].text() == "1: (empty)"
+
+
+def test_a_macro_renames_the_selected_files_without_a_dialog(window, tmp_path, monkeypatch):
+    _macro_window(window, tmp_path)
+    monkeypatch.setattr(mw.RenamePatternDialog, "exec", lambda self: pytest.fail("the dialog was shown"))
+    window._save_rename_macro(1, {"pattern": "%series% %number%", "mode": "rename"})
+    window.table.selectRow(0)
+    window.run_rename_macro(1)
+    assert sorted(n for n in os.listdir(tmp_path) if n.endswith(".cbz")) == ["Saga 1.cbz", "b.cbz"]  # only the selected file
+
+
+def test_a_macro_never_runs_on_an_empty_selection(window, tmp_path):
+    _macro_window(window, tmp_path)
+    window._save_rename_macro(0, {"pattern": "%series% %number%", "mode": "rename"})
+    window.table.clearSelection()
+    window.run_rename_macro(0)
+    assert sorted(os.listdir(tmp_path)) == ["a.cbz", "b.cbz"]
+
+
+def test_an_empty_macro_slot_explains_itself(window, tmp_path, monkeypatch):
+    _macro_window(window, tmp_path)
+    shown = []
+    monkeypatch.setattr(QMessageBox, "information", lambda *a, **k: shown.append(a[1]))
+    window.table.selectAll()
+    window.run_rename_macro(2)
+    assert shown == ["Macro 3 Is Empty"] and sorted(os.listdir(tmp_path)) == ["a.cbz", "b.cbz"]
+
+
+def test_an_export_macro_without_a_folder_says_why_and_does_nothing(window, tmp_path, monkeypatch):
+    _macro_window(window, tmp_path)
+    warned = []
+    monkeypatch.setattr(QMessageBox, "warning", lambda *a, **k: warned.append(a[2]))
+    window._save_rename_macro(3, {"pattern": "%series% %number%", "mode": "export"})
+    window.table.selectAll()
+    window.run_rename_macro(3)
+    assert warned and "export folder" in warned[0]
+    assert sorted(os.listdir(tmp_path)) == ["a.cbz", "b.cbz"]
+
+
+def test_an_export_macro_copies_into_its_folder_and_keeps_the_originals(window, tmp_path):
+    _macro_window(window, tmp_path)
+    out = tmp_path / "out"
+    out.mkdir()
+    window._save_rename_macro(4, {"pattern": "%series% %number%", "mode": "export", "export_folder": str(out)})
+    window.table.selectAll()
+    window.run_rename_macro(4)
+    assert sorted(os.listdir(out)) == ["Saga 1.cbz", "Saga 2.cbz"]
+    assert sorted(n for n in os.listdir(tmp_path) if n.endswith(".cbz")) == ["a.cbz", "b.cbz"]

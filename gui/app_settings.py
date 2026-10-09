@@ -56,6 +56,8 @@ _RESIZE_OUTPUT_FORMAT_KEY = "resize/output_format"  # "" = keep each page's form
 _RESIZE_IN_PLACE_KEY = "resize/in_place"  # False = export copies to a folder
 _SAVE_AFTER_LOOKUP_KEY = "lookup/save_after"
 _REVIEW_LOOKUP_KEY = "lookup/review_changes"
+_RENAME_MACROS_KEY = "rename/macros"
+RENAME_MACRO_SLOTS = 5
 _RESIZE_RECYCLE_ORIGINAL_KEY = "resize/recycle_original"  # in place: original to the Recycle Bin
 _RESIZE_OVERSIZED_ONLY_KEY = "resize/oversized_only"
 _RESIZE_EXPORT_FOLDER_KEY = "resize/export_folder"
@@ -386,6 +388,27 @@ def load_resize_in_place() -> bool:
 
 def save_resize_in_place(enabled: bool) -> None:
     _settings().setValue(_RESIZE_IN_PLACE_KEY, bool(enabled))
+
+
+def load_rename_macros() -> list[dict]:
+    """The five Rename / Export / Move macro slots: each a RenamePatternDialog.macro_state()
+    dict, or {} for an empty slot. Always RENAME_MACRO_SLOTS long."""
+    slots: list[dict] = [{} for _ in range(RENAME_MACRO_SLOTS)]
+    try:
+        stored = json.loads(str(_settings().value(_RENAME_MACROS_KEY, "") or "[]"))
+    except (ValueError, TypeError):
+        return slots
+    for index, state in enumerate(stored[:RENAME_MACRO_SLOTS] if isinstance(stored, list) else []):
+        if isinstance(state, dict) and state.get("pattern"):
+            slots[index] = state
+    return slots
+
+
+def save_rename_macro(slot: int, state: dict) -> None:
+    """Stores `state` in slot (0-based); an empty dict clears it."""
+    slots = load_rename_macros()
+    slots[slot] = dict(state)
+    _settings().setValue(_RENAME_MACROS_KEY, json.dumps(slots))
 
 
 def load_review_lookup_changes() -> bool:

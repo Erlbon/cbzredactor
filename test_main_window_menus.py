@@ -49,7 +49,7 @@ def test_file_menu_structure():
     assert _texts(menu) == [
         "Open Files…", "Open Folder…", "---",
         "Save As…", "Save All", "---",
-        "Rename File…", "Undo Last Rename", "Rename / Export / Move…", "---",
+        "Rename File…", "Undo Last Rename", "Rename / Export / Move…", "Rename / Export / Move Macros", "---",
         "Export Settings…", "Import Settings…", "---",
         "Remove from List", "Clear List", "---",
         "Exit",

@@ -290,6 +290,20 @@ SAVE_PROGRESS_THRESHOLD = 3
 RESIZE_PROGRESS_THRESHOLD = 1
 
 
+_MACRO_MODE_WORDS = {"rename": "Rename", "export": "Export", "move": "Move"}
+
+
+def _rename_macro_summary(state: dict) -> str:
+    """One line for a macro slot: "Rename: %series% %number%", or "" for an empty slot."""
+    if not state:
+        return ""
+    return f"{_MACRO_MODE_WORDS.get(state.get('mode', 'rename'), 'Rename')}: {state.get('pattern', '')}"
+
+
+def _rename_macro_labels() -> list[str]:
+    return [_rename_macro_summary(state) for state in app_settings.load_rename_macros()]
+
+
 def _add_review_checkbox(dialog) -> QCheckBox | None:
     """A "Review changes before applying" tick box at the bottom of a lookup dialog, just above
     its button row. Remembered; read back with `.isChecked()` after the dialog closes."""
@@ -542,6 +556,13 @@ class MainWindow(QMainWindow):
             exit_slot=self.close,
             export_settings=self.export_settings,
             import_settings=self.import_settings,
+            extra_rename=[Submenu("Rename / Export / Move Macros", [
+                MenuAction(
+                    f"rename_macro_{slot + 1}", f"{slot + 1}: (empty)",
+                    lambda n=slot: self.run_rename_macro(n), shortcut=f"Ctrl+Alt+{slot + 1}",
+                )
+                for slot in range(app_settings.RENAME_MACRO_SLOTS)
+            ])],
         )
         edit_items = standard_edit_items(
             undo=self.undo_last_action,
@@ -635,6 +656,7 @@ class MainWindow(QMainWindow):
         # changed files too, as a secondary shortcut (drop after one release).
         with_aliases(registry["save_all"], "Ctrl+S")
         self.actions_ = {key: registry[key] for key in registry.keys()}
+        self._refresh_macro_actions()
         add_command_palette(self, registry)  # Ctrl+K / View > Command Palette: every menu action, searchable
         # Keys this file (and its tests) used before the skeleton renamed them.
         for old, new in LEGACY_ACTION_KEYS.items():
@@ -2010,6 +2032,58 @@ class MainWindow(QMainWindow):
             QMessageBox.information(self, "No Files", "Load some files first (or select the ones to rename).")
             return
 
+        dialog = self._make_rename_dialog(target_books)
+        if dialog.exec() != dialog.DialogCode.Accepted:
+            return
+        self._run_rename_plan(dialog, target_books)
+
+    def _save_rename_macro(self, slot: int, state: dict) -> None:
+        app_settings.save_rename_macro(slot, state)
+        self._refresh_macro_actions()
+        self.statusBar().showMessage(
+            f"Macro {slot + 1} {'saved' if state else 'cleared'} (Ctrl+Alt+{slot + 1}).", 6000
+        )
+
+    def _refresh_macro_actions(self) -> None:
+        for slot, label in enumerate(_rename_macro_labels()):
+            action = self.actions_.get(f"rename_macro_{slot + 1}")
+            if action is not None:
+                action.setText(f"{slot + 1}: {label or '(empty)'}")
+                action.setToolTip(label or "Empty: save one from Rename / Export / Move > Save as Macro.")
+
+    def run_rename_macro(self, slot: int) -> None:
+        """Ctrl+Alt+1..5: runs macro `slot` straight on the selected files (never on the whole
+        list), with no dialog: the saved pattern, action and options go through the very same
+        planning and execution as the Rename / Export / Move window."""
+        state = app_settings.load_rename_macros()[slot]
+        if not state:
+            QMessageBox.information(
+                self, f"Macro {slot + 1} Is Empty",
+                "Open Rename / Export / Move, set it up the way you want, and choose "
+                f"Save as Macro > Save as Macro {slot + 1}.",
+            )
+            return
+        self._commit_current_edits()
+        if not self._selected_rows:
+            self.statusBar().showMessage(f"Macro {slot + 1} runs on the selected files: select some first.", 6000)
+            return
+        target_books = self._target_books()
+        if not target_books:
+            return
+        dialog = self._make_rename_dialog(target_books)  # never shown: only its planning is used
+        try:
+            dialog.apply_macro_state(state)
+            if not dialog.can_apply():
+                QMessageBox.warning(
+                    self, f"Macro {slot + 1} Can't Run",
+                    dialog.apply_problem() or "Nothing to do with the selected files.",
+                )
+                return
+            self._run_rename_plan(dialog, target_books, label=f"Rename Macro {slot + 1}")
+        finally:
+            dialog.deleteLater()
+
+    def _make_rename_dialog(self, target_books: list[CbzBook]) -> RenamePatternDialog:
         def get_values(book: CbzBook) -> dict[str, str]:
             return {key: getattr(book.metadata, key, "") for key, _ in FILENAME_PLACEHOLDERS}
 
@@ -2027,11 +2101,15 @@ class MainWindow(QMainWindow):
             on_zero_pad_changed=app_settings.save_rename_zero_pad,
             library_root=app_settings.load_library_root(),
             on_library_root_changed=app_settings.save_library_root,
+            macro_labels=_rename_macro_labels,
+            on_save_macro=self._save_rename_macro,
+            on_clear_macro=lambda slot: self._save_rename_macro(slot, {}),
             parent=self,
         )
-        if dialog.exec() != dialog.DialogCode.Accepted:
-            return
+        return dialog
 
+    def _run_rename_plan(self, dialog: RenamePatternDialog, target_books: list[CbzBook], label: str = "Rename by Pattern") -> None:
+        """Carries out what an accepted (or macro-loaded) Rename / Export / Move dialog planned."""
         app_settings.save_pattern_used(dialog.pattern_edit.text())
         if dialog.is_move_mode():
             self._move_into_folders(dialog.planned_moves())
@@ -2058,7 +2136,7 @@ class MainWindow(QMainWindow):
             threshold=SAVE_PROGRESS_THRESHOLD, cancellable=True,
             label_for=lambda planned: f"{'Exporting' if export_mode else 'Renaming'}: {os.path.basename(planned[1])}",
         )
-        _rename_log().record("Rename by Pattern", renamed)
+        _rename_log().record(label, renamed)
 
         for book in target_books:
             self._refresh_table_row(self.books.index(book), book)
