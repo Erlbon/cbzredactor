@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-10-09#10 -- The command line is the one exe
+
+- The command line of 2026-10-09#09 is now part of `cbzredactor.exe` itself, with no second program: `cbzredactor info ...`, `set`, `convert`, `rename`, `move` and `redact` run the command and never open the window; with no command, or with a file to open, the window starts as before. The separate `cbzredactor-cli.exe` build is gone (it was never released).
+- Typed in a terminal the output appears there; `> file` and pipes work; `--output FILE` writes the result (the text, or with `--json` the JSON document) to a file, the reliable way for a script to read it. A windowed exe cannot be waited for by an interactive shell, so scripts use a batch file, `start /wait`, `Start-Process -Wait` or a scheduled task and read the exit code (0 done, 1 some files failed, 2 bad arguments, 70 internal error, 130 interrupted); the README's Command line section shows how.
+- The README's Command line section is now the full reference: every command, every option with its default, the field names and their checks, the Redact steps, the JSON output of each command, the exit codes, and worked examples for scripts and scheduled tasks. A test fails if a command, option, step or field is added without being documented.
+- Requires redactor_common 2026-10-09-04.
+
 ## 2026-10-09#09 -- Command line: cbzredactor-cli
 
 - New `cbzredactor-cli` (a console build beside the app; `python cbzredactor_cli.py` from source) with `info`, `set`, `convert`, `rename`, `move` and `redact`: the same engines the window uses, for scripts and scheduled jobs. It reads the app's settings and saved Redact recipe; `--dry-run` previews the commands that change files, `--json` prints one JSON document, and the exit code says whether files failed (see the README's Command line section).

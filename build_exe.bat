@@ -64,25 +64,9 @@ if not exist "dist\cbzredactor.exe" (
     exit /b 1
 )
 
-echo Building cbzredactor-cli.exe ^(the command-line tool^) ...
-python -m PyInstaller cbzredactor-cli.spec --noconfirm
-if errorlevel 1 (
-    echo.
-    echo ERROR: PyInstaller failed building the command-line tool.
-    pause
-    exit /b 1
-)
-if not exist "dist\cbzredactor-cli.exe" (
-    echo.
-    echo ERROR: dist\cbzredactor-cli.exe was not found after the build.
-    pause
-    exit /b 1
-)
-
 echo.
 echo ================================================================
 echo  SUCCESS. Your app is at: %cd%\dist\cbzredactor.exe
-echo  The command-line tool is at: %cd%\dist\cbzredactor-cli.exe
-echo  Each file can be copied anywhere and run with no Python
+echo  That one file can be copied anywhere and run with no Python
 echo  install needed.
 echo ================================================================

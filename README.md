@@ -463,26 +463,231 @@ Per format:
 
 ## Command line
 
-`cbzredactor-cli` (`cbzredactor_cli.py` from source) does the common jobs without the window, for scripts and
-scheduled tasks. It reads the same settings file as the app (Preferences, the saved Redact recipe, the API
-keys; a Comic Vine key can also come from the `COMICVINE_API_KEY` environment variable).
+The one exe (`cbzredactor.exe`, or `python main.py` from source) is also the command line. When its first
+argument is a command name, it runs that command and the window never opens; with no command, or with a file
+or folder to open, the window starts as usual. `cbzredactor --help` lists the commands and
+`cbzredactor COMMAND --help` lists the options of one.
 
 ```
-cbzredactor-cli info    PATH... [--fields series,year | --all]    what the comics are
-cbzredactor-cli set     PATH... -s Series=Saga -s Number=3 --clear Notes
-cbzredactor-cli convert PATH... [--resize] [--trash-original]     CBR/CB7/CBT -> CBZ
-cbzredactor-cli rename  PATH... -p "%series% %number% - %title%" [--zero-pad 3] [--ascii]
-cbzredactor-cli move    PATH... -p "%publisher%/%series%/%series% %number%" --root LIBRARY [--copy]
-cbzredactor-cli redact  PATH... [--recipe FILE] [--disable lookup] [--threshold 90] [--trash-dir FOLDER]
-cbzredactor-cli redact --list-steps
+cbzredactor info     PATH...  [--fields LIST | --all]
+cbzredactor set      PATH...  -s FIELD=VALUE ... [--clear FIELD ...] [-n]
+cbzredactor convert  PATH...  [--resize] [--trash-original] [-n]
+cbzredactor rename   PATH...  [-p PATTERN] [--zero-pad N] [--ascii] [-n]
+cbzredactor move     PATH...  -p PATTERN [--root FOLDER] [--copy] [--zero-pad N] [--ascii] [-n]
+cbzredactor redact   [PATH...] [--recipe FILE] [--enable STEP] [--disable STEP] [--threshold N]
+                              [--trash-dir FOLDER] [--list-steps]
 ```
 
-A PATH is a file, a folder (searched recursively; `-R` for just that folder) or a wildcard. Every command takes
-`--json` (one JSON document on stdout, nothing else) and `--quiet` (no progress or warnings on stderr); the ones
-that change files take `-n` / `--dry-run`. Exit codes: 0 done, 1 some files failed, 2 bad arguments or nothing
-found, 130 interrupted. Nothing is overwritten: a taken name gets (2), (3)...; a conversion whose `.cbz` already
-exists leaves it alone; Redact and cross-volume moves send originals to the Recycle Bin (or `--trash-dir`).
-Renames and moves are logged, so File > Undo Last Rename in the app undoes them.
+The command line uses the same code as the window, so the results are the same. It reads the same settings file
+(`cbzredactor_settings.ini` next to the exe: Tools > Preferences, the saved Redact recipe, the library root, the
+database paths) and the same secret store for the API keys. Not every window function is available from the
+command line; the commands above are what is.
+
+### Options every command has
+
+| Option | Meaning |
+| --- | --- |
+| `PATH...` | One or more comic files, folders or wildcards (`D:\Comics\Saga*.cbz`). A folder is searched recursively for `.cbz`, `.cbr`, `.cb7` and `.cbt`. A file you name is always used. A path that matches nothing is reported, and if nothing at all matches the command stops with exit code 2. |
+| `-R`, `--no-recurse` | For a folder, look only at the files directly in it. |
+| `--json` | Print one JSON document on stdout instead of text (see "JSON output"). Nothing else goes to stdout. |
+| `-q`, `--quiet` | No progress lines and no warnings on stderr (errors are still shown). |
+| `-o FILE`, `--output FILE` | Write the result (the text, or with `--json` the JSON document) to FILE instead of stdout. The file is complete when the program exits. This is the reliable way for a script to read a result. |
+| `-n`, `--dry-run` | Only on the commands that change files (`set`, `convert`, `rename`, `move`): show what would happen and change nothing. |
+| `-h`, `--help` | Help for the program or for one command. |
+| `--version` | The version (top level only). |
+
+Progress lines (`[3/20] name.cbz`) go to stderr when more than one file is processed.
+
+### info
+
+`cbzredactor info PATH... [--fields LIST | --all]`
+
+Shows what each comic is: its real format (`zip`, `rar`, ...), the number of pages, whether it is ready to edit
+(`ok`), needs converting (`needs conversion`) or could not be read (the reason), and its ComicInfo fields.
+
+| Option | Meaning |
+| --- | --- |
+| `--fields LIST` | Comma-separated fields to show, e.g. `--fields series,number,year`. Default: `series, number, title, year, publisher`. |
+| `--all` | Show every field that has a value. |
+
+Only fields with a value are listed. Exit code 1 if a file could not be read; a CBR/CB7/CBT that merely needs
+converting is not a failure.
+
+### set
+
+`cbzredactor set PATH... -s FIELD=VALUE [-s ...] [--clear FIELD ...] [-n]`
+
+Sets or empties ComicInfo fields and saves each comic in place (the same save as the window's Save All; the
+page count is recomputed). A CBR/CB7/CBT must be converted first. Fields and values are checked before any file
+is touched; a bad one stops the command with exit code 2.
+
+| Option | Meaning |
+| --- | --- |
+| `-s FIELD=VALUE`, `--set FIELD=VALUE` | Set a field (repeat for several). `VALUE` may be empty to clear it. |
+| `--clear FIELD` | Empty a field (repeat for several). |
+| `-n`, `--dry-run` | Show the old and new value of each field, save nothing. |
+
+Field names are case-insensitive and accept the ComicInfo spelling or the plain one (`CoverArtist`,
+`cover_artist`, `coverartist`). The settable fields are: Title, Series, Number, Count, Volume, AlternateSeries,
+AlternateNumber, AlternateCount, Summary, Notes, Year, Month, Day, Writer, Penciller, Inker, Colorist, Letterer,
+CoverArtist, Editor, Translator, Publisher, Imprint, Genre, Tags, Web, LanguageISO, Format, BlackAndWhite, Manga,
+Characters, Teams, Locations, ScanInformation, StoryArc, StoryArcNumber, SeriesGroup, AgeRating, CommunityRating,
+MainCharacterOrTeam, Review, GTIN. (PageCount is always taken from the archive.)
+
+Checks: Count, Volume, AlternateCount, Year, Month and Day must be whole numbers (Month 1-12, Day 1-31);
+CommunityRating is a number from 0 to 5; BlackAndWhite, Manga and AgeRating must be one of the schema's values
+(any capitalisation is accepted and corrected).
+
+Each file's result is `changed`, `unchanged` (nothing differed), `planned` (dry run) or `failed`.
+
+### convert
+
+`cbzredactor convert PATH... [--resize] [--trash-original] [-n]`
+
+Converts CBR, CB7 and CBT files, and `.cbz` files that are really another format, to real `.cbz` files beside
+them. The original is left in place unless you ask otherwise. Never overwrites: if the `.cbz` already exists the
+file is `skipped` and nothing is touched. A file that already is a real CBZ is `skipped` too.
+
+| Option | Meaning |
+| --- | --- |
+| `--resize` | Shrink the pages in the same pass, with the saved Resize defaults (Tools > Preferences > Resize defaults). |
+| `--trash-original` | After the new `.cbz` is made, send the original to the Recycle Bin (never deleted for good; if the Recycle Bin refuses, the original is kept and a warning says so). |
+| `-n`, `--dry-run` | Show what would be converted, change nothing. |
+
+Results: `converted`, `skipped`, `planned`, `failed`. The new path is in `new_path`.
+
+### rename
+
+`cbzredactor rename PATH... [-p PATTERN] [--zero-pad N] [--ascii] [-n]`
+
+Renames each comic from its ComicInfo fields, in its own folder, like Rename / Export / Move > Rename files in
+place. Never overwrites: a name that is taken gets `(2)`, `(3)`, ...
+
+| Option | Meaning |
+| --- | --- |
+| `-p PATTERN`, `--pattern PATTERN` | The new name (without the extension), with `%field%` tokens, e.g. `"%series% %number% - %title%"`. Default: `%series% %number% - %title%`. Quote it so the shell leaves the `%` signs alone. |
+| `--zero-pad N` | Pad the number to N digits (`--zero-pad 3` gives `001`). The month is always two digits. |
+| `--ascii` | ASCII-safe names (é becomes e, æ becomes ae, other symbols are dropped). |
+| `-n`, `--dry-run` | Show the new names, rename nothing. |
+
+Tokens are the ComicInfo field names in lower case (`%series%`, `%number%`, `%title%`, `%year%`, `%publisher%`,
+`%volume%`, `%writer%` and so on). A file the pattern gives no name for (all its fields are empty) is `skipped`,
+not renamed to "untitled". A file that already has the name is `unchanged`. The rename is recorded, so File >
+Undo Last Rename in the app undoes it.
+
+### move
+
+`cbzredactor move PATH... -p PATTERN [--root FOLDER] [--copy] [--zero-pad N] [--ascii] [-n]`
+
+Moves (or copies) each comic into a folder tree under a library folder, like Rename / Export / Move > Move into
+folders. The pattern may contain `/` to make sub-folders: `"%publisher%/%series%/%series% %number%"`. Missing
+folders are created; nothing is overwritten (a taken name gets `(2)`); a destination outside the library folder
+or too long is refused.
+
+| Option | Meaning |
+| --- | --- |
+| `-p PATTERN`, `--pattern PATTERN` | Required. The path under the library folder, with `%field%` tokens. |
+| `--root FOLDER` | The library folder. Default: the one saved in the app (Rename / Export / Move window). The folder must exist. |
+| `--copy` | Copy instead of move, leaving the originals (nothing is logged for undo). |
+| `--zero-pad N`, `--ascii` | As for `rename`. |
+| `-n`, `--dry-run` | Show where each file would go, change nothing. |
+
+Across volumes a move is a verified copy followed by sending the original to the Recycle Bin. A file the pattern
+has no name for is `skipped`. Moves are recorded for File > Undo Last Rename.
+
+### redact
+
+`cbzredactor redact [PATH...] [--recipe FILE] [--enable STEP] [--disable STEP] [--threshold N] [--trash-dir FOLDER] [--list-steps]`
+
+Runs the Redact recipe on the comics, the same steps as Operations > Redact: convert, clean up archive contents,
+remove credit pages, resize, fill from the path and the filename, database lookups, fix ComicInfo issues, tag
+low-res scans, rename, move into folders. Each file is saved in place and its original goes to the Recycle Bin
+(or `--trash-dir`). Guesses below the confidence threshold are listed under "needs review" and not applied. There
+is no `--dry-run`: use `info` first, and `--disable` for the steps you do not want.
+
+| Option | Meaning |
+| --- | --- |
+| `--recipe FILE` | Use this recipe (a JSON file in the format the app stores) instead of the one saved in the app. |
+| `--enable STEP` | Turn a step on for this run (repeatable). |
+| `--disable STEP` | Turn a step off for this run (repeatable). |
+| `--threshold N` | Confidence needed to apply a guess, `0`-`1` or a percentage (`0.9` or `90`). |
+| `--trash-dir FOLDER` | Move originals into this folder (created if needed) instead of the Recycle Bin, for a machine or a task that has none. |
+| `--list-steps` | Show the steps and whether the recipe has each on, then stop (no `PATH` needed). |
+
+Steps: `convert_to_cbz`, `clean_contents`, `remove_credit_pages`, `resize_images`, `path_tags`, `filename_tags`,
+`lookup`, `validate_fix`, `tag_low_res`, `rename`, `move_into_folders`. Without `--recipe` the recipe saved in the
+app is used (the defaults if none was saved). The Comic Vine key comes from the `COMICVINE_API_KEY` environment
+variable if it is set, else from the app's saved key; the local GCD / ComicRack databases and the library root
+come from the app's settings. A file with unsaved edits does not exist on the command line, so nothing is skipped
+for that. Exit code 1 if any file failed; files that need review are not failures.
+
+### JSON output
+
+`--json` prints one document: `{"results": [...], <summary fields>, "warnings": [...]}`.
+
+| Command | Each entry in `results` | Summary fields |
+| --- | --- | --- |
+| `info` | `path`, `format`, `pages`, `status`, `has_comicinfo`, `fields` (name to value) | `files`, `failed` |
+| `set` | `path`, `status`, `changes` (field to `{old, new}`), `message` | `files`, `failed`, `dry_run` |
+| `convert` | `path`, `status`, `new_path`, `message` | `files`, `failed`, `dry_run` |
+| `rename` | `path`, `status`, `new_path`, `message` | `files`, `failed`, `dry_run`, `pattern` |
+| `move` | `path`, `status`, `new_path`, `message` | `files`, `failed`, `dry_run`, `root` |
+| `redact` | `file`, `path`, `status`, `applied`, `needs_review` (step, value, confidence, reason), `failures`, `notes`, `skipped`, `not_saved` | `files`, `failed`, `needs_review`, `cancelled`, `confidence_threshold`, `run_notes` |
+| `redact --list-steps` | `step`, `label`, `enabled` | `confidence_threshold` |
+
+### Exit codes
+
+| Code | Meaning |
+| --- | --- |
+| 0 | Done (files that were skipped or unchanged are not failures). |
+| 1 | The command ran but some files failed. |
+| 2 | Bad arguments, an unknown field or step, or no files found. The reason is on stderr. |
+| 70 | An internal error (a bug); the traceback is on stderr. |
+| 130 | Interrupted with Ctrl+C. |
+
+### Using it from scripts and scheduled tasks (Windows)
+
+`cbzredactor.exe` is a windowed program, and Windows shells treat those differently from console programs:
+typed by hand in a terminal its output appears there and `>` / `|` redirection works, but an interactive shell
+does not wait for it (the prompt can come back before the output), and a script cannot read a windowed
+program's output unless it is redirected. So for automation: ask for the result in a file with `--output`, wait
+for the process, and read the exit code.
+
+```
+:: batch file (cmd waits for the program in a batch file; %errorlevel% is the exit code)
+cbzredactor.exe info "D:\Comics" --json --output "%TEMP%\comics.json"
+if errorlevel 1 echo some files failed
+
+:: interactive cmd: start /wait waits and keeps the exit code
+start /wait cbzredactor.exe redact "D:\Incoming" --quiet --trash-dir "D:\Trash"
+
+# PowerShell: wait with Start-Process, read .ExitCode
+$p = Start-Process cbzredactor.exe -ArgumentList 'info','D:\Comics','--json','-o','C:\Temp\comics.json' -Wait -PassThru
+$p.ExitCode
+(Get-Content C:\Temp\comics.json -Raw | ConvertFrom-Json).results | Where-Object status -ne 'ok'
+
+# PowerShell: piping to Out-Null also waits
+cbzredactor.exe convert "D:\Incoming" --trash-original | Out-Null; $LASTEXITCODE
+```
+
+Task Scheduler waits for the program and records its exit code as it is. On Linux and macOS there is no such
+distinction: the output goes to the terminal and pipes as usual.
+
+### Examples
+
+```
+cbzredactor info "D:\Comics\Saga" --all                          what is in a folder
+cbzredactor set "D:\Comics\Saga" -s Publisher="Image Comics" -n  preview a bulk edit, then run it without -n
+cbzredactor set book.cbz --clear Notes --clear Review
+cbzredactor convert "D:\Incoming" --resize --trash-original      convert, shrink the pages, recycle the originals
+cbzredactor rename "D:\Comics\Saga" -p "%series% %number% (%year%)" --zero-pad 3 -n
+cbzredactor move "D:\Incoming" -p "%publisher%/%series%/%series% %number%" --root "D:\Library"
+cbzredactor redact "D:\Incoming" --disable lookup --disable move_into_folders --trash-dir "D:\Trash"
+cbzredactor redact --list-steps --json
+```
+
+What the commands will not do: overwrite a file, delete anything for good, or ask a question. Everything that
+could be a prompt in the window is a flag here or a skipped file in the report.
 
 ## Running from source
 

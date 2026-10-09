@@ -13,6 +13,7 @@ import sys
 
 from core import crash_log
 from core.app_paths import asset_path
+from cbzcli import cli_requested
 from core.version import APP_NAME
 from redactor_common.gui.app_bootstrap import run_app
 
@@ -29,6 +30,12 @@ def _window():
 
 
 def main() -> int:
+    if cli_requested(sys.argv):
+        # One exe: `cbzredactor info ...` is the command line (no window). See cbzcli/main.py.
+        from cbzcli.main import main as cli_main
+        from redactor_common.cli import run
+
+        return run(cli_main, sys.argv[1:])
     return run_app(
         app_name=APP_NAME,
         window_factory=_window,

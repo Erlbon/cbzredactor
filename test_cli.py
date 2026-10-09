@@ -315,3 +315,84 @@ def test_the_entry_point_maps_errors_to_exit_codes(capsys):
 
     assert run(lambda argv: main(["info", "definitely-not-there.cbz"])) == 2
     assert "no comic files found" in capsys.readouterr().err
+
+
+# --- one exe ------------------------------------------------------------------------------------------
+
+
+def test_a_command_name_starts_the_command_line_and_a_path_starts_the_window():
+    from cbzcli import COMMANDS, cli_requested
+
+    assert set(COMMANDS) == {"info", "set", "convert", "rename", "move", "redact"}
+    assert cli_requested(["cbzredactor.exe", "info", "x.cbz"]) and cli_requested(["cbzredactor.exe", "--version"])
+    assert not cli_requested(["cbzredactor.exe"])
+    assert not cli_requested(["cbzredactor.exe", "D:/Comics/Saga 1.cbz"])  # a file to open in the window
+
+
+def test_the_app_entry_point_runs_the_command_line_without_a_window(library, monkeypatch, capsys):
+    import main as app
+
+    _tmp, saga, _ = library
+    monkeypatch.setattr(app.sys, "argv", ["cbzredactor", "info", saga, "--json"])
+    monkeypatch.setattr(app, "run_app", lambda **kw: pytest.fail("the window was started"))
+    assert app.main() == 0
+    assert json.loads(capsys.readouterr().out)["results"][0]["fields"]["series"] == "Saga"
+
+
+def test_the_app_entry_point_still_starts_the_window_for_no_command(monkeypatch):
+    import main as app
+
+    started = []
+    monkeypatch.setattr(app.sys, "argv", ["cbzredactor"])
+    monkeypatch.setattr(app, "run_app", lambda **kw: started.append(kw["app_name"]) or 0)
+    assert app.main() == 0 and started
+
+
+def test_output_writes_the_result_to_a_file_for_scripts(library, capsys, tmp_path):
+    _tmp, saga, _ = library
+    target = tmp_path / "result.json"
+    code = main(["info", saga, "--json", "--output", str(target)])
+    assert code == 0 and capsys.readouterr().out == ""
+    assert json.loads(target.read_text(encoding="utf-8"))["results"][0]["fields"]["series"] == "Saga"
+
+
+# --- the documentation covers every option --------------------------------------------------------------
+
+
+def _readme_cli_section() -> str:
+    text = open(os.path.join(os.path.dirname(__file__), "README.md"), encoding="utf-8").read()
+    start = text.index("## Command line")
+    return text[start: text.index("## Running from source")]
+
+
+def test_the_readme_documents_every_command_option_step_and_field():
+    import argparse
+
+    from cbzcli.fields import SETTABLE
+    from cbzcli.main import build_parser
+    from core.redact_steps import build_catalogue
+
+    section = _readme_cli_section()
+    parser = build_parser()
+    missing = []
+    for action in parser._actions:
+        missing += [o for o in action.option_strings if o not in section]
+    subparsers = next(a for a in parser._actions if isinstance(a, argparse._SubParsersAction))
+    for name, sub in subparsers.choices.items():
+        if f"### {name}" not in section:
+            missing.append(f"### {name}")
+        for action in sub._actions:
+            for option in action.option_strings:
+                if option not in section:
+                    missing.append(f"{name} {option}")
+    missing += [f"step {s.key}" for s in build_catalogue(None) if not s.hidden and s.key not in section]
+    missing += [f"field {tag}" for tag in SETTABLE if tag not in section]
+    assert missing == [], f"the README's Command line section does not mention: {missing}"
+
+
+def test_the_readme_lists_the_exit_codes_and_the_scripting_ways():
+    section = _readme_cli_section()
+    for code in ("| 0 |", "| 1 |", "| 2 |", "| 70 |", "| 130 |"):
+        assert code in section
+    for way in ("start /wait", "Start-Process", "Out-Null", "--output"):
+        assert way in section
