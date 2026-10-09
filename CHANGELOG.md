@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-10-09#08 -- Redact: a CBR that was already converted
+
+- The Redact step Convert used to fail a CBR/CB7/CBT whose .cbz of the same name already existed. It now carries on with that existing .cbz (the rest of the recipe runs on it and the row becomes it), says so in the log, and leaves the original untouched and never recycled. A .cbz that cannot be read still fails the file, and nothing is ever overwritten by a conversion.
+
 ## 2026-10-09#07 -- Loading a CBR that was already converted
 
 - Converting while loading used to fail every CBR/CB7/CBT whose .cbz of the same name already existed ("... already exists -- not overwriting it"). It now loads that existing .cbz instead and says so in the status bar; the original is left alone (never recycled in this case) and the .cbz is not listed twice when it is in the same batch. Nothing is overwritten.

@@ -252,13 +252,27 @@ def test_convert_cbt_to_cbz(env, tmp_path):
     assert _leftovers(tmp_path) == []
 
 
-def test_convert_does_not_overwrite_an_existing_cbz(env, tmp_path):
+def test_convert_uses_an_existing_cbz_instead_of_failing_and_overwrites_nothing(env, tmp_path):
     path = _cbt(tmp_path / "Saga 001.cbt")
     other = _cbz(tmp_path / "Saga 001.cbz")
     before = open(other, "rb").read()
+    book = CbzBook(path)
+    entry = _only(_run(env, [book]))
+    assert entry.status is not FileStatus.FAILED, entry
+    assert any("already existed" in c for c in entry.applied)
+    assert os.path.exists(path) and env.bin == []  # the foreign original is left alone, not recycled
+    assert book.path == other and not book.needs_conversion and book.actual_page_count == 3  # the row now is the .cbz
+    assert _leftovers(tmp_path) == []
+    # nothing needed changing here (no lookups, no fixes), so the existing file is byte for byte as it was
+    assert open(other, "rb").read() == before
+
+
+def test_an_existing_cbz_that_cannot_be_read_still_fails_the_file(env, tmp_path):
+    path = _cbt(tmp_path / "Saga 001.cbt")
+    (tmp_path / "Saga 001.cbz").write_bytes(b"not a zip")
     entry = _only(_run(env, [CbzBook(path)]))
-    assert entry.status is FileStatus.FAILED and "already exists" in entry.failures[0]
-    assert os.path.exists(path) and open(other, "rb").read() == before and env.bin == []
+    assert entry.status is FileStatus.FAILED and "could not be read" in entry.failures[0]
+    assert os.path.exists(path) and open(tmp_path / "Saga 001.cbz", "rb").read() == b"not a zip"
 
 
 def test_foreign_file_with_convert_step_off_is_left_alone_with_a_note(env, tmp_path):
@@ -753,3 +767,15 @@ def test_old_recipe_json_loads_unchanged(env):
     recipe = rs.recipe_from_setting(text)
     assert recipe.options["rename"]["pattern"] == "%series%" and recipe.confidence_threshold == 0.8
     assert Recipe.from_json(rs.recipe_to_setting(recipe)).options == recipe.options
+
+
+def test_later_steps_work_on_the_adopted_cbz_and_save_it_in_place(env, tmp_path):
+    path = _cbt(tmp_path / "Saga 001.cbt")
+    other = _cbz(tmp_path / "Saga 001.cbz", extra=[("Thumbs.db", b"junk")])
+    book = CbzBook(path)
+    entry = _only(_run(env, [book]))
+    assert entry.status is FileStatus.CHANGED, entry
+    assert os.path.exists(path)  # the foreign original is never touched
+    assert len(env.bin) == 1 and "redact-orig" in env.bin[0]  # the previous .cbz was recycled, as any saved-in-place file is
+    assert "Thumbs.db" not in CbzBook(other).page_names and book.path == other
+    assert _leftovers(tmp_path) == []

@@ -245,6 +245,7 @@ class CbzCtx:
         self.skip_reason = ""
         self.scratch = ""
         self.converted = False
+        self.adopted_existing = False  # the Convert step found the .cbz already there and carried on with it
         self.structure_changed = False  # an archive rewrite happened (cleanup, pages, resize)
         self.rename_to = ""
         self.scan_status = ""  # the validation result the working copy is stamped with, once that step ran
@@ -377,12 +378,29 @@ class ConvertStep(Step):
         "Needs rarfile + an unrar tool for CBR and py7zr for CB7."
     )
 
+    @staticmethod
+    def _adopt_existing(ctx: CbzCtx, target: str) -> StepResult:
+        """A .cbz of that name is already there (converted earlier): the run carries on with it, as
+        if it had been the file in the list, and the original foreign file is left alone. Nothing is
+        overwritten; a .cbz that can't be read still fails the file."""
+        name = os.path.basename(target)
+        if not os.path.isfile(target):
+            return StepResult.failed(f"{name} already exists and is not a file -- not overwriting it")
+        work = CbzBook(os.path.realpath(target))
+        if work.load_error:
+            return StepResult.failed(f"{name} already exists but could not be read ({work.load_error}) -- not overwriting it")
+        foreign = os.path.basename(ctx.original)
+        ctx.original = ctx.current_path = ctx.target_path = os.path.realpath(target)
+        ctx.work, ctx.path_changed, ctx.adopted_existing = work, True, True
+        ctx.baseline = _xml_ignoring_stamp(work.metadata)
+        return StepResult.applied(f"{name} already existed, so it is used instead of converting {foreign} again")
+
     def run(self, ctx: CbzCtx) -> StepResult:
         if ctx.work is not None:
             return StepResult.nothing()
         target = os.path.splitext(ctx.original)[0] + ".cbz"
         if not _same_path(target, ctx.original) and os.path.lexists(target):
-            return StepResult.failed(f"{os.path.basename(target)} already exists -- not overwriting it")
+            return self._adopt_existing(ctx, target)
         scratch = _side_path(ctx.original, "redact-work")
         ctx.temps.append(scratch)
         try:
@@ -1009,7 +1027,7 @@ def save_stage(ctx: CbzCtx, entry) -> StepResult | None:
         if not error and ctx.move is not None:
             error = _execute_move(ctx, done, notes)
     finally:
-        if done:
+        if done or ctx.adopted_existing:
             # Whatever did happen is on disk: show it in the row even if a later part failed.
             reload_book(ctx.book, ctx.current_path if ctx.path_changed else ctx.book.path)
     if error:
