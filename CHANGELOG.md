@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026-10-09#04 -- Lookups: a match without a cover says so
+
+- In the GCD (and every other) lookup dialog, the Found cover preview stays empty when the source has no cover image, which looked like no match at all. It now shows a green "Match found (this source has no cover image)"; a search without a match says "No match" and a failed one "Lookup failed".
+- Requires redactor_common 2026-10-09-01.
+
 ## 2026-10-09#03 -- Lookups save the files they changed
 
 - After any lookup (Comic Vine, GCD online and local, Bedetheque, ComicRack...) applies its metadata, the files it changed are saved straight away, with the usual progress and error report. Undo still works: it restores the old values as unsaved changes. Tools > Preferences > Lookups turns this off, and the files then stay marked as changed until Save All.

@@ -48,7 +48,7 @@ def test_gcd_dialog_shows_the_books_own_cover_as_current(tmp_path, monkeypatch):
     dialog.table.selectRow(0)
 
     assert dialog.detail_cover_current.text() == ""
-    assert dialog.detail_cover_found.text() == "No cover available"
+    assert dialog.detail_cover_found.text() == "No match"
 
 
 def test_book_with_no_pages_shows_no_local_cover_placeholder(tmp_path, monkeypatch):
