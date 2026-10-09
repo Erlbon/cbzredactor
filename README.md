@@ -461,6 +461,29 @@ Per format:
 - **CB7** needs the optional `py7zr` package -- unlike CBR, this is a
   normal pip-installable dependency with no separate binary to install.
 
+## Command line
+
+`cbzredactor-cli` (`cbzredactor_cli.py` from source) does the common jobs without the window, for scripts and
+scheduled tasks. It reads the same settings file as the app (Preferences, the saved Redact recipe, the API
+keys; a Comic Vine key can also come from the `COMICVINE_API_KEY` environment variable).
+
+```
+cbzredactor-cli info    PATH... [--fields series,year | --all]    what the comics are
+cbzredactor-cli set     PATH... -s Series=Saga -s Number=3 --clear Notes
+cbzredactor-cli convert PATH... [--resize] [--trash-original]     CBR/CB7/CBT -> CBZ
+cbzredactor-cli rename  PATH... -p "%series% %number% - %title%" [--zero-pad 3] [--ascii]
+cbzredactor-cli move    PATH... -p "%publisher%/%series%/%series% %number%" --root LIBRARY [--copy]
+cbzredactor-cli redact  PATH... [--recipe FILE] [--disable lookup] [--threshold 90] [--trash-dir FOLDER]
+cbzredactor-cli redact --list-steps
+```
+
+A PATH is a file, a folder (searched recursively; `-R` for just that folder) or a wildcard. Every command takes
+`--json` (one JSON document on stdout, nothing else) and `--quiet` (no progress or warnings on stderr); the ones
+that change files take `-n` / `--dry-run`. Exit codes: 0 done, 1 some files failed, 2 bad arguments or nothing
+found, 130 interrupted. Nothing is overwritten: a taken name gets (2), (3)...; a conversion whose `.cbz` already
+exists leaves it alone; Redact and cross-volume moves send originals to the Recycle Bin (or `--trash-dir`).
+Renames and moves are logged, so File > Undo Last Rename in the app undoes them.
+
 ## Running from source
 
 ```bash

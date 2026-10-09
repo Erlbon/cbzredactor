@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-10-09#09 -- Command line: cbzredactor-cli
+
+- New `cbzredactor-cli` (a console build beside the app; `python cbzredactor_cli.py` from source) with `info`, `set`, `convert`, `rename`, `move` and `redact`: the same engines the window uses, for scripts and scheduled jobs. It reads the app's settings and saved Redact recipe; `--dry-run` previews the commands that change files, `--json` prints one JSON document, and the exit code says whether files failed (see the README's Command line section).
+- Nothing is overwritten and nothing is deleted for good: names that are taken get numbers, an existing `.cbz` is left alone, originals go to the Recycle Bin (or `--trash-dir`), and renames and moves are recorded for File > Undo Last Rename. A file the pattern has no name for is skipped instead of being called "untitled".
+- build_exe.bat builds cbzredactor-cli.exe after the app, and the release attaches it.
+- Requires redactor_common 2026-10-09-03 (the shared command-line skeleton).
+
 ## 2026-10-09#08 -- Redact: a CBR that was already converted
 
 - The Redact step Convert used to fail a CBR/CB7/CBT whose .cbz of the same name already existed. It now carries on with that existing .cbz (the rest of the recipe runs on it and the row becomes it), says so in the log, and leaves the original untouched and never recycled. A .cbz that cannot be read still fails the file, and nothing is ever overwritten by a conversion.
