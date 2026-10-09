@@ -105,6 +105,7 @@ class ComicVineBrowseDialog(QDialog):
         self._books = books
         self._index = 0
         self._results: dict[int, dict] = {}
+        self._series_issue: Optional[ComicVineIssue] = None  # the selected series' issue with the file's number
 
         self._api_key = app_settings.load_comicvine_api_key()
         if not self._api_key:
@@ -169,7 +170,7 @@ class ComicVineBrowseDialog(QDialog):
         splitter.addWidget(self.stack)
         self.volume_table.itemSelectionChanged.connect(self._on_volume_selected)
         self.issue_table.itemSelectionChanged.connect(self._on_issue_selected)
-        self.volume_table.itemDoubleClicked.connect(lambda _item: self._use_volume())
+        self.volume_table.itemDoubleClicked.connect(lambda _item: self._use_current() if self._series_issue else self._use_volume())
         self.issue_table.itemDoubleClicked.connect(lambda _item: self._use_issue())
 
         covers = QWidget()
@@ -193,19 +194,21 @@ class ComicVineBrowseDialog(QDialog):
         buttons = QHBoxLayout()
         self.back_btn = QPushButton("◀ Back to Series")
         self.skip_btn = QPushButton("No – Skip This File")
-        self.use_btn = QPushButton("Choose This Series ▶")
+        self.use_btn = QPushButton("Yes – Use This Issue")
+        self.browse_btn = QPushButton("Browse Issues ▶")
         self.use_btn.setDefault(True)
         self.finish_btn = QPushButton("Stop Here")
         self.cancel_btn = QPushButton("Cancel")
-        for button in (self.back_btn, self.skip_btn):
+        for button in (self.back_btn, self.browse_btn):
             buttons.addWidget(button)
         buttons.addStretch(1)
-        for button in (self.use_btn, self.finish_btn, self.cancel_btn):
+        for button in (self.use_btn, self.skip_btn, self.finish_btn, self.cancel_btn):
             buttons.addWidget(button)
         root.addLayout(buttons)
         self.back_btn.clicked.connect(self._back_to_series)
         self.skip_btn.clicked.connect(self._next_book)
         self.use_btn.clicked.connect(self._use_current)
+        self.browse_btn.clicked.connect(self._use_volume)
         self.finish_btn.clicked.connect(self._stop)
         self.finish_btn.setToolTip(
             "Stop the lookup here. Files you answered Yes to keep their metadata; this file and the rest are left alone."
@@ -404,6 +407,8 @@ class ComicVineBrowseDialog(QDialog):
 
     def _on_volume_selected(self) -> None:
         volume = self._selected_volume()
+        self._series_issue = None
+        self.use_btn.setEnabled(False)
         if volume is None:
             return
         bits = [bit for bit in (volume.publisher, f"started {volume.start_year}" if volume.start_year else "") if bit]
@@ -412,6 +417,8 @@ class ComicVineBrowseDialog(QDialog):
         # Show the cover of the issue with the file's number straight away, so the series can be
         # judged (and another one picked) without choosing it first. Falls back to the series cover.
         issue, have = self._issue_for_file(volume)
+        self._series_issue = issue
+        self.use_btn.setEnabled(issue is not None)
         number = self.number_edit.text().strip()
         if issue is not None and issue.image_url:
             image_url, note = issue.image_url, f"{volume.name} #{issue.number}" + (f' – "{issue.name}"' if issue.name else "")
@@ -545,7 +552,9 @@ class ComicVineBrowseDialog(QDialog):
         if issue is None:
             QMessageBox.information(self, "Comic Vine", "Select an issue first, or press No.")
             return False
-        volume = self._current_volume
+        return self._apply(self._current_volume, issue, advance)
+
+    def _apply(self, volume: ComicVineVolume, issue: ComicVineIssue, advance: bool = True) -> bool:
         candidate = candidate_for(volume, issue)
         try:
             details = self._bg(fetch_issue_details, self._api_key, candidate.detail_url)
@@ -554,13 +563,17 @@ class ComicVineBrowseDialog(QDialog):
             return False
         details.publisher = volume.publisher
         self._results[self._index] = details.as_dict()
+        self._prior_volume_ids.add(volume.volume_id)  # the chosen series is remembered for the next file
+        self._last_volume = volume
+        self._last_series_key = _series_key(self.series_edit.text())
         if advance:
             self._next_book()
         return True
 
     def _use_current(self) -> None:
         if self.stack.currentIndex() == STEP_SERIES:
-            self._use_volume()
+            if self._series_issue is not None:  # Yes straight from the series list
+                self._apply(self._selected_volume(), self._series_issue)
         else:
             self._use_issue()
 
@@ -571,10 +584,11 @@ class ComicVineBrowseDialog(QDialog):
         self.stack.setCurrentIndex(step)
         in_issues = step == STEP_ISSUES
         self.back_btn.setVisible(in_issues)
-        self.use_btn.setText("Yes – Use This Issue" if in_issues else "Choose This Series ▶")
+        self.browse_btn.setVisible(not in_issues)
+        self.use_btn.setEnabled(in_issues or self._series_issue is not None)
         self.step_label.setText(
-            "Step 2 of 2: choose the issue (the covers are side by side)." if in_issues
-            else "Step 1 of 2: choose the series (best fit first; the covers are side by side)."
+            "Choose the issue (the covers are side by side), then Yes. Back to Series changes the series." if in_issues
+            else "Is this the right issue? Yes applies it; pick another series in the list, or Browse Issues to choose a different issue."
         )
         if not in_issues:
             self.match_label.setText("")

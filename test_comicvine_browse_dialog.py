@@ -115,7 +115,7 @@ def test_without_a_matching_cover_the_best_ranked_volume_is_selected(tmp_path, n
 
 def test_choosing_a_series_lists_its_issues_in_order_with_the_files_number_selected(tmp_path, net):
     dialog = ComicVineBrowseDialog([_book(tmp_path)])
-    dialog.use_btn.click()  # choose the preselected series (volume 2... which has only #1)
+    dialog.browse_btn.click()  # choose the preselected series (volume 2... which has only #1)
     assert dialog.stack.currentIndex() == STEP_ISSUES
     assert net["issues"] == ["2"]
     assert dialog._selected_issue() is None
@@ -123,7 +123,7 @@ def test_choosing_a_series_lists_its_issues_in_order_with_the_files_number_selec
 
     dialog.back_btn.click()
     _select_volume(dialog, "1")
-    dialog.use_btn.click()
+    dialog.browse_btn.click()
     assert [dialog.issue_table.item(r, 0).text() for r in range(4)] == ["1", "2", "3", "5"]
     assert dialog._selected_issue().number == "2"
 
@@ -131,7 +131,7 @@ def test_choosing_a_series_lists_its_issues_in_order_with_the_files_number_selec
 def test_using_the_issue_applies_its_details_and_the_volumes_publisher(tmp_path, net):
     dialog = ComicVineBrowseDialog([_book(tmp_path)])
     _select_volume(dialog, "1")
-    dialog.use_btn.click()
+    dialog.browse_btn.click()
     dialog.use_btn.click()  # "Use This Issue"
     fields = dialog.accepted_metadata()[0]
     assert fields["publisher"] == "DC Comics"
@@ -143,7 +143,7 @@ def test_the_chosen_series_is_remembered_for_the_next_file_of_the_same_series(tm
     books = [_book(tmp_path, "Batman 002 (2017).cbz", number="2"), _book(tmp_path, "Batman 003 (2017).cbz", number="3")]
     dialog = ComicVineBrowseDialog(books)
     _select_volume(dialog, "1")
-    dialog.use_btn.click()
+    dialog.browse_btn.click()
     dialog.use_btn.click()
     assert dialog._index == 1
     assert dialog.stack.currentIndex() == STEP_ISSUES  # straight to the issue, no second series search
@@ -157,7 +157,7 @@ def test_back_to_series_forgets_the_remembered_choice(tmp_path, net):
     books = [_book(tmp_path, "Batman 002 (2017).cbz"), _book(tmp_path, "Batman 003 (2017).cbz", number="3")]
     dialog = ComicVineBrowseDialog(books)
     _select_volume(dialog, "1")
-    dialog.use_btn.click()
+    dialog.browse_btn.click()
     dialog.use_btn.click()
     dialog.back_btn.click()
     assert dialog.stack.currentIndex() == STEP_SERIES
@@ -206,7 +206,7 @@ def test_stop_keeps_the_yes_answers_and_leaves_the_current_file_alone(tmp_path, 
              _book(tmp_path, "Batman 004 (2017).cbz", number="4")]
     dialog = ComicVineBrowseDialog(books)
     _select_volume(dialog, "1")
-    dialog.use_btn.click()  # to the issue step
+    dialog.browse_btn.click()  # to the issue step
     dialog.use_btn.click()  # Yes for file 1, on to file 2
     dialog.finish_btn.click()  # Stop here
     assert dialog.result() == dialog.DialogCode.Accepted
@@ -221,3 +221,15 @@ def test_selecting_a_series_shows_the_issue_with_the_files_number_without_choosi
     _select_volume(dialog, "2")  # this series only has #1
     assert "No issue #2" in dialog.info_label.text()
     assert net["issues"].count("1") == 1  # fetched once, then cached
+
+
+def test_yes_applies_straight_from_the_series_list_when_the_series_has_the_number(tmp_path, net):
+    dialog = ComicVineBrowseDialog([_book(tmp_path)])  # the file is #2
+    _select_volume(dialog, "2")  # this series only has #1
+    assert not dialog.use_btn.isEnabled()  # nothing to say Yes to; Browse Issues is still there
+    _select_volume(dialog, "1")
+    assert dialog.use_btn.isEnabled()
+    dialog.use_btn.click()
+    assert dialog.stack.currentIndex() == STEP_SERIES  # never went to the issue list
+    assert dialog.accepted_metadata()[0]["publisher"] == "DC Comics"
+    assert dialog.result() == dialog.DialogCode.Accepted

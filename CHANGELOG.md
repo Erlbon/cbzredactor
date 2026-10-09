@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026-10-09#01 -- Comic Vine: Yes straight from the series list
+
+- When the selected series has the file's number, its cover is already shown, so **Yes – Use This Issue** now applies it right there; the separate "Choose This Series" click is gone. A series without that number leaves Yes greyed out. **Browse Issues** (new, series step only) opens the issue list to pick a different issue, and **Back to Series** returns from it.
+- Button order is now Yes, No – Skip This File, Stop Here, Cancel, side by side (No used to sit at the far left).
+
 ## 2026-10-08#07 -- Comic Vine: Yes / No / Stop
 
 - The Comic Vine lookup asks one question per file: **Yes – Use This Issue** applies the metadata and moves on, **No – Skip This File** moves on without it. **Stop Here** (was Finish) ends the chain: files already answered Yes keep their metadata, the current file and the rest are left alone. Cancel still discards everything.
