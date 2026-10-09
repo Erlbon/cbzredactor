@@ -14,6 +14,7 @@ from __future__ import annotations
 import argparse
 import os
 
+from core.archive_sniff import CONTAINER_UNKNOWN, detect_container
 from core.cbz_file import CbzBook, path_needs_conversion
 from core.foreign_archive_convert import ForeignArchiveConversionError, convert_to_cbz, relabel_mislabeled_cbz
 from core.redact_steps import FILENAME_FIELD_KEYS
@@ -21,11 +22,24 @@ from gui import app_settings
 from redactor_common.cli import Output, add_common_options, commands
 from redactor_common.cli.commands import add_pattern_options, new_row, say
 from redactor_common.core.rename_pattern import zero_pad_numeric_value
+from redactor_common.cli.commands import trash_with_retries
 from redactor_common.core.trash import TrashError, move_to_trash
 
 from cbzcli.files import add_path_arguments, collect, load_books
 
 DEFAULT_RENAME_PATTERN = "%series% %number% - %title%"
+
+
+def _zero_pad(args: argparse.Namespace) -> int:
+    """--zero-pad N, else the choice saved in the app's Rename window (on: its width), else none."""
+    if args.zero_pad is not None:
+        return args.zero_pad
+    enabled, width = app_settings.load_rename_zero_pad()
+    return width if enabled else 0
+
+
+def _ascii(args: argparse.Namespace) -> bool:
+    return bool(args.ascii) or app_settings.load_ascii_filenames()
 
 
 def _values_for(book: CbzBook, zero_pad: int) -> dict[str, str]:
@@ -64,24 +78,32 @@ def run_convert(args: argparse.Namespace, out: Output) -> int:
     files = collect(args.paths, out, recurse=not args.no_recurse)
     resize = app_settings.load_resize_options() if args.resize else None
     failed = 0
+    taken: set[str] = set()  # the .cbz names this run has already claimed (a dry run must say what a real one does)
     for index, path in enumerate(files, start=1):
         out.progress(index, len(files), path)
         row = new_row(path)
-        _convert_one(path, args, resize, row, out)
+        _convert_one(path, args, resize, row, out, taken)
         failed += row["status"] == "failed"
         out.record(row)
         say(out, row)
     return commands.finish_run(out, failed, files=len(files), dry_run=args.dry_run)
 
 
-def _convert_one(path: str, args, resize, row: dict, out: Output) -> None:
+def _convert_one(path: str, args, resize, row: dict, out: Output, taken: set[str]) -> None:
     if not path_needs_conversion(path):
-        row["status"], row["message"] = "skipped", "already a real CBZ"
+        if detect_container(path) == CONTAINER_UNKNOWN:
+            row["status"], row["message"] = "failed", "not a ZIP, RAR, 7z or tar archive (damaged, or not a comic)"
+        else:
+            row["status"], row["message"] = "skipped", "already a real CBZ"
         return
     target = os.path.splitext(path)[0] + ".cbz"
     if target != path and os.path.lexists(target):
         row["status"], row["message"], row["new_path"] = "skipped", "a .cbz of that name already exists; left alone", target
         return
+    if os.path.normcase(target) in taken:
+        row["status"], row["message"], row["new_path"] = "skipped", "another file in this run converts to the same name; left alone", target
+        return
+    taken.add(os.path.normcase(target))
     if args.dry_run:
         row["status"], row["new_path"] = "planned", target
         return
@@ -91,24 +113,25 @@ def _convert_one(path: str, args, resize, row: dict, out: Output) -> None:
             source = relabel_mislabeled_cbz(path)  # book.cbz that is really a RAR/7z/tar gets its true extension first
         new_path = convert_to_cbz(source, resize=resize)
     except (ForeignArchiveConversionError, OSError) as exc:
-        _restore_name(source, path, row)
-        row["status"], row["message"] = "failed", str(exc)
+        row["status"], row["message"] = "failed", str(exc) + _restore_name(source, path)
         return
     row["status"], row["new_path"] = "converted", new_path
     if args.trash_original:
         try:
-            move_to_trash(source)
+            trash_with_retries(move_to_trash)(source)
         except TrashError as exc:
             row["message"] = f"converted, but the original was kept: {exc}"
             out.warn(f"{os.path.basename(source)}: the original was kept ({exc})")
 
 
-def _restore_name(source: str, path: str, row: dict) -> None:
+def _restore_name(source: str, path: str) -> str:
+    """Puts a relabelled file back under its old name after a failed conversion; "" or what went wrong."""
     if source != path:
         try:
             os.rename(source, path)
         except OSError as exc:
-            row["message"] = f"could not restore the name {os.path.basename(path)}: {exc}"
+            return f"; could not restore the name {os.path.basename(path)}, it is now {os.path.basename(source)}: {exc}"
+    return ""
 
 
 # --- rename -------------------------------------------------------------------------
@@ -127,10 +150,11 @@ def add_rename_parser(sub) -> None:
 
 def run_rename(args: argparse.Namespace, out: Output) -> int:
     pattern = args.pattern or DEFAULT_RENAME_PATTERN
-    books = load_books(collect(args.paths, out, recurse=not args.no_recurse))
+    zero_pad = _zero_pad(args)
+    books = load_books(collect(args.paths, out, recurse=not args.no_recurse), out)
     failed = commands.rename_items(
-        books, pattern=pattern, values_for=lambda b: _values_for(b, args.zero_pad), path_of=lambda b: b.path,
-        skip_reason=_skip_reason, out=out, dry_run=args.dry_run, ascii_only=args.ascii,
+        books, pattern=pattern, values_for=lambda b: _values_for(b, zero_pad), path_of=lambda b: b.path,
+        skip_reason=_skip_reason, out=out, dry_run=args.dry_run, ascii_only=_ascii(args),
     )
     return commands.finish_run(out, failed, files=len(books), dry_run=args.dry_run, pattern=pattern)
 
@@ -154,10 +178,11 @@ def add_move_parser(sub) -> None:
 
 def run_move(args: argparse.Namespace, out: Output) -> int:
     root = args.root or app_settings.load_library_root()
-    books = load_books(collect(args.paths, out, recurse=not args.no_recurse))
+    zero_pad = _zero_pad(args)
+    books = load_books(collect(args.paths, out, recurse=not args.no_recurse), out)
     failed = commands.move_items(
-        books, root=root, pattern=args.pattern, values_for=lambda b: _values_for(b, args.zero_pad),
+        books, root=root, pattern=args.pattern, values_for=lambda b: _values_for(b, zero_pad),
         path_of=lambda b: b.path, skip_reason=_skip_reason, out=out, dry_run=args.dry_run, copy=args.copy,
-        ascii_only=args.ascii,
+        ascii_only=_ascii(args),
     )
     return commands.finish_run(out, failed, files=len(books), dry_run=args.dry_run, root=root)

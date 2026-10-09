@@ -33,8 +33,14 @@ def collect(paths: list[str], out: Output, recurse: bool = True) -> list[str]:
     return files
 
 
-def load_books(files: list[str]) -> list[CbzBook]:
-    return [CbzBook(path) for path in files]
+def load_books(files: list[str], out: Output | None = None) -> list[CbzBook]:
+    """Loads each file; `out` shows "reading N/M" on stderr while a big batch is read."""
+    books = []
+    for index, path in enumerate(files, start=1):
+        if out is not None:
+            out.progress(index, len(files), f"reading {path}")
+        books.append(CbzBook(path))
+    return books
 
 
 def book_status(book: CbzBook) -> str:

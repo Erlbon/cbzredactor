@@ -124,10 +124,11 @@ def test_set_accepts_field_spellings_and_fixes_enum_case(library, capsys):
     assert book.metadata.cover_artist == "Fiona" and book.metadata.manga == "Yes"
 
 
-def test_set_on_a_foreign_file_fails_with_exit_1(tmp_path, capsys):
+def test_set_on_a_foreign_file_is_skipped_like_rename_and_move(tmp_path, capsys):
     cbt = _cbt(tmp_path / "old.cbt")
     code, document = run_json(capsys, "set", cbt, "-s", "Series=X")
-    assert code == 1 and document["failed"] == 1 and "needs conversion" in document["results"][0]["message"]
+    assert code == 0 and document["failed"] == 0
+    assert document["results"][0]["status"] == "skipped" and "needs conversion" in document["results"][0]["message"]
 
 
 # --- convert ------------------------------------------------------------------------------
@@ -353,6 +354,20 @@ def _readme_cli_section() -> str:
     return text[start: text.index("## Running from source")]
 
 
+def _readme_subsections(section: str) -> dict[str, str]:
+    """The text under each "### name" heading of the Command line section."""
+    parts = {}
+    heading, lines = "", []
+    for line in section.splitlines():
+        if line.startswith("### "):
+            parts[heading] = " ".join(lines)
+            heading, lines = line[4:].strip(), []
+        else:
+            lines.append(line)
+    parts[heading] = " ".join(lines)
+    return parts
+
+
 def test_the_readme_documents_every_command_option_step_and_field():
     import argparse
 
@@ -361,20 +376,22 @@ def test_the_readme_documents_every_command_option_step_and_field():
     from core.redact_steps import build_catalogue
 
     section = _readme_cli_section()
+    parts = _readme_subsections(section)
+    common = parts["Options every command has"]
     parser = build_parser()
-    missing = []
-    for action in parser._actions:
-        missing += [o for o in action.option_strings if o not in section]
+    missing = [o for action in parser._actions for o in action.option_strings if o not in common]
     subparsers = next(a for a in parser._actions if isinstance(a, argparse._SubParsersAction))
     for name, sub in subparsers.choices.items():
-        if f"### {name}" not in section:
+        if name not in parts:
             missing.append(f"### {name}")
+            continue
         for action in sub._actions:
             for option in action.option_strings:
-                if option not in section:
+                # an option every command has is described once in the common table; the others in their command's own part
+                if option not in parts[name] and option not in common:
                     missing.append(f"{name} {option}")
-    missing += [f"step {s.key}" for s in build_catalogue(None) if not s.hidden and s.key not in section]
-    missing += [f"field {tag}" for tag in SETTABLE if tag not in section]
+    missing += [f"step {s.key}" for s in build_catalogue(None) if not s.hidden and f"`{s.key}`" not in parts["redact"]]
+    missing += [f"field {tag}" for tag in SETTABLE if tag not in parts["set"]]
     assert missing == [], f"the README's Command line section does not mention: {missing}"
 
 
@@ -384,3 +401,91 @@ def test_the_readme_lists_the_exit_codes_and_the_scripting_ways():
         assert code in section
     for way in ("start /wait", "Start-Process", "Out-Null", "--output"):
         assert way in section
+
+
+# --- second review -------------------------------------------------------------------------------------------
+
+
+@pytest.fixture(autouse=True)
+def _private_credit_pages(monkeypatch, tmp_path):
+    """The learned credit pages live in their own file next to the settings; a redact run must not touch the real one."""
+    from gui import app_settings
+
+    monkeypatch.setattr(app_settings, "credit_pages_path", lambda: str(tmp_path / "credit_pages.json"))
+
+
+@pytest.mark.parametrize("argv,message", [
+    (["-s", "Series=bad\x01char"], "control character"),
+    (["-s", "Year=\u00b2"], "whole number"),
+    (["-s", "CommunityRating=\u0663"], "number from 0 to 5"),
+])
+def test_set_refuses_values_no_comicinfo_can_store(library, argv, message):
+    from redactor_common.cli import CliError
+
+    _tmp, saga, _ = library
+    before = open(saga, "rb").read()
+    with pytest.raises(CliError, match=message):
+        main(["set", saga, *argv])
+    assert open(saga, "rb").read() == before
+
+
+def test_set_stores_a_padded_number_as_the_number(library, capsys):
+    _tmp, saga, _ = library
+    run_json(capsys, "set", saga, "-s", "Volume=7")
+    _code, document = run_json(capsys, "set", saga, "-s", "Volume=007")
+    assert document["results"][0]["status"] == "unchanged"
+
+
+def test_convert_says_a_file_that_is_no_archive_is_damaged_not_already_a_cbz(tmp_path, capsys):
+    junk = tmp_path / "junk.cbz"
+    junk.write_bytes(b"this is not an archive")
+    code, document = run_json(capsys, "convert", str(junk))
+    row = document["results"][0]
+    assert code == 1 and row["status"] == "failed" and "not a ZIP" in row["message"]
+
+
+def test_convert_dry_run_and_the_real_run_agree_when_two_sources_share_a_name(tmp_path, capsys):
+    a, b = _cbt(tmp_path / "x.cbt"), _cbt(tmp_path / "x.cbr")
+    _code, plan = run_json(capsys, "convert", str(tmp_path), "-n")
+    _code, real = run_json(capsys, "convert", str(tmp_path))
+    assert [r["status"] for r in plan["results"]] == ["planned", "skipped"]  # the dry run already says the second is left alone
+    assert [r["status"] for r in real["results"]] == ["converted", "skipped"]
+    assert sorted(r["status"] for r in real["results"]) == ["converted", "skipped"]
+    assert (tmp_path / "x.cbz").exists()
+
+
+def test_convert_failure_keeps_both_messages_when_the_name_cannot_be_restored(tmp_path, capsys, monkeypatch):
+    from core.foreign_archive_convert import ForeignArchiveConversionError
+
+    os.rename(_cbt(tmp_path / "old.cbt"), tmp_path / "tar.cbz")  # a tar called .cbz
+    real_rename = os.rename
+
+    def relabel(path):
+        new = path[:-4] + ".cbt"
+        real_rename(path, new)
+
+        def locked(src, dst):
+            raise OSError("locked")
+
+        monkeypatch.setattr(os, "rename", locked)  # putting the name back will fail
+        return new
+
+    def broken(source, resize=None):
+        raise ForeignArchiveConversionError("the conversion broke")
+
+    monkeypatch.setattr(cmd_files, "relabel_mislabeled_cbz", relabel)
+    monkeypatch.setattr(cmd_files, "convert_to_cbz", broken)
+    code, document = run_json(capsys, "convert", str(tmp_path / "tar.cbz"))
+    message = document["results"][0]["message"]
+    assert code == 1 and "the conversion broke" in message and "could not restore the name tar.cbz" in message
+
+
+def test_rename_defaults_come_from_the_saved_settings(library, capsys):
+    from gui import app_settings
+
+    tmp, saga, _ = library
+    app_settings.save_rename_zero_pad(True, 3)
+    _code, document = run_json(capsys, "rename", saga, "-p", "%series% %number%", "-n")
+    assert document["results"][0]["new_path"].endswith("Saga 001.cbz")
+    _code, document = run_json(capsys, "rename", saga, "-p", "%series% %number%", "--zero-pad", "0", "-n")
+    assert document["results"][0]["new_path"].endswith("Saga 1.cbz")

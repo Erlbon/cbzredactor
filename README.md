@@ -518,8 +518,8 @@ converting is not a failure.
 `cbzredactor set PATH... -s FIELD=VALUE [-s ...] [--clear FIELD ...] [-n]`
 
 Sets or empties ComicInfo fields and saves each comic in place (the same save as the window's Save All; the
-page count is recomputed). A CBR/CB7/CBT must be converted first. Fields and values are checked before any file
-is touched; a bad one stops the command with exit code 2.
+page count is recomputed). A CBR/CB7/CBT is `skipped` (convert it first), as it is for `rename` and `move`.
+Fields and values are checked before any file is touched; a bad one stops the command with exit code 2.
 
 | Option | Meaning |
 | --- | --- |
@@ -534,11 +534,15 @@ CoverArtist, Editor, Translator, Publisher, Imprint, Genre, Tags, Web, LanguageI
 Characters, Teams, Locations, ScanInformation, StoryArc, StoryArcNumber, SeriesGroup, AgeRating, CommunityRating,
 MainCharacterOrTeam, Review, GTIN. (PageCount is always taken from the archive.)
 
-Checks: Count, Volume, AlternateCount, Year, Month and Day must be whole numbers (Month 1-12, Day 1-31);
-CommunityRating is a number from 0 to 5; BlackAndWhite, Manga and AgeRating must be one of the schema's values
-(any capitalisation is accepted and corrected).
+Checks: Count, Volume, AlternateCount, Year, Month and Day must be whole numbers written with the digits 0-9
+(Month 1-12, Day 1-31; `007` is stored as `7`); CommunityRating is a number from 0 to 5; BlackAndWhite, Manga and
+AgeRating must be one of the schema's values (any capitalisation is accepted and corrected). A value with a
+control character in it is refused, as is a line break or tab in any field except Summary, Notes and Review,
+since ComicInfo.xml cannot store them. If a field is given both `-s` and `--clear`, `--clear` wins whatever
+the order.
 
-Each file's result is `changed`, `unchanged` (nothing differed), `planned` (dry run) or `failed`.
+Each file's result is `changed`, `unchanged` (nothing differed), `planned` (dry run), `skipped` (a foreign
+archive) or `failed`.
 
 ### convert
 
@@ -546,12 +550,14 @@ Each file's result is `changed`, `unchanged` (nothing differed), `planned` (dry 
 
 Converts CBR, CB7 and CBT files, and `.cbz` files that are really another format, to real `.cbz` files beside
 them. The original is left in place unless you ask otherwise. Never overwrites: if the `.cbz` already exists the
-file is `skipped` and nothing is touched. A file that already is a real CBZ is `skipped` too.
+file is `skipped` and nothing is touched; so is the second of two files in one run that would become the same
+`.cbz` (`--dry-run` says the same). A file that already is a real CBZ is `skipped` too. A `.cbz` that is no
+archive at all (damaged, or not a comic) is `failed`.
 
 | Option | Meaning |
 | --- | --- |
 | `--resize` | Shrink the pages in the same pass, with the saved Resize defaults (Tools > Preferences > Resize defaults). |
-| `--trash-original` | After the new `.cbz` is made, send the original to the Recycle Bin (never deleted for good; if the Recycle Bin refuses, the original is kept and a warning says so). |
+| `--trash-original` | After the new `.cbz` is made, send the original to the Recycle Bin (never deleted for good; a move a virus scanner blocks for a moment is retried, and if the Recycle Bin still refuses, the original is kept and a warning says so). |
 | `-n`, `--dry-run` | Show what would be converted, change nothing. |
 
 Results: `converted`, `skipped`, `planned`, `failed`. The new path is in `new_path`.
@@ -566,13 +572,18 @@ place. Never overwrites: a name that is taken gets `(2)`, `(3)`, ... A change of
 | Option | Meaning |
 | --- | --- |
 | `-p PATTERN`, `--pattern PATTERN` | The new name (without the extension), with `%field%` tokens, e.g. `"%series% %number% - %title%"`. Default: `%series% %number% - %title%`. Quote it so the shell leaves the `%` signs alone. |
-| `--zero-pad N` | Pad the number to N digits (`--zero-pad 3` gives `001`). The month is always two digits. |
-| `--ascii` | ASCII-safe names (é becomes e, æ becomes ae, other symbols are dropped). |
+| `--zero-pad N` | Pad the number to N digits (`--zero-pad 3` gives `001`). Default: the choice saved in the app's Rename window (on, with its width, or off); `--zero-pad 0` turns it off. The month is always two digits. |
+| `--ascii` | ASCII-safe names (é becomes e, æ becomes ae, other symbols are dropped). Also on when the app's Rename window has it saved. |
 | `-n`, `--dry-run` | Show the new names, rename nothing. |
 
 Tokens are the ComicInfo field names in lower case (`%series%`, `%number%`, `%title%`, `%year%`, `%publisher%`,
 `%volume%`, `%writer%` and so on). A file the pattern gives no name for (all its fields are empty) is `skipped`,
-not renamed to "untitled". A file that already has the name is `unchanged`. There is no undo for the command line: preview with `--dry-run`.
+not renamed to "untitled". A token that is not a field name (a typo such as `%tittle%`) is refused with exit code 2
+instead of silently rendering as nothing, and a rename pattern cannot contain `/` or `\` (`move` makes folders).
+A file that already has the name is `unchanged`. There is no undo for the command line: preview with `--dry-run`.
+
+In a batch file write `%%` for each `%` (`-p "%%series%% %%number%%"`): cmd expands a single `%name%` itself, and a
+pattern that then reads nothing makes the file `skipped`.
 
 ### move
 
@@ -609,7 +620,7 @@ is no `--dry-run`: use `info` first, and `--disable` for the steps you do not wa
 | `--recipe FILE` | Use this recipe (a JSON file in the format the app stores) instead of the one saved in the app. |
 | `--enable STEP` | Turn a step on for this run (repeatable). |
 | `--disable STEP` | Turn a step off for this run (repeatable). |
-| `--threshold N` | Confidence needed to apply a guess, `0`-`1` or a percentage (`0.9`, `90` or `90%`); a plain number from 1 to 5 such as `1.5` is refused as ambiguous. |
+| `--threshold N` | Confidence needed to apply a guess: a fraction `0`-`1` (`0.9`, also `1`), or a percentage with at least two digits (`90`, `90%`, `100`); a number above 1 and below 5 such as `1.5` is refused as ambiguous. |
 | `--trash-dir FOLDER` | Move originals into this folder (created if needed) instead of the Recycle Bin, for a machine or a task that has none. |
 | `--list-steps` | Show the steps and whether the recipe has each on, then stop (no `PATH` needed). |
 

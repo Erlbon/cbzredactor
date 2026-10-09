@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-10-10#01 -- Command line: second review fixes
+
+- `rename` / `move` take their zero-pad and ASCII defaults from the app's saved Rename choices (`--zero-pad 0` turns padding off); an unknown `%token%` in a pattern is refused instead of rendering as nothing; a pattern that reads nothing for a file (for example `%series%` expanded by cmd in a batch file) skips the file instead of calling it "untitled".
+- `set` refuses values with control characters, non-ASCII digits (a superscript two) and line breaks outside Summary / Notes / Review, stores `007` as `7`, and skips a CBR/CB7/CBT (like `rename` and `move`) instead of counting it as a failure.
+- `convert`: a failed conversion no longer loses the message that the old name could not be restored; a `.cbz` that is no archive at all is reported as damaged instead of "already a real CBZ"; two sources that would become the same `.cbz` are treated the same in `--dry-run` and in a real run.
+- `--trash-original` and `redact` retry a Recycle Bin move that a virus scanner briefly blocks; a `--recipe` file that is not a recipe is refused instead of running the default one; a big batch shows "reading N/M" while it loads.
+- Requires redactor_common 2026-10-10-01.
+
 ## 2026-10-09#12 -- Command line: review fixes
 
 - There is no undo for the command line: renames, moves and Redact run from it are no longer recorded in the app's rename log (File > Undo Last Rename does not see them). Preview with `--dry-run`; nothing is overwritten and nothing is deleted for good.

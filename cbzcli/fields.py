@@ -12,9 +12,13 @@ from core.comicinfo import (
     AGE_RATING_VALUES, ATTR_TO_TAG, BLACK_AND_WHITE_VALUES, INT_FIELDS, MANGA_VALUES, TAG_TO_ATTR,
 )
 from redactor_common.cli import CliError
+from redactor_common.cli.values import check_text, is_ascii_number
 
 # PageCount is always recomputed from the archive when saving; it is not a field to set.
 SETTABLE = {tag: attr for tag, attr in TAG_TO_ATTR.items() if tag != "PageCount"}
+
+# Fields that may hold several lines; every other field is a single line.
+MULTILINE_TAGS = {"Summary", "Notes", "Review"}
 
 _ENUMS = {
     "BlackAndWhite": BLACK_AND_WHITE_VALUES,
@@ -44,19 +48,22 @@ def resolve_field(name: str, settable: bool = False) -> tuple[str, str]:
 
 def check_value(tag: str, value: str) -> str:
     """The value to store (stripped), or a CliError when the field would not accept it. "" clears the field."""
-    value = value.strip()
+    value = check_text(tag, value, multiline=tag in MULTILINE_TAGS)
     if not value:
         return ""
     if tag in INT_FIELDS:
-        if not value.isdigit():
-            raise CliError(f"{tag} must be a whole number, not {value!r}")
+        if not is_ascii_number(value):
+            raise CliError(f"{tag} must be a whole number written with the digits 0-9, not {value!r}")
         number = int(value)
+        value = str(number)  # "007" is stored, and compared, as 7
         if tag == "Month" and not 1 <= number <= 12:
             raise CliError("Month must be 1 to 12")
         if tag == "Day" and not 1 <= number <= 31:
             raise CliError("Day must be 1 to 31")
     if tag == "CommunityRating":
         try:
+            if not value.isascii():
+                raise ValueError(value)
             rating = float(value)
         except ValueError:
             raise CliError(f"CommunityRating must be a number from 0 to 5, not {value!r}") from None

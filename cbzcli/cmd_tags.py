@@ -38,7 +38,7 @@ def run_info(args: argparse.Namespace, out: Output) -> int:
         [attr_for(name) for name in args.fields.split(",") if name.strip()] if args.fields else DEFAULT_INFO_FIELDS
     )
     failed = 0
-    for index, book in enumerate(load_books(files), start=1):
+    for index, book in enumerate(load_books(files, out), start=1):
         out.progress(index, len(files), book.path)
         shown = ALL_ATTRS if wanted is None else wanted
         fields = {a: getattr(book.metadata, a, "") for a in shown if (getattr(book.metadata, a, "") or "").strip()}
@@ -87,12 +87,14 @@ def run_set(args: argparse.Namespace, out: Output) -> int:
 
     files = collect(args.paths, out, recurse=not args.no_recurse)
     failed = 0
-    for index, book in enumerate(load_books(files), start=1):
+    for index, book in enumerate(load_books(files, out), start=1):
         out.progress(index, len(files), book.path)
         row = {"path": book.path, "status": "", "changes": {}, "message": ""}
-        if book.load_error or book.needs_conversion:
-            row["status"], row["message"] = "failed", book_status(book)
+        if book.load_error:
+            row["status"], row["message"] = "failed", book.load_error
             failed += 1
+        elif book.needs_conversion:  # like rename and move: a foreign archive is skipped, not a failure
+            row["status"], row["message"] = "skipped", "needs conversion first (run: convert)"
         else:
             for attr, new in changes.items():
                 old = getattr(book.metadata, attr, "") or ""
