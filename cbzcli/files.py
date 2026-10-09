@@ -7,13 +7,10 @@ settings and files, read without any window).
 
 from __future__ import annotations
 
-import os
 
-from core.app_paths import base_dir
 from core.cbz_file import CbzBook
 from core.foreign_archive_convert import FOREIGN_ARCHIVE_EXTENSIONS
 from redactor_common.cli import CliError, Output, expand_paths
-from redactor_common.core.rename_log import RenameLog
 
 EXTENSIONS = (".cbz",) + FOREIGN_ARCHIVE_EXTENSIONS
 
@@ -47,8 +44,3 @@ def book_status(book: CbzBook) -> str:
     if book.needs_conversion:
         return "needs conversion"
     return "ok"
-
-
-def rename_log() -> RenameLog:
-    """The same log File > Undo Last Rename reads, so a rename done here can be undone from the app."""
-    return RenameLog(os.path.join(str(base_dir()), "cbzredactor_rename_log.json"))

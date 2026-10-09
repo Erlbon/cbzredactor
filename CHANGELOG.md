@@ -1,5 +1,14 @@
 # Changelog
 
+## 2026-10-09#12 -- Command line: review fixes
+
+- There is no undo for the command line: renames, moves and Redact run from it are no longer recorded in the app's rename log (File > Undo Last Rename does not see them). Preview with `--dry-run`; nothing is overwritten and nothing is deleted for good.
+- A name containing `[` or `]` is taken literally (it was read as a wildcard, so `Book [2019].cbz` could select other files), a wildcard's matches are filtered by extension like a folder's files, and a folder inside a folder that is a link or junction is not followed (a file was listed twice, and a loop was walked until the path got too long).
+- A change of letter case alone (`song` to `Song`) is now a rename on Windows too; a rename or a sidecar rename never replaces an existing file.
+- `--json` / `--output` always leave ONE valid, ASCII-only document: if the command fails or is interrupted after it started it still holds what was done so far and an `error` entry (before, the output file was empty). The document also lists the `errors` printed on stderr.
+- `--threshold` accepts `0.9`, `90` and `90%`, and refuses an ambiguous `1.5` instead of guessing. A file name with a character such as a superscript two no longer crashes the command.
+- Requires redactor_common 2026-10-09-08.
+
 ## 2026-10-09#11 -- Command line on the shared building blocks
 
 - No change in what the commands do. `rename`, `move` and `redact` now run on the implementations shared with the other Redactor apps (redactor_common.cli.commands), so they behave the same in every app and are written once.

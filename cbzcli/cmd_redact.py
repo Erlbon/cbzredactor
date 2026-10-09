@@ -27,7 +27,7 @@ from redactor_common.cli.commands import (
     add_redact_options, build_recipe, list_steps, read_recipe_file, redact_items, trash_to,
 )
 
-from cbzcli.files import collect, load_books, rename_log
+from cbzcli.files import collect, load_books
 
 
 def add_redact_parser(sub) -> None:
@@ -47,7 +47,7 @@ def build_env(args: argparse.Namespace) -> RedactEnv:
     """What the steps share, read from the app's settings like the window does -- minus anything visual."""
     resize = app_settings.load_resize_options() if app_settings.load_resize_on_convert() == app_settings.RESIZE_ON_CONVERT_YES else None
     return RedactEnv(
-        rename_log=rename_log(),
+        rename_log=None,
         trash=trash_to(args.trash_dir) if args.trash_dir else None,
         pattern_history=app_settings.load_pattern_history(),
         ascii_filenames=app_settings.load_ascii_filenames(),

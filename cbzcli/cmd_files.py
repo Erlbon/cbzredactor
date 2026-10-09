@@ -6,8 +6,7 @@ cbzcli/cmd_files.py
   move    PATH...   move (or copy) into folders under a library root by a pattern ("%publisher%/%series%/...")
 
 Rename and move are the shared implementations in redactor_common.cli.commands; this file only says how a
-comic's fields and path are read. Renames and moves are recorded in the same log the app's File > Undo Last
-Rename reads.
+comic's fields and path are read. There is no undo for the command line (it is not recorded in the app's rename log).
 """
 
 from __future__ import annotations
@@ -19,12 +18,12 @@ from core.cbz_file import CbzBook, path_needs_conversion
 from core.foreign_archive_convert import ForeignArchiveConversionError, convert_to_cbz, relabel_mislabeled_cbz
 from core.redact_steps import FILENAME_FIELD_KEYS
 from gui import app_settings
-from redactor_common.cli import EXIT_OK, EXIT_PARTIAL, Output, add_common_options, commands
+from redactor_common.cli import Output, add_common_options, commands
 from redactor_common.cli.commands import add_pattern_options, new_row, say
 from redactor_common.core.rename_pattern import zero_pad_numeric_value
 from redactor_common.core.trash import TrashError, move_to_trash
 
-from cbzcli.files import add_path_arguments, collect, load_books, rename_log
+from cbzcli.files import add_path_arguments, collect, load_books
 
 DEFAULT_RENAME_PATTERN = "%series% %number% - %title%"
 
@@ -72,8 +71,7 @@ def run_convert(args: argparse.Namespace, out: Output) -> int:
         failed += row["status"] == "failed"
         out.record(row)
         say(out, row)
-    out.finish({"files": len(files), "failed": failed, "dry_run": args.dry_run})
-    return EXIT_PARTIAL if failed else EXIT_OK
+    return commands.finish_run(out, failed, files=len(files), dry_run=args.dry_run)
 
 
 def _convert_one(path: str, args, resize, row: dict, out: Output) -> None:
@@ -132,11 +130,9 @@ def run_rename(args: argparse.Namespace, out: Output) -> int:
     books = load_books(collect(args.paths, out, recurse=not args.no_recurse))
     failed = commands.rename_items(
         books, pattern=pattern, values_for=lambda b: _values_for(b, args.zero_pad), path_of=lambda b: b.path,
-        skip_reason=_skip_reason, out=out, dry_run=args.dry_run, ascii_only=args.ascii, log=rename_log(),
-        log_label="Rename by Pattern (command line)",
+        skip_reason=_skip_reason, out=out, dry_run=args.dry_run, ascii_only=args.ascii,
     )
-    out.finish({"files": len(books), "failed": failed, "dry_run": args.dry_run, "pattern": pattern})
-    return EXIT_PARTIAL if failed else EXIT_OK
+    return commands.finish_run(out, failed, files=len(books), dry_run=args.dry_run, pattern=pattern)
 
 
 # --- move ---------------------------------------------------------------------------
@@ -162,7 +158,6 @@ def run_move(args: argparse.Namespace, out: Output) -> int:
     failed = commands.move_items(
         books, root=root, pattern=args.pattern, values_for=lambda b: _values_for(b, args.zero_pad),
         path_of=lambda b: b.path, skip_reason=_skip_reason, out=out, dry_run=args.dry_run, copy=args.copy,
-        ascii_only=args.ascii, log=rename_log(), log_label="Move into folders (command line)",
+        ascii_only=args.ascii,
     )
-    out.finish({"files": len(books), "failed": failed, "dry_run": args.dry_run, "root": root})
-    return EXIT_PARTIAL if failed else EXIT_OK
+    return commands.finish_run(out, failed, files=len(books), dry_run=args.dry_run, root=root)

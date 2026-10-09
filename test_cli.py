@@ -1,5 +1,5 @@
 """The command line (cbzcli/): every command on real small archives, text and --json output, exit codes,
---dry-run, and the log File > Undo Last Rename reads. The settings file is the test-isolated one (conftest)."""
+--dry-run and sidecar-free renames. The settings file is the test-isolated one (conftest)."""
 
 import json
 import os
@@ -9,7 +9,6 @@ import pytest
 from cbzcli import cmd_files
 from cbzcli.main import main
 from core.cbz_file import CbzBook
-from redactor_common.core.rename_log import RenameLog
 from test_redact_steps import _cbt, _cbz
 
 COMICINFO = (
@@ -34,13 +33,6 @@ def library(tmp_path):
     saga = _cbz(tmp_path / "saga1.cbz", comicinfo=COMICINFO)
     plain = _cbz(tmp_path / "plain.cbz", comicinfo=None)
     return tmp_path, saga, plain
-
-
-@pytest.fixture(autouse=True)
-def isolated_log(tmp_path, monkeypatch):
-    log = RenameLog(str(tmp_path / "_cli_rename_log.json"))
-    monkeypatch.setattr(cmd_files, "rename_log", lambda: log)
-    return log
 
 
 # --- info -----------------------------------------------------------------------------
@@ -179,16 +171,12 @@ def test_convert_failure_is_exit_1_and_changes_nothing(tmp_path, capsys):
 # --- rename ---------------------------------------------------------------------------------
 
 
-def test_rename_by_pattern_with_padding_and_the_undo_log(library, capsys, isolated_log):
+def test_rename_by_pattern_with_padding(library, capsys):
     tmp, saga, plain = library
     code, document = run_json(capsys, "rename", saga, "-p", "%series% %number% - %title%", "--zero-pad", "3")
     assert code == 0 and document["results"][0]["status"] == "renamed"
     new_path = str(tmp / "Saga 001 - Chapter One.cbz")
     assert os.path.exists(new_path) and not os.path.exists(saga)
-    batch = isolated_log.last_batch()
-    assert batch is not None and batch.renames == [(saga, new_path)]
-    result = isolated_log.undo_last()  # what File > Undo Last Rename does
-    assert result is not None and os.path.exists(saga) and not os.path.exists(new_path)
 
 
 def test_rename_skips_a_file_whose_pattern_gives_no_name(library, capsys):
