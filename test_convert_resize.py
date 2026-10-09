@@ -668,3 +668,34 @@ def test_trash_gets_a_plain_path_not_the_extended_length_form(monkeypatch):
     mw._trash_retrying(ext + "D:/Download" + chr(92) + "a.cbz")
     assert seen == ["D:" + chr(92) + "Download" + chr(92) + "a.cbz"] or os.name != "nt"
     assert not seen[0].startswith(ext)
+
+
+class _FakeLookupDialog:
+    DialogCode = mw.ResizeImagesDialog.DialogCode
+
+    def __init__(self, books, parent=None):
+        pass
+
+    def exec(self):
+        return self.DialogCode.Accepted
+
+    def accepted_metadata(self):
+        return {0: {"series": "Saga"}}
+
+
+def test_a_lookup_saves_the_files_it_changed_and_only_those(window, tmp_path):
+    paths = _load_two(window, tmp_path)
+    window.table.selectAll()
+    window._run_lookup_dialog(_FakeLookupDialog, "Fake lookup")
+    assert not any(book.dirty for book in window.books)  # saved straight away
+    assert CbzBook(paths[0]).metadata.series == "Saga"
+    assert CbzBook(paths[1]).metadata.series == ""  # the other file was not in the results
+
+
+def test_the_save_after_lookup_setting_can_be_turned_off(window, tmp_path, monkeypatch):
+    monkeypatch.setattr(app_settings, "load_save_after_lookup", lambda: False)
+    paths = _load_two(window, tmp_path)
+    window.table.selectAll()
+    window._run_lookup_dialog(_FakeLookupDialog, "Fake lookup")
+    assert window.books[0].dirty  # left for Save All
+    assert CbzBook(paths[0]).metadata.series == ""

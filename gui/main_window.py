@@ -1962,6 +1962,10 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage("No files have unsaved changes.", 5000)
             return
 
+        self._save_rows(changed_rows)
+
+    def _save_rows(self, rows: list[int]) -> None:
+        """Writes the given rows (with progress), reports failures, refreshes the status."""
         errors: list[str] = []
 
         def _step(row: int, _index: int) -> None:
@@ -1973,7 +1977,7 @@ class MainWindow(QMainWindow):
             self._refresh_table_row(row, book)
 
         run_with_progress(
-            self, changed_rows, _step, "Saving files...", threshold=SAVE_PROGRESS_THRESHOLD, cancellable=True,
+            self, rows, _step, "Saving files...", threshold=SAVE_PROGRESS_THRESHOLD, cancellable=True,
             label_for=lambda row: f"Saving: {os.path.basename(self.books[row].path)}",
         )
 
@@ -3658,6 +3662,8 @@ class MainWindow(QMainWindow):
                 page_count_text = f"{book.actual_page_count} page(s)"
                 self._show_book_in_panel(book, page_count_text)
         self._update_status()
+        if app_settings.load_save_after_lookup():
+            self._save_rows([self.books.index(target_books[i]) for i in metadata_changes])
 
     def _resolve_overwrite_conflicts(
         self, target_books: list[CbzBook], metadata_changes: dict[int, dict[str, str]]

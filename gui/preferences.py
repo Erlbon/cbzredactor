@@ -47,6 +47,7 @@ KEY_RESIZE_ON_CONVERT = "conversion_resize_on_convert"
 KEY_GCD_LOCAL_DB = "gcd_local_database"
 KEY_COMICRACK_DB = "comicrack_database"
 KEY_LIBRARY_ROOT = "library_root"
+KEY_SAVE_AFTER_LOOKUP = "save_after_lookup"
 
 # Same ceiling the Export/Import adapter accepts for the padding settings.
 MAX_PAD_WIDTH = 10
@@ -141,6 +142,18 @@ def preference_sections() -> list[PrefSection]:
         "What the Resize Images dialog starts with (and remembers from the last run). "
         "You can still change them there each time.",
     )
+    lookups = PrefSection(
+        "lookups", "Lookups",
+        (
+            PrefSpec(
+                KEY_SAVE_AFTER_LOOKUP, "Save the files right after a lookup applies metadata", "bool", True,
+                help="Comic Vine, GCD, Bedetheque and the other lookups write the files they changed "
+                     "as soon as you accept the results. Off: the files stay marked as changed until "
+                     "you Save All. Undo works either way.",
+            ),
+        ),
+        "What happens after a lookup has filled in metadata.",
+    )
     paths = PrefSection(
         "paths", "Paths",
         (
@@ -169,7 +182,7 @@ def preference_sections() -> list[PrefSection]:
         description="Habits for the names the app builds when it renames, exports or moves files. "
                     "The Rename / Export and Auto-Numbering dialogs start from these.",
     )
-    return [filenames, conversion, resize, paths]
+    return [filenames, conversion, resize, lookups, paths]
 
 
 # --- storage: key -> (read, write) over app_settings ---------------------------
@@ -195,6 +208,7 @@ _READERS = {
     KEY_RESIZE_JPEG_QUALITY: app_settings.load_resize_jpeg_quality,
     KEY_RESIZE_OUTPUT_FORMAT: app_settings.load_resize_output_format,
     KEY_RESIZE_IN_PLACE: app_settings.load_resize_in_place,
+    KEY_SAVE_AFTER_LOOKUP: app_settings.load_save_after_lookup,
     KEY_RESIZE_RECYCLE_ORIGINAL: app_settings.load_resize_recycle_original,
     KEY_RESIZE_OVERSIZED_ONLY: app_settings.load_resize_oversized_only,
     KEY_RESIZE_EXPORT_FOLDER: app_settings.load_resize_export_folder,
@@ -216,6 +230,7 @@ _WRITERS = {
     KEY_RESIZE_JPEG_QUALITY: app_settings.save_resize_jpeg_quality,
     KEY_RESIZE_OUTPUT_FORMAT: app_settings.save_resize_output_format,
     KEY_RESIZE_IN_PLACE: app_settings.save_resize_in_place,
+    KEY_SAVE_AFTER_LOOKUP: app_settings.save_save_after_lookup,
     KEY_RESIZE_RECYCLE_ORIGINAL: app_settings.save_resize_recycle_original,
     KEY_RESIZE_OVERSIZED_ONLY: app_settings.save_resize_oversized_only,
     KEY_RESIZE_EXPORT_FOLDER: app_settings.save_resize_export_folder,

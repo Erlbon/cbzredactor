@@ -29,7 +29,7 @@ def _dialog():
 def test_sections_are_valid_and_have_the_expected_pages():
     sections = preferences.preference_sections()
     core_prefs.validate_sections(sections)
-    assert [s.title for s in sections] == ["Filenames", "Conversion", "Resize defaults", "Paths"]
+    assert [s.title for s in sections] == ["Filenames", "Conversion", "Resize defaults", "Lookups", "Paths"]
     keys = {spec.key for s in sections for spec in s.specs}
     assert not any("key" in k or "password" in k for k in keys)  # secrets stay in API Keys
     zero_width = next(sp for s in sections for sp in s.specs if sp.key == core_prefs.KEY_ZERO_PAD_WIDTH)

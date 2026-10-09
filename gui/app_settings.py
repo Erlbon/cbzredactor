@@ -54,6 +54,7 @@ _RESIZE_JPEG_QUALITY_KEY = "resize/jpeg_quality"
 _RESIZE_MAX_HEIGHT_KEY = "resize/max_height"  # 0 = no height limit
 _RESIZE_OUTPUT_FORMAT_KEY = "resize/output_format"  # "" = keep each page's format
 _RESIZE_IN_PLACE_KEY = "resize/in_place"  # False = export copies to a folder
+_SAVE_AFTER_LOOKUP_KEY = "lookup/save_after"
 _RESIZE_RECYCLE_ORIGINAL_KEY = "resize/recycle_original"  # in place: original to the Recycle Bin
 _RESIZE_OVERSIZED_ONLY_KEY = "resize/oversized_only"
 _RESIZE_EXPORT_FOLDER_KEY = "resize/export_folder"
@@ -384,6 +385,16 @@ def load_resize_in_place() -> bool:
 
 def save_resize_in_place(enabled: bool) -> None:
     _settings().setValue(_RESIZE_IN_PLACE_KEY, bool(enabled))
+
+
+def load_save_after_lookup() -> bool:
+    """Save the files a lookup (Comic Vine, GCD, Bedetheque...) changed as soon as it is
+    applied (default on). Undo still works afterwards: it puts the old values back unsaved."""
+    return _settings().value(_SAVE_AFTER_LOOKUP_KEY, True, type=bool)
+
+
+def save_save_after_lookup(enabled: bool) -> None:
+    _settings().setValue(_SAVE_AFTER_LOOKUP_KEY, bool(enabled))
 
 
 def load_resize_recycle_original() -> bool:
