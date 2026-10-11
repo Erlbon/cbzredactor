@@ -77,6 +77,7 @@ from core.credit_pages import KnownCreditPages, credit_matches, hamming, scan_bo
 from core.foreign_archive_convert import ForeignArchiveConversionError, convert_to_cbz
 from core.gcd_local import GcdLocalError, normalize_name, open_database
 from core.image_resize import DEFAULT_MAX_WIDTH, ResizeOptions, target_size
+from core.manga_lookup import MangaClient, MangaLookupError
 from core.page_dimensions import SIZE_LOW, scan_page_sizes
 from core.scan_quality_tag import LOW_RES_TAG, add_tag, has_tag, remove_tag
 from core.zip_names import open_zip
@@ -91,6 +92,7 @@ NUMERIC_FILENAME_FIELDS = frozenset(
 
 # Fields that, all present, mean there is nothing worth a lookup round trip.
 LOOKUP_TRIGGER_FIELDS = ("series", "number", "year", "publisher", "writer", "summary")
+MANGA_TRIGGER_FIELDS = ("series", "year", "publisher", "writer", "summary", "genre")
 
 # Filename parsing confidences: the pattern was named explicitly in the recipe / picked
 # from the pattern history / the scene-name parser (no pattern at all) was used.
@@ -127,6 +129,8 @@ class RedactEnv:
     sample_values: dict[str, str] = field(default_factory=dict)  # the first loaded book's fields, for pattern previews
     open_database: Callable[[str], object] = open_database
     comicvine_down: bool = False  # set by the first network failure, skips the rest of the run
+    manga: MangaClient | None = None  # AniList + MangaUpdates; made on first use (tests put a canned one here)
+    manga_down: bool = False  # likewise: both sources failed once, skip the rest of the run
     convert: Callable[..., str] | None = None  # convert(source, output_path=...): None = convert_to_cbz directly; the app supplies a threaded one with progress
 
     convert_resize: ResizeOptions | None = None  # resize the pages in the same pass as the conversion (None: don't); read from the saved setting, never asked
@@ -134,6 +138,14 @@ class RedactEnv:
     def begin(self) -> None:
         """Call before each run."""
         self.comicvine_down = False
+        self.manga_down = False
+
+    def manga_client(self) -> MangaClient:
+        """One client for the whole run: it remembers the series it has asked about, so a folder of twenty
+        volumes costs one request pair, and it spaces its requests."""
+        if self.manga is None:
+            self.manga = MangaClient()
+        return self.manga
 
     def _newest(self, with_separator: bool) -> str:
         for pattern in self.pattern_history:
@@ -799,6 +811,64 @@ class LookupStep(Step):
         return f"filled {', '.join(filled)} from {result.value.source}"
 
 
+class MangaLookupStep(Step):
+    key = "manga_lookup"
+    label = "Fill empty fields from AniList and MangaUpdates (manga)"
+    description = (
+        "Looks the SERIES up on AniList and MangaUpdates (no key needed) and fills fields that are EMPTY: the "
+        "series title, summary, start date, genres, tags, author and artist, publisher (the English one when "
+        "known), the volume count of a finished series, the community rating, Manga = YesAndRightToLeft for "
+        "Japanese manga and an adults-only age rating where AniList flags it. Both sources describe the whole "
+        "series, so every volume gets the same answer and the volume number is never touched. Confidence: the "
+        f"title found exactly in both sources {EXACT_CONFIDENCE:.0%}, in one {SERIES_NUMBER_CONFIDENCE:.0%}, "
+        "anything looser lower (Needs review under the default threshold). Off by default: switch it on for a "
+        "manga library, or tick \"Only books tagged as manga\" in a mixed one."
+    )
+    default_enabled = False
+    options = (
+        OptionSpec(
+            "only_manga", "Only books tagged as manga (Manga = Yes or YesAndRightToLeft)", "bool", False,
+        ),
+    )
+
+    def run(self, ctx: CbzCtx) -> StepResult:
+        if (missing := ctx.need_work()) is not None:
+            return missing
+        meta = ctx.work.metadata
+        if self.options_for(ctx)["only_manga"] and not (meta.manga or "").startswith("Yes"):
+            return StepResult.nothing()
+        if all((getattr(meta, k, "") or "").strip() for k in MANGA_TRIGGER_FIELDS):
+            return StepResult.nothing()
+        parsed = parse_scene_name(ctx.original)
+        series = (meta.series or parsed.series).strip()
+        if not series:
+            return StepResult.nothing("manga lookup skipped: no series in ComicInfo or the filename")
+        env = ctx.env
+        if env.manga_down:
+            return StepResult.nothing("manga lookup skipped (AniList and MangaUpdates unreachable earlier in this run)")
+        year = (meta.year or parsed.year).strip()
+        client = env.manga_client()
+        try:
+            matches = client.search(series, year)
+        except MangaLookupError as exc:
+            env.manga_down = True
+            return StepResult.nothing(f"manga lookup unavailable: {exc}")
+        if not matches:
+            return StepResult.nothing("manga lookup found no match")
+        best = matches[0]
+        fill = _empty_fields(ctx, client.details(best).as_dict())
+        if not fill:
+            return StepResult.nothing()
+        return StepResult.suggestion(
+            FieldFill(fill, f"{best.source_text} {best.display_label()}"), best.confidence,
+            f"{best.source_text} matched {best.display_label()}",
+        )
+
+    def apply_suggestion(self, ctx: CbzCtx, result: StepResult) -> str:
+        filled = _fill_empty(ctx, result.value.fields)
+        return f"filled {', '.join(filled)} from {result.value.source}"
+
+
 class ValidateFixStep(Step):
     key = "validate_fix"
     label = "Fix ComicInfo issues"
@@ -1077,6 +1147,7 @@ def build_catalogue(env: RedactEnv | None = None) -> list[Step]:
         PathTagsStep(env),
         FilenameTagsStep(env),
         LookupStep(),
+        MangaLookupStep(),
         ValidateFixStep(),
         TagLowResStep(),
         RenameStep(env),

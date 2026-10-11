@@ -77,7 +77,8 @@ def _items(window, rows):
 REPAIR = ["Validate and Fix…", "Resize Images…", "Tag Low-Res Scans", "Remove Credit Pages…",
           "Clean Up Archive Contents…"]
 BULK = ["Search and Replace…", "Change Case…", "Auto-Number…"]
-LOOK_UP = ["Comic Vine…", "Grand Comics Database…", "GCD Local Database…", "ComicRack Library…", "Bedetheque…"]
+LOOK_UP = ["Comic Vine…", "Grand Comics Database…", "GCD Local Database…", "ComicRack Library…", "Bedetheque…",
+           "Manga (AniList + MangaUpdates)…"]
 
 
 def test_one_file_selected_offers_every_selection_command(window):

@@ -134,7 +134,8 @@ def test_default_enabled_states(env):
     enabled = {s.key: s.default_enabled for s in build_catalogue(env)}
     assert enabled == {
         "convert_to_cbz": True, "clean_contents": True, "remove_credit_pages": False, "resize_images": False,
-        "path_tags": True, "filename_tags": True, "lookup": True, "validate_fix": True, "tag_low_res": True,
+        "path_tags": True, "filename_tags": True, "lookup": True, "manga_lookup": False, "validate_fix": True,
+        "tag_low_res": True,
         "rename": False, "move_into_folders": False,
     }
     env.pattern_history = ["%series% %number%"]
@@ -779,3 +780,71 @@ def test_later_steps_work_on_the_adopted_cbz_and_save_it_in_place(env, tmp_path)
     assert len(env.bin) == 1 and "redact-orig" in env.bin[0]  # the previous .cbz was recycled, as any saved-in-place file is
     assert "Thumbs.db" not in CbzBook(other).page_names and book.path == other
     assert _leftovers(tmp_path) == []
+
+
+# --- manga: AniList + MangaUpdates ---------------------------------------------------------------------------
+
+
+def _manga_env(env, **kw):
+    from test_manga_lookup import FakeNet, client
+
+    net = FakeNet(**kw)
+    env.manga = client(net)
+    return net
+
+
+def _manga_recipe(env, **kw):
+    return _recipe(env, enable=("manga_lookup",), disable=("filename_tags", "lookup"), **kw)
+
+
+def test_the_manga_step_is_off_by_default_and_does_nothing_without_it(env, tmp_path):
+    net = _manga_env(env)
+    book = CbzBook(_cbz(tmp_path / "Berserk v01.cbz", comicinfo=b"<ComicInfo/>"))
+    entry = _only(_run(env, [book], _recipe(env, disable=("filename_tags", "lookup"))))
+    assert entry.status is FileStatus.UNCHANGED and net.requests == []
+
+
+def test_an_exact_title_in_both_sources_fills_the_empty_fields_and_never_the_volume_number(env, tmp_path):
+    _manga_env(env)
+    book = CbzBook(_cbz(tmp_path / "Berserk v01.cbz", comicinfo=b"<ComicInfo><Number>1</Number><Publisher>Own</Publisher></ComicInfo>"))
+    entry = _only(_run(env, [book], _manga_recipe(env)))
+    meta = book.metadata
+    assert entry.status is FileStatus.CHANGED and any("auto-applied at 95%" in a and "AniList + MangaUpdates" in a for a in entry.applied)
+    assert (meta.series, meta.year, meta.writer, meta.penciller) == ("Berserk", "1989", "Kentaro Miura, Kouji Mori", "Kentaro Miura, Studio Gaga")
+    assert meta.manga == "YesAndRightToLeft" and meta.genre.startswith("Action") and meta.community_rating == "4.6"
+    assert meta.number == "1" and meta.publisher == "Own"  # what the file already says stays
+
+
+def test_a_match_in_one_source_only_is_listed_for_review_not_applied(env, tmp_path):
+    _manga_env(env, fail=("graphql.anilist.co",))
+    book = CbzBook(_cbz(tmp_path / "Berserk v01.cbz", comicinfo=b"<ComicInfo/>"))
+    entry = _only(_run(env, [book], _manga_recipe(env)))
+    assert entry.status is FileStatus.NEEDS_REVIEW and not book.metadata.writer
+
+
+def test_a_whole_series_costs_one_request_pair(env, tmp_path):
+    net = _manga_env(env)
+    books = [CbzBook(_cbz(tmp_path / f"Berserk v0{i}.cbz", comicinfo=b"<ComicInfo/>")) for i in (1, 2, 3)]
+    report = _run(env, books, _manga_recipe(env))
+    assert [e.status for e in report.entries] == [FileStatus.CHANGED] * 3
+    assert len([u for u in net.requests if "anilist" in u]) == 1  # once for the three volumes
+
+
+def test_both_sources_down_is_a_note_not_a_failure_and_is_not_retried(env, tmp_path):
+    net = _manga_env(env, fail=("graphql.anilist.co", "mangaupdates"))
+    books = [CbzBook(_cbz(tmp_path / f"Berserk v0{i}.cbz", comicinfo=b"<ComicInfo/>")) for i in (1, 2)]
+    report = _run(env, books, _manga_recipe(env))
+    assert [e.status for e in report.entries] == [FileStatus.UNCHANGED] * 2
+    assert any("manga lookup unavailable" in n for n in report.entries[0].notes)
+    assert any("unreachable earlier" in n for n in report.entries[1].notes)
+    assert len(net.requests) == 2  # one AniList and one MangaUpdates attempt, in total
+
+
+def test_only_manga_skips_books_not_tagged_as_manga(env, tmp_path):
+    net = _manga_env(env)
+    plain = CbzBook(_cbz(tmp_path / "Berserk v01.cbz", comicinfo=b"<ComicInfo/>"))
+    tagged = CbzBook(_cbz(tmp_path / "Berserk v02.cbz", comicinfo=b"<ComicInfo><Manga>Yes</Manga></ComicInfo>"))
+    recipe = _manga_recipe(env, options={"manga_lookup": {"only_manga": True}})
+    report = _run(env, [plain, tagged], recipe)
+    assert [e.status for e in report.entries] == [FileStatus.UNCHANGED, FileStatus.CHANGED]
+    assert net.requests and not plain.metadata.writer and tagged.metadata.writer

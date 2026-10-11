@@ -135,6 +135,7 @@ from core.duplicates import BookFacts, find_duplicates, fingerprint_book
 from core.version import APP_NAME, APP_REPO_URL, APP_VERSION, RELEASE_LABEL
 from gui import app_settings
 from gui.bedetheque_lookup_dialog import BedethequeLookupDialog
+from gui.manga_lookup_dialog import MangaLookupDialog
 from gui.comicvine_browse_dialog import ComicVineBrowseDialog
 from gui.conversion_settings_dialog import ConversionSettingsDialog
 from gui.gcd_lookup_dialog import GcdLookupDialog
@@ -606,6 +607,7 @@ class MainWindow(QMainWindow):
                 MenuAction("gcd_local_lookup", "GCD &Local Database…", self.open_gcd_local_lookup_dialog),
                 MenuAction("comicrack_lookup", "Comic&Rack Library…", self.open_comicrack_lookup_dialog),
                 MenuAction("bedetheque_lookup", "&Bedetheque…", self.open_bedetheque_lookup_dialog),
+                MenuAction("manga_lookup", "&Manga (AniList + MangaUpdates)…", self.open_manga_lookup_dialog),
             ]),
             Separator(),
             # Act on the current selection (enabled by _update_selection_actions);
@@ -891,7 +893,7 @@ class MainWindow(QMainWindow):
             items.append(look_up_submenu([
                 a[key] for key in (
                     "comicvine_lookup", "gcd_lookup", "gcd_local_lookup",
-                    "comicrack_lookup", "bedetheque_lookup",
+                    "comicrack_lookup", "bedetheque_lookup", "manga_lookup",
                 )
             ]))
         organize: list = [a["rename_export_move"]]
@@ -3816,6 +3818,9 @@ class MainWindow(QMainWindow):
 
     def open_gcd_lookup_dialog(self) -> None:
         self._run_lookup_dialog(GcdLookupDialog, "Grand Comics Database lookup")
+
+    def open_manga_lookup_dialog(self) -> None:
+        self._run_lookup_dialog(MangaLookupDialog, "Manga lookup")
 
     def open_bedetheque_lookup_dialog(self) -> None:
         """Checked here, before ever constructing BedethequeLookupDialog

@@ -85,6 +85,7 @@ def test_metadata_menu_structure():
     look_up = next(a for a in menu.actions() if _plain(a.text()) == "Look Up").menu()
     assert _texts(look_up) == [
         "Comic Vine…", "Grand Comics Database…", "GCD Local Database…", "ComicRack Library…", "Bedetheque…",
+        "Manga (AniList + MangaUpdates)…",
     ]
 
 
@@ -238,7 +239,7 @@ def test_every_lookup_is_in_the_right_click_menu(monkeypatch):
     sub = next(i for i in items if isinstance(i, mw.Submenu) and "Look Up" in i.text)
     assert [a.text() for a in sub.items] == [
         window.actions_[k].text() for k in (
-            "comicvine_lookup", "gcd_lookup", "gcd_local_lookup", "comicrack_lookup", "bedetheque_lookup"
+            "comicvine_lookup", "gcd_lookup", "gcd_local_lookup", "comicrack_lookup", "bedetheque_lookup", "manga_lookup"
         )
     ]
 

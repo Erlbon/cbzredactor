@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-10-11#01 -- Manga lookup: AniList + MangaUpdates
+
+- **New: Metadata > Look Up > Manga (AniList + MangaUpdates)...** A manga source that needs no key. Both services describe the SERIES, so every volume gets the same answer (a series is asked about once per batch) and the volume number is never touched. AniList and MangaUpdates are paired by title and start year and merged: series title, summary, start date, genres and best-rated tags, author and artist (as Writer and Penciller), the publisher (the English one when known), the volume count of a finished series, the community rating, Manga = YesAndRightToLeft for Japanese manga, an adults-only age rating where AniList flags it, and the AniList page in Web. Other matching series are under Other Matches, the found cover is shown for confirmation only, and if one service is down the other still answers. Requests are spaced to respect AniList's low limit.
+- **New Redact step** "Fill empty fields from AniList and MangaUpdates (manga)" (`manga_lookup`, also from the command line with `redact --enable manga_lookup`): fills empty fields only, off by default, with an option to run only on books tagged Manga = Yes. A title found exactly in both services is 95%, in one 85% (Needs review under the default threshold), looser lower.
+- Data from AniList and MangaUpdates (credited in the README and CREDITS).
+
 ## 2026-10-10#01 -- Command line: second review fixes
 
 - `rename` / `move` take their zero-pad and ASCII defaults from the app's saved Rename choices (`--zero-pad 0` turns padding off); an unknown `%token%` in a pattern is refused instead of rendering as nothing; a pattern that reads nothing for a file (for example `%series%` expanded by cmd in a batch file) skips the file instead of calling it "untitled".

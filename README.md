@@ -339,6 +339,30 @@ understands that this app now supports too).
   you'll get a clear message if it's missing rather than a crash.
   The album's Bedetheque page is recorded in **Web**, as the Comic
   Vine and GCD lookups record theirs.
+- `Metadata > Look Up > Manga (AniList + MangaUpdates)...` -- a manga
+  lookup against two free services that need no key:
+  [AniList](https://anilist.co) and [MangaUpdates](https://www.mangaupdates.com).
+  Both describe a SERIES, not one volume, so every volume of a series
+  gets the same answer (one request pair for the whole batch, and the
+  volume number a file has is never touched). The two answers are paired
+  by title (and start year) and merged: the series title, summary and
+  start date, genres and the best-rated tags, the **author** and
+  **artist** as Writer and Penciller (MangaUpdates names them
+  separately), the **publisher** (the English one when MangaUpdates has
+  it), the volume count of a finished series, the community rating,
+  Manga = YesAndRightToLeft for Japanese manga, an adults-only age
+  rating where AniList flags it, and AniList's page in **Web**. Other
+  series with a similar title are offered under Other Matches; the found
+  cover is shown next to yours for confirmation and is never written
+  into the archive. If one service is down the other still answers;
+  AniList's low request limit is respected (requests are spaced two
+  seconds apart, and a series is only asked about once per run). The
+  Redact step **Fill empty fields from AniList and MangaUpdates
+  (manga)** does the same for empty fields only: off by default, with
+  an option to run only on books tagged Manga = Yes. A title found
+  exactly in both services scores 95%, in one 85% (Needs review under
+  the default threshold), anything looser lower. Data from AniList and
+  MangaUpdates.
 - **All three lookup dialogs show the file's own "Current" cover side
   by side with the "Found" one** (not a cramped in-table icon) for
   whichever row is currently selected -- so you can actually see
@@ -625,7 +649,9 @@ is no `--dry-run`: use `info` first, and `--disable` for the steps you do not wa
 | `--list-steps` | Show the steps and whether the recipe has each on, then stop (no `PATH` needed). |
 
 Steps: `convert_to_cbz`, `clean_contents`, `remove_credit_pages`, `resize_images`, `path_tags`, `filename_tags`,
-`lookup`, `validate_fix`, `tag_low_res`, `rename`, `move_into_folders`. Without `--recipe` the recipe saved in the
+`lookup`, `manga_lookup`, `validate_fix`, `tag_low_res`, `rename`, `move_into_folders`. `manga_lookup` is off by default (turn it on
+with `--enable manga_lookup`, or in the recipe; its option `only_manga` limits it to books tagged Manga = Yes) and needs no key.
+Without `--recipe` the recipe saved in the
 app is used (the defaults if none was saved). The Comic Vine key comes from the `COMICVINE_API_KEY` environment
 variable if it is set, else from the app's saved key; the local GCD / ComicRack databases and the library root
 come from the app's settings. A file with unsaved edits does not exist on the command line, so nothing is skipped
