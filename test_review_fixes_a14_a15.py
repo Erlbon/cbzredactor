@@ -94,3 +94,16 @@ def test_secret_prompt_survives_an_unwritable_fallback(monkeypatch):
 
     assert sp.save_with_fallback_prompt(None, save) is False
     assert warnings and "read-only" in str(warnings[0])
+
+
+def test_the_database_dialogs_hand_the_shared_dialog_a_plain_check_callable():
+    """redactor_common's LocalDatabaseSettingsDialog runs Check File on a worker thread itself; a check that
+    wraps its own run_busy would nest two busy dialogs (and call a GUI-thread helper from the worker)."""
+    import inspect
+
+    import gui.comicrack_settings_dialog as cr
+    import gui.gcd_local_settings_dialog as gcd
+
+    for module, cls in ((gcd, gcd.GcdLocalSettingsDialog), (cr, cr.ComicRackSettingsDialog)):
+        assert "run_busy" not in inspect.getsource(cls.__init__).replace("no run_busy", "")
+        assert not hasattr(module, "run_busy")

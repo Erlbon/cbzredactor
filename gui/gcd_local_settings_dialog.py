@@ -14,7 +14,6 @@ check live here.
 from __future__ import annotations
 
 from redactor_common.gui.local_db_settings_dialog import LocalDatabaseSettingsDialog
-from redactor_common.gui.progress import run_busy
 
 from core.gcd_local import GCD_DOWNLOAD_URL, GcdLocalDatabase, GcdLocalError
 from gui import app_settings
@@ -53,8 +52,9 @@ class GcdLocalSettingsDialog(LocalDatabaseSettingsDialog):
             title="GCD Local Database",
             instructions_html=INSTRUCTIONS,
             path=app_settings.load_gcd_local_database(),
-            # Counting a GCD dump's series and issues takes a moment: off the GUI thread.
-            check=lambda path: run_busy(self, "Checking the database...", _check, path, title="Check File"),
+            # Counting a GCD dump's series and issues takes a moment; the shared dialog runs Check File off the
+            # GUI thread under a progress dialog, so this callable just does the work (no widgets, no run_busy).
+            check=_check,
             save=app_settings.save_gcd_local_database,
             error_types=(GcdLocalError,),
             parent=parent,

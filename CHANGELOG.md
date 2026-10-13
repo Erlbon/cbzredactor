@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026-10-14#02 -- Check File on the databases uses the shared progress dialog
+
+- The GCD and ComicRack database dialogs no longer wrap their own progress dialog around Check File: redactor_common's shared dialog now runs Check File off the GUI thread under a progress dialog itself, so the app's workaround is gone (it would have nested two). Same behaviour for you.
+- Requires redactor_common 2026-10-14-01.
+
 ## 2026-10-14#01 -- Redact no longer freezes the window on a slow file
 
 - Redact now runs each file on a worker thread (redactor_common 2026-10-13-06): the window keeps painting and Cancel stays clickable while a big rewrite, a conversion or a lookup is running. Before, the window could freeze for the whole length of one slow file and the Cancel click was only seen between files.

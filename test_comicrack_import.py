@@ -189,14 +189,20 @@ def test_settings_check_accepts_a_library_and_refuses_a_gcd_dump(library, tmp_pa
     with pytest.raises(dialog_module.GcdLocalError, match="GCD dump"):
         dialog_module._check(str(gcd_like))
 
-    # P1: Check File runs the (row-counting) check under the busy dialog, and its
-    # errors still reach the dialog's own error handling.
+    # Check File runs the (row-counting) check under redactor_common's busy dialog (the shared dialog does that
+    # itself), and its errors still reach the dialog's own error handling.
+    from redactor_common.gui import local_db_settings_dialog as shared
+
     busy = []
-    monkeypatch.setattr(dialog_module, "run_busy", lambda parent, label, fn, *a, **k: busy.append(label) or fn(*a))
+    monkeypatch.setattr(shared, "run_busy", lambda parent, label, fn, *a, **k: busy.append(label) or fn(*a))
+    monkeypatch.setattr(shared.QMessageBox, "information", staticmethod(lambda *a, **k: None))
+    monkeypatch.setattr(shared.QMessageBox, "warning", staticmethod(lambda *a, **k: None))
     monkeypatch.setattr(dialog_module.app_settings, "load_comicrack_database", lambda: str(dest))
     dialog = dialog_module.ComicRackSettingsDialog()
     ok, message = dialog.check_result()
-    assert ok and message.startswith("Looks good") and busy
+    assert ok and message.startswith("Looks good")
+    dialog._run_check()
+    assert busy == ["Checking the database..."]
     dialog.path_edit.setText(str(gcd_like))
     assert dialog.check_result()[0] is False
 
