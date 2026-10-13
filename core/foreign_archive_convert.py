@@ -616,7 +616,7 @@ def _extract_cb7(path: str, dest_dir: str, report: Optional["_Progress"] = None)
     except py7zr.exceptions.PasswordRequired as exc:
         raise ForeignArchiveConversionError(
             "This CB7 file is password-protected -- extract it with a "
-            "password-aware tool first, then load the result."
+            "password-aware tool first, then open the result."
         ) from exc
     except py7zr.exceptions.ArchiveError as exc:
         raise ForeignArchiveConversionError(f"Could not read CB7 file: {exc}") from exc

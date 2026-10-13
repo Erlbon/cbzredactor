@@ -45,8 +45,8 @@ command is also searchable in the **Command Palette** (Ctrl+K).
 
 - **File**: Open Files... (Ctrl+O), Open Folder... (Ctrl+Shift+O),
   **Include Subfolders** (a tick: Open Folder and Refresh List also look
-  in subfolders), Save As... (Ctrl+Shift+S), Save All (Ctrl+Shift+A;
-  Ctrl+S also still saves all changed files), Rename File... (F2), Undo
+  in subfolders), Save As... (Ctrl+Shift+S), Save All (Ctrl+Shift+A),
+  Rename File... (F2), Undo
   Last Rename, Rename / Export / Move... (Ctrl+E), Rename / Export / Move
   Macros (slots 1-5 on **Ctrl+Shift+1** to **Ctrl+Shift+5**), Export /
   Import Settings..., Remove from List (Del), Clear List, Exit.
@@ -63,7 +63,7 @@ command is also searchable in the **Command Palette** (Ctrl+K).
   Remove Credit Pages..., Clean Up Archive Contents..., Convert to
   CBZ..., Find Duplicates....
 - **Tools**: Preferences... (Ctrl+,), API Keys..., Known Credit Pages...,
-  Conversion Settings..., GCD Local Database..., ComicRack Library
+  GCD Local Database..., ComicRack Library
   Database..., Collection (Scan Collection Folder..., Collection
   Report..., Compare Library with GCD...), Columns..., Genres...,
   Languages....
@@ -80,11 +80,11 @@ selection.
   visible in dark mode, unlike relying on the OS's native style, whose
   own dark-mode approximation of a selected row's colors is often too
   low-contrast to see at a glance.
-- Load one or many `.cbz` files (or a whole folder) and browse them in
+- Open one or many `.cbz` files (Open Files, or a whole folder with Open Folder) and browse them in
   a table. Multi-select (ctrl/shift-click, same as Explorer) works for
   saving, looking up, or bulk-editing several files at once.
 - A toolbar sits above the table for one-click access to the most
-  common actions -- Load Files, Load Folder, Save, Apply (bulk edit,
+  common actions -- Open Files, Open Folder, Save, Apply (bulk edit,
   see below), Undo, then a Panel-minimize toggle and a table-font
   zoom control pushed to the far right -- matching epubredactor's own
   toolbar shape exactly, sharing the same `QAction`s as the menus so
@@ -270,10 +270,12 @@ selection.
   ComicInfo), **Duplicates**, **Name vs ComicInfo** disagreements, and
   **Formats & missing** (not really a ZIP, PDF, no or unreadable
   ComicInfo, no pages, PageCount out of step, paths over 260
-  characters). Nothing moves unless you tick it; moves and renames never
-  overwrite, only run where the scanned folder exists, and File > Undo
-  Last Rename takes them back. **Save List...** writes every finding to
-  a CSV.
+  characters). The report is **read-only**: it never moves, renames,
+  converts or rewrites a file. Each finding names the app action that
+  fixes it (a "Fix with" column, and a summary such as "Use Repair >
+  Convert to CBZ on 12 file(s)"); open those files with File > Open
+  Files or Open Folder and use that action. **Save List...** writes
+  every finding, with its "Fix with" action, to a CSV.
 - **Page order is numeric**, as comic readers do it: an archive whose
   pages are numbered 1, 2, ... 10 reads 1, 2, ... 10 (plain text
   sorting put 10 before 2 -- found in real archives), and macOS
@@ -493,8 +495,7 @@ its extension. A `.cbr` that's really a ZIP converts by a plain copy
 its true extension, then converted normally.
 
 What **File > Open Files...**/**Open Folder...** does with files that
-need converting is set in **Tools > Preferences > Conversion** (the same
-settings are also under **Tools > Conversion Settings...**):
+need converting is set in **Tools > Preferences > Conversion**:
 
 - **Add to the list unconverted** (the default) -- listed as greyed,
   read-only rows (Status "Needs conversion"). Sort by Ext, then select

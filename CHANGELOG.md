@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-10-14#03 -- Collection Report is report-only; one place for conversion settings; "Open" wording
+
+- **Collection Report no longer changes files.** The Fixes tab, the tickboxes on Moves and File names, and the Apply button are gone: the report never moves, renames, converts or rewrites anything. Each finding now has a **Fix with** column naming the app action that fixes it (e.g. Repair > Convert to CBZ, Repair > Validate and Fix, File > Rename / Export / Move), and the top of the report sums them up ("Use Repair > Convert to CBZ on 12 file(s)"). Open those files with File > Open Files or Open Folder and use that action. Save List... writes the Fix with column too.
+- **Tools > Conversion Settings... is removed.** Tools > Preferences > Conversion is the one place for those settings; the Convert to CBZ question now points there.
+- **Ctrl+S no longer saves.** The compatibility alias is dropped; Save All stays on Ctrl+Shift+A, the family key.
+- **"Open" wording.** The file and folder pickers are titled Open Files / Open Folder (were "Load CBZ Files" / "Load Folder"), and messages say "Open some files first", matching the File menu.
+
 ## 2026-10-14#02 -- Check File on the databases uses the shared progress dialog
 
 - The GCD and ComicRack database dialogs no longer wrap their own progress dialog around Check File: redactor_common's shared dialog now runs Check File off the GUI thread under a progress dialog itself, so the app's workaround is gone (it would have nested two). Same behaviour for you.

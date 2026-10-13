@@ -101,7 +101,7 @@ def test_nothing_selected_asks_before_redacting_all(window, tmp_path, monkeypatc
 
 def test_no_files_loaded_says_so(window):
     window.redact_files()
-    assert any("Load some files" in m for m in window.shown)
+    assert any("Open some files" in m for m in window.shown)
 
 
 def test_unsaved_file_is_skipped_and_named_in_the_report(window, tmp_path, monkeypatch):

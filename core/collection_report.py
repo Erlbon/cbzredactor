@@ -29,6 +29,10 @@ Checks:
 - Formats & missing: not a real ZIP, a PDF, no or unreadable
   ComicInfo.xml, no pages, PageCount out of step with the pages, a path
   over Windows' 260-character limit.
+
+The report only reports: it never changes a file. Each finding names
+the app action that fixes it (fix_with()), to use after opening the
+files with File > Open Files / Open Folder.
 """
 
 from __future__ import annotations
@@ -40,10 +44,6 @@ from dataclasses import dataclass, field
 
 from core.collection_names import (
     FileName, FolderName, library_name, loose_key, number_key, numbers_agree, parse_file_name, parse_folder_name, series_key,
-)
-from core.collection_fix import (
-    KIND_COMICINFO_FROM_NAME, KIND_CONVERT, KIND_EXTENSION, KIND_NEW_COMICINFO, KIND_PAGECOUNT, KIND_RENAME_FROM_COMICINFO,
-    Fix, fields_from_name, name_from_comicinfo,
 )
 from core.credit_pages import MATCH_DISTANCE, hamming
 from core.collection_scan import WINDOWS_PATH_LIMIT, ScanInfo, ScanRow
@@ -119,7 +119,6 @@ class Report:
     duplicates: list[DuplicateGroup] = field(default_factory=list)
     mismatches: list[Mismatch] = field(default_factory=list)
     formats: list[FormatIssue] = field(default_factory=list)
-    fixes: list[Fix] = field(default_factory=list)  # what "Apply" can fix (core/collection_fix.py)
 
 
 @dataclass
@@ -305,48 +304,53 @@ def build_report(info: ScanInfo, rows: list[ScanRow]) -> Report:
     _find_duplicates(report, by_key)
     _find_mismatches(report, by_key)
     _find_format_issues(report, info, rows)
-    _find_fixes(report, entries)
     return report
 
 
-def _find_fixes(report, entries) -> None:
-    by_path = {e.row.path: e for e in entries}
-    taken = {e.row.path for e in entries}
+# The report never changes a file: each finding names the app action that
+# fixes it, used after File > Open Files / Open Folder on those files.
+FIX_MOVE = "File > Rename / Export / Move"
+FIX_RENAME = "File > Rename File"
+FIX_DUPLICATES = "Repair > Find Duplicates"
+FIX_MISMATCH = "Metadata > Parse Filename (the name is right) or File > Rename File (ComicInfo is right)"
+FIX_CONVERT = "Repair > Convert to CBZ"
+FIX_PAGECOUNT = "Repair > Validate and Fix"
+FIX_NEW_COMICINFO = "Metadata > Parse Filename, then File > Save All"
+
+
+def format_fix_with(problem: str) -> str:
+    """The app action for a Formats & missing finding; "" when the app
+    has none (a PDF, an archive that can't be opened, no pages)."""
+    if problem.startswith("PageCount says"):
+        return FIX_PAGECOUNT
+    if problem == "no ComicInfo.xml" or problem.startswith("ComicInfo.xml can't be read"):
+        return FIX_NEW_COMICINFO
+    if "not a ZIP" in problem or (problem.startswith("named ") and problem.endswith("but really ZIP")):
+        return FIX_CONVERT
+    if problem.startswith("path is "):
+        return FIX_RENAME
+    return ""
+
+
+def fix_summary(report: Report) -> list[tuple[str, int]]:
+    """(app action, number of files it would fix), biggest first: "use
+    Repair > Convert to CBZ on these 12 files"."""
+    counts: Counter = Counter()
+    counts[FIX_MOVE] += len({m.path for m in report.moves if m.target_folder})
+    counts[FIX_RENAME] += len({n.path for n in report.names})
+    counts[FIX_DUPLICATES] += sum(len(group.rows) for group in report.duplicates)
+    counts[FIX_MISMATCH] += len({m.path for m in report.mismatches})
+    by_action: dict[str, set[str]] = defaultdict(set)
     for issue in report.formats:
-        entry = by_path[issue.path]
-        row, name = entry.row, entry.name
-        if issue.problem.startswith("PageCount says"):
-            report.fixes.append(Fix(row.path, KIND_PAGECOUNT, f"PageCount {row.page_count} → {row.pages}"))
-        elif issue.problem == "no ComicInfo.xml" and row.container == "zip" and name.series and name.number:
-            fields = fields_from_name(name)
-            report.fixes.append(Fix(row.path, KIND_NEW_COMICINFO,
-                                    "create ComicInfo.xml: " + ", ".join(f"{k} {v}" for k, v in fields.items()), fields))
-        elif "not a ZIP" in issue.problem and row.container in ("rar", "7z", "tar"):
-            report.fixes.append(Fix(row.path, KIND_CONVERT, f"convert {row.format} to a .cbz; original to the Recycle Bin",
-                                    convert=True))
-        elif issue.problem.startswith("named ") and issue.problem.endswith("but really ZIP"):
-            new_path = posixpath.splitext(row.path)[0] + ".cbz"
-            if new_path not in taken:
-                report.fixes.append(Fix(row.path, KIND_EXTENSION, "rename to .cbz (it is a ZIP)", new_path=new_path))
-    by_file: dict[str, list[Mismatch]] = defaultdict(list)
-    for mismatch in report.mismatches:
-        by_file[mismatch.path].append(mismatch)
-    for path, mismatches in by_file.items():
-        entry = by_path[path]
-        wanted = {m.field for m in mismatches}
-        fields = fields_from_name(entry.name, wanted)
-        if fields:
-            what = "; ".join(f"{m.field}: {m.in_comicinfo} → {m.in_name}" for m in mismatches)
-            report.fixes.append(Fix(path, KIND_COMICINFO_FROM_NAME, "set ComicInfo — " + what, fields, choice=path))
-        new_name = name_from_comicinfo(entry.name, entry.row, wanted)
-        new_path = posixpath.join(posixpath.dirname(path), new_name) if new_name else ""
-        if new_path and new_path != path and new_path not in taken:
-            report.fixes.append(Fix(path, KIND_RENAME_FROM_COMICINFO, f"rename to {new_name}",
-                                    new_path=new_path, choice=path))
-    report.fixes.sort(key=lambda f: (f.path.casefold(), f.kind))
+        action = format_fix_with(issue.problem)
+        if action:
+            by_action[action].add(issue.path)
+    for action, paths in by_action.items():
+        counts[action] += len(paths)
+    return [(action, n) for action, n in counts.most_common() if n]
 
 
-LIST_COLUMNS = ["Check", "File", "Folder", "Problem", "Suggestion"]
+LIST_COLUMNS = ["Check", "File", "Folder", "Problem", "Suggestion", "Fix with"]
 
 
 def report_list(report: Report) -> list[list[str]]:
@@ -355,26 +359,27 @@ def report_list(report: Report) -> list[list[str]]:
     computer)."""
     out = []
 
-    def add(check, path, problem, suggestion=""):
-        out.append([check, posixpath.basename(path), posixpath.dirname(path), problem, suggestion])
+    def add(check, path, problem, suggestion="", fix_with=""):
+        out.append([check, posixpath.basename(path), posixpath.dirname(path), problem, suggestion, fix_with])
 
     for move in report.moves:
-        add("Move", move.path, move.reason, move.target_folder)
+        add("Move", move.path, move.reason, move.target_folder, FIX_MOVE)
     for split in report.splits:
         folders = "; ".join(f"{f} ({n})" if n else f for f, n in split.folders)
-        out.append(["Split series", split.series, "", split.note or "spread over several folders", folders])
+        out.append(["Split series", split.series, "", split.note or "spread over several folders", folders, FIX_MOVE])
     for issue in report.names:
-        add("File name", issue.path, "; ".join(issue.problems), issue.suggested)
+        add("File name", issue.path, "; ".join(issue.problems), issue.suggested, FIX_RENAME)
     for group in report.duplicates:
         for row in group.rows:
             add("Duplicate", row.path,
                 f"{group.series} {group.number}: {len(group.rows)} copies" + (f" ({group.covers})" if group.covers else ""),
-                f"{row.size / 1048576:.1f} MB, {row.pages or '?'} pages")
+                f"{row.size / 1048576:.1f} MB, {row.pages or '?'} pages", FIX_DUPLICATES)
     for mismatch in report.mismatches:
         add("Name vs ComicInfo", mismatch.path,
-            f"{mismatch.field}: “{mismatch.in_name}” in the name, “{mismatch.in_comicinfo}” in ComicInfo")
+            f"{mismatch.field}: “{mismatch.in_name}” in the name, “{mismatch.in_comicinfo}” in ComicInfo",
+            "", FIX_MISMATCH)
     for issue in report.formats:
-        add("Format / missing", issue.path, issue.problem)
+        add("Format / missing", issue.path, issue.problem, "", format_fix_with(issue.problem))
     return out
 
 

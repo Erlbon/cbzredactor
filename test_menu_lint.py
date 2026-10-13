@@ -68,11 +68,11 @@ def test_no_shortcut_is_ambiguous_anywhere_in_the_window():
     assert window.actions_["reset_zoom"].shortcut() == QKeySequence("Ctrl+0")
 
 
-def test_shortcuts_are_the_family_keys_with_ctrl_s_kept_on_save_all():
+def test_shortcuts_are_the_family_keys():
     window = MainWindow()
     expected = {
         "open_files": ["Ctrl+O"], "open_folder": ["Ctrl+Shift+O"], "save_as": ["Ctrl+Shift+S"],
-        "save_all": ["Ctrl+Shift+A", "Ctrl+S"], "rename_file": ["F2"], "rename_export_move": ["Ctrl+E"],
+        "save_all": ["Ctrl+Shift+A"], "rename_file": ["F2"], "rename_export_move": ["Ctrl+E"],
         "remove_from_list": ["Del"], "refresh_list": ["F5", "Ctrl+R"], "undo": ["Ctrl+Z"], "redo": ["Ctrl+Y"],
         "search_replace": ["Ctrl+H"], "parse_filename": ["Ctrl+I"], "redact": ["Ctrl+Shift+E"],
         "command_palette": ["Ctrl+K"],

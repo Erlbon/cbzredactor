@@ -196,10 +196,10 @@ def test_only_unconverted_rows_selected_says_convert_first_not_load_files(window
     window.open_search_replace_dialog()
     window.open_comicvine_lookup_dialog()
     assert [title for title, _ in shown] == ["Convert to CBZ First"] * 2
-    assert all("Convert" in text and "Load some files" not in text for _, text in shown)
+    assert all("Convert" in text and "Open some files" not in text for _, text in shown)
     # Nothing loaded at all still says to load files.
     window.clear_list()
-    assert window._no_targets_message("search") == ("No Files", "Load some files first (or select the ones to search).")
+    assert window._no_targets_message("search") == ("No Files", "Open some files first (or select the ones to search).")
 
 
 def test_convert_from_the_table_replaces_the_row_in_place(window, tmp_path, monkeypatch):
@@ -300,35 +300,6 @@ def test_skip_is_never_remembered(window, settings, tmp_path, monkeypatch):
     assert settings["behavior"] == app_settings.FOREIGN_LOAD_ASK
 
 
-def test_settings_dialog_saves_both_choices(settings):
-    from gui.conversion_settings_dialog import ConversionSettingsDialog
-
-    dialog = ConversionSettingsDialog()
-    dialog._radios[app_settings.FOREIGN_LOAD_CONVERT].setChecked(True)
-    dialog.recycle_check.setChecked(True)
-    dialog._resize_radios[app_settings.RESIZE_ON_CONVERT_NO].setChecked(True)
-    dialog.accept()
-    assert settings == {"behavior": app_settings.FOREIGN_LOAD_CONVERT, "recycle": True}
-    assert app_settings.load_resize_on_convert() == app_settings.RESIZE_ON_CONVERT_NO
-
-
-def test_settings_dialog_shows_what_preferences_shows(settings):
-    # T6: Tools > Conversion Settings and Tools > Preferences > Conversion are one
-    # set of values with one set of labels (the dialog lacked the resize choice).
-    from gui import preferences
-    from gui.conversion_settings_dialog import ConversionSettingsDialog
-
-    settings["behavior"], settings["recycle"] = app_settings.FOREIGN_LOAD_CONVERT, True
-    app_settings.save_resize_on_convert(app_settings.RESIZE_ON_CONVERT_YES)
-    dialog = ConversionSettingsDialog()
-    assert dialog.selected_behavior() == app_settings.FOREIGN_LOAD_CONVERT
-    assert dialog.recycle_check.isChecked() is True
-    assert dialog.selected_resize_on_convert() == preferences.make_backend().get(preferences.KEY_RESIZE_ON_CONVERT)
-    assert dialog.selected_resize_on_convert() == app_settings.RESIZE_ON_CONVERT_YES
-    section = next(s for s in preferences.preference_sections() if s.key == "conversion")
-    labels = {spec.key: spec.label for spec in section.specs}
-    assert dialog.recycle_check.text() == labels[preferences.KEY_RECYCLE_ORIGINALS]
-    assert dialog._resize_radios[app_settings.RESIZE_ON_CONVERT_YES].text() == "Always resize"
 
 
 @pytest.mark.parametrize(

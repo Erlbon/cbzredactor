@@ -103,7 +103,7 @@ def test_tools_menu_structure_with_the_collection_submenu():
     assert _texts(menu) == [
         "Preferences…", "---",
         "API Keys…", "---",
-        "Known Credit Pages…", "Conversion Settings…", "---",
+        "Known Credit Pages…", "---",
         "GCD Local Database…", "ComicRack Library Database…", "---",
         "Collection", "---",
         "Columns…", "Genres…", "Languages…",
@@ -111,6 +111,36 @@ def test_tools_menu_structure_with_the_collection_submenu():
     collection = next(a for a in menu.actions() if _plain(a.text()) == "Collection").menu()
     assert _texts(collection) == ["Scan Collection Folder…", "Collection Report…", "Compare Library with GCD…"]
     assert window.actions_["scan_collection"] in collection.actions()
+
+
+def test_open_dialogs_and_messages_use_the_menus_open_wording(monkeypatch):
+    # C4 (2026-10-14): "Open Files" / "Open Folder", the menu's own words, not
+    # "Load CBZ Files" / "Load Folder" / "Load some files first".
+    from PyQt6.QtWidgets import QFileDialog
+
+    titles = []
+    monkeypatch.setattr(QFileDialog, "getOpenFileNames", lambda parent, title, *a, **k: (titles.append(title), ([], ""))[1])
+    monkeypatch.setattr(QFileDialog, "getExistingDirectory", lambda parent, title, *a, **k: titles.append(title) or "")
+    window = MainWindow()
+    window.load_files_dialog()
+    window.load_folder_dialog()
+    assert titles == ["Open Files", "Open Folder"]
+    assert window._no_targets_message()[1] == "Open some files first."
+
+
+def test_conversion_settings_live_only_in_preferences():
+    # C2 (2026-10-14): Tools > Conversion Settings is gone; Tools > Preferences >
+    # Conversion is the one place, and no text points to the old entry.
+    import importlib.util
+    import inspect
+
+    import gui.main_window as main_window_module
+
+    window = MainWindow()
+    assert "conversion_settings" not in window.actions_
+    assert not hasattr(window, "open_conversion_settings_dialog")
+    assert importlib.util.find_spec("gui.conversion_settings_dialog") is None
+    assert "Conversion Settings" not in inspect.getsource(main_window_module)
 
 
 def test_help_menu_structure():
@@ -135,7 +165,7 @@ def test_every_old_feature_is_still_reachable_from_a_menu():
         "bedetheque_lookup", "apply_bulk_edit", "redact", "redact_recipe", "search_replace",
         "case_conversion", "auto_numbering", "validate", "resize_images", "tag_low_res",
         "remove_credit_pages", "clean_contents", "find_duplicates", "undo", "redo",
-        "known_credit_pages", "gcd_local_settings", "comicrack_settings", "conversion_settings",
+        "known_credit_pages", "gcd_local_settings", "comicrack_settings",
         "column_settings", "genre_settings", "language_settings", "about", "changelog", "credits",
         "scan_collection", "collection_report",
     ]
@@ -272,15 +302,17 @@ def _two_cbz(tmp_path):
 
 def test_there_is_one_save_and_it_saves_all_changed_files(tmp_path, monkeypatch):
     """No selected-only Save: Save All is the only save command, on
-    Ctrl+Shift+A with Ctrl+S kept as a secondary key, and saves every
-    changed file whatever is selected."""
+    Ctrl+Shift+A only (the Ctrl+S alias was dropped 2026-10-14), and saves
+    every changed file whatever is selected."""
     from PyQt6.QtGui import QKeySequence
 
     window = MainWindow()
     assert "save" not in window.actions_
     save_all = window.actions_["save_all"]
     portable = QKeySequence.SequenceFormat.PortableText
-    assert [s.toString(portable) for s in save_all.shortcuts()] == ["Ctrl+Shift+A", "Ctrl+S"]
+    assert [s.toString(portable) for s in save_all.shortcuts()] == ["Ctrl+Shift+A"]
+    bound = {s.toString(portable) for a in window.findChildren(type(save_all)) for s in a.shortcuts()}
+    assert "Ctrl+S" not in bound
 
     window._load_paths(_two_cbz(tmp_path))
     saved = []

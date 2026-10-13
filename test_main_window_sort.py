@@ -133,8 +133,8 @@ def test_sort_clears_selection_rather_than_leaving_a_stale_highlight(window):
 
 
 def test_newly_loaded_files_are_folded_into_an_active_sort(window, tmp_path):
-    """A column sort is active when more files get loaded (Load Files/
-    Load Folder, or Refresh List / Convert CBR / Resize Images loading
+    """A column sort is active when more files get loaded (Open Files/
+    Open Folder, or Refresh List / Convert CBR / Resize Images loading
     their own results back in, all of which route through
     _load_paths()) -- the new arrivals shouldn't just get tacked onto
     the end, breaking the sort the user asked for."""

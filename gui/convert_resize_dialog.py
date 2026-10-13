@@ -3,7 +3,7 @@ gui/convert_resize_dialog.py
 
 "Resize pages in the same step?" -- the one question a batch of CBR/CBT/CB7
 conversions asks before it starts (on load, the table's Convert, Convert from
-disk, the Collection report's Convert). Yes means the pages are shrunk while
+disk). Yes means the pages are shrunk while
 the archive is packed (core/foreign_archive_convert.py: extract, resize each
 page, pack, one check) instead of converting and then rewriting the whole file
 a second time.

@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import copy
 import os
-import posixpath
 import zipfile
 import shutil
 import threading
@@ -97,7 +96,6 @@ from redactor_common.gui.standard_menus import (
     standard_help_items,
     standard_tools_items,
     standard_view_items,
-    with_aliases,
 )
 from redactor_common.gui.zoom_toolbar import TableZoomController
 from redactor_common.core.version import REDACTOR_COMMON_REPO_URL, REDACTOR_COMMON_VERSION
@@ -139,7 +137,6 @@ from gui import app_settings
 from gui.bedetheque_lookup_dialog import BedethequeLookupDialog
 from gui.manga_lookup_dialog import MangaLookupDialog
 from gui.comicvine_browse_dialog import ComicVineBrowseDialog
-from gui.conversion_settings_dialog import ConversionSettingsDialog
 from gui.gcd_lookup_dialog import GcdLookupDialog
 from gui.page_size_scanner import PageSizeScanner
 from gui.settings_adapter import CbzSettingsAdapter
@@ -396,7 +393,7 @@ def resource_path(*parts: str) -> str:
 def comic_files_in_folder(folder: str, recursive: bool = False) -> list[str]:
     """Every archive this app opens (.cbz, plus CBR/CBT/CB7 offered for
     conversion) inside `folder`, sorted; the folder's subfolders too when
-    `recursive` (File > Include Subfolders). Shared by Load Folder and
+    `recursive` (File > Include Subfolders). Shared by Open Folder and
     Refresh List so the two can't disagree."""
     wanted = (".cbz",) + FOREIGN_ARCHIVE_EXTENSIONS
     if recursive:
@@ -637,7 +634,6 @@ class MainWindow(QMainWindow):
             app_settings=[
                 Separator(),
                 MenuAction("known_credit_pages", "Known Cre&dit Pages…", self.open_known_credit_pages_dialog),
-                MenuAction("conversion_settings", "Conversion &Settings…", self.open_conversion_settings_dialog),
                 Separator(),
                 MenuAction("gcd_local_settings", "GCD &Local Database…", self.open_gcd_local_settings_dialog),
                 MenuAction(
@@ -659,7 +655,7 @@ class MainWindow(QMainWindow):
         help_items = standard_help_items(
             APP_NAME, self.open_changelog_dialog, self.open_credits_dialog, self.open_about_dialog
         )
-        # Saving is always "all changed files" here (Ctrl+S and Ctrl+Shift+A):
+        # Saving is always "all changed files" here (Save All, Ctrl+Shift+A):
         # the helper's separate selected-only Save entry is left out.
         file_items = [i for i in file_items if not (isinstance(i, MenuAction) and i.key == "save")]
         spec = StandardMenuSpec(
@@ -672,9 +668,6 @@ class MainWindow(QMainWindow):
         attach_include_subfolders(
             registry["include_subfolders"], load=app_settings.load_include_subfolders, save=app_settings.save_include_subfolders,
         )
-        # Save All is Ctrl+Shift+A (family key); the old Ctrl+S now saves all
-        # changed files too, as a secondary shortcut (drop after one release).
-        with_aliases(registry["save_all"], "Ctrl+S")
         self.actions_ = {key: registry[key] for key in registry.keys()}
         self._refresh_macro_actions()
         add_command_palette(self, registry)  # Ctrl+K / View > Command Palette: every menu action, searchable
@@ -962,7 +955,7 @@ class MainWindow(QMainWindow):
     def load_files_dialog(self) -> None:
         start_dir = app_settings.load_last_directory()
         paths, _ = QFileDialog.getOpenFileNames(
-            self, "Load CBZ Files", start_dir,
+            self, "Open Files", start_dir,
             "Comic Book Archives (*.cbz *.cbr *.cbt *.cb7);;All Files (*)",
         )
         if paths:
@@ -971,7 +964,7 @@ class MainWindow(QMainWindow):
 
     def load_folder_dialog(self) -> None:
         start_dir = app_settings.load_last_directory()
-        folder = QFileDialog.getExistingDirectory(self, "Load Folder", start_dir)
+        folder = QFileDialog.getExistingDirectory(self, "Open Folder", start_dir)
         if not folder:
             return
         app_settings.save_last_directory(folder)
@@ -1053,7 +1046,7 @@ class MainWindow(QMainWindow):
 
     def _resolve_foreign_choice(self, paths: list[str]) -> tuple[str, bool]:
         """What _load_paths() does with files needing conversion, per
-        Tools > Conversion Settings...: list them unconverted (the
+        Tools > Preferences > Conversion: list them unconverted (the
         default), convert them without asking, or ask."""
         behavior = app_settings.load_foreign_load_behavior()
         if behavior == app_settings.FOREIGN_LOAD_ASK:
@@ -1991,7 +1984,7 @@ class MainWindow(QMainWindow):
         then re-reads every file still present from disk. Doesn't
         discover a brand-new subfolder you haven't loaded anything
         from yet (only folders already represented in your current
-        list get scanned, non-recursively) -- use Load Folder for that.
+        list get scanned, non-recursively) -- use Open Folder for that.
         Discards unsaved in-memory edits (with confirmation first) and
         clears the undo stack, since its entries would reference book
         objects this replaces."""
@@ -2055,13 +2048,13 @@ class MainWindow(QMainWindow):
         self._update_status()
 
     def save_all_changed(self) -> None:
-        """File > Save All (Ctrl+Shift+A, and Ctrl+S): writes every changed
+        """File > Save All (Ctrl+Shift+A): writes every changed
         file. There is no save-selected-only command; Save As... handles one."""
         self._commit_current_edits()
         changed_rows = [i for i, book in enumerate(self.books) if book.dirty]
         if not changed_rows:
-            # A status message, not a dialog: Ctrl+S lands here too, and pressing it
-            # with nothing changed is harmless.
+            # A status message, not a dialog: pressing the shortcut with
+            # nothing changed is harmless.
             self.statusBar().showMessage("No files have unsaved changes.", 5000)
             return
 
@@ -3137,7 +3130,7 @@ class MainWindow(QMainWindow):
         if selected:
             return selected
         if not self.books:
-            QMessageBox.information(self, "No Files Loaded", "Load some files first.")
+            QMessageBox.information(self, "No Files Loaded", "Open some files first.")
             return []
         reply = QMessageBox.question(
             self, "Redact all files?",
@@ -3336,10 +3329,9 @@ class MainWindow(QMainWindow):
 
     def open_collection_report(self) -> None:
         """Collection > Collection Report...: patterns and irregularities
-        in the last scan (core/collection_report.py). Ticked moves and
-        renames are applied only where the scanned folder exists, and go
-        in the rename log, so File > Undo Last Rename takes them back."""
-        from PyQt6.QtWidgets import QApplication
+        in the last scan (core/collection_report.py). Report-only: it
+        never changes a file; each finding names the app action that
+        fixes it."""
         from core import collection_scan as scan
         from core.collection_report import build_report
         from gui.collection_report_dialog import CollectionReportDialog
@@ -3376,174 +3368,7 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Collection Report", str(exc))
             return
         report = self._build_report_in_background(build_report, info, rows)
-        dialog = CollectionReportDialog(info, len(rows), report, os.path.isdir(info.root), self)
-        if dialog.exec() != dialog.DialogCode.Accepted:
-            return
-        pairs, fixes = dialog.ticked(), dialog.ticked_fixes()
-        if pairs or fixes:
-            self._apply_collection_changes(zip_path, info, rows, pairs, fixes)
-
-    def _apply_collection_changes(self, zip_path: str, info, rows: list, pairs: list[tuple[str, str]],
-                                  fixes: list) -> None:
-        """Ticked fixes first (ComicInfo edits inside the archives, one
-        rewrite per file), then every rename -- the report's moves and
-        renames and the fixes that rename -- through the rename log."""
-        from core import collection_scan as scan
-        from core.collection_fix import apply_edits, drop_conflicts, group_edits
-
-        fixes = drop_conflicts(fixes)
-        edits = group_edits(fixes)
-        conversions = [f for f in fixes if f.convert]
-        summary: list[str] = []
-        failed: set[str] = set()
-        if edits:
-            answer = QMessageBox.question(
-                self, "Apply Fixes",
-                f"{len(edits)} archive(s) will be rewritten with the ComicInfo changes ticked in the report "
-                "(each written to a temporary file first). Undo Last Rename can't take these back.\n\nContinue?",
-            )
-            if answer != QMessageBox.StandardButton.Yes:
-                edits, fixes = {}, [f for f in fixes if f.is_rename or f.convert]
-                if not (pairs or fixes):
-                    return
-        if edits:
-            errors: list[str] = []
-            by_path = {row.path: index for index, row in enumerate(rows)}
-
-            def _edit(item: tuple[str, dict], _index: int) -> None:
-                path, fields = item
-                try:
-                    apply_edits(info.root, path, fields)
-                    full = scan.long_path(scan.full_path(info.root, path))
-                    stat = os.stat(full)
-                    listed = scan.Listed(path, stat.st_size, scan._stamp(stat.st_mtime))
-                    if path in by_path:
-                        rows[by_path[path]] = scan.read_comic(info.root, listed)  # the scan stays in step
-                except (CbzError, OSError) as exc:
-                    failed.add(path)
-                    errors.append(f"{path.rsplit('/', 1)[-1]}: {exc}")
-
-            finished = run_with_progress(self, list(edits.items()), _edit, "Fixing ComicInfo...",
-                                         label_for=lambda item: f"Fixing: {item[0].rsplit('/', 1)[-1]}")
-            summary.append(f"{len(edits) - len(failed)} archive(s) rewritten."
-                           + ("" if finished else " Stopped before the rest."))
-            if errors:
-                summary.append(f"{len(errors)} failed:\n" + "\n".join(errors[:10]))
-            try:
-                run_busy(self, "Saving the scan...", scan.write_scan, zip_path, info, rows)
-            except OSError:
-                pass
-        if conversions:
-            self._convert_collection_files(zip_path, info, rows, conversions, summary, failed)
-        renames, seen = [], set()
-        for old, new in pairs + [(f.path, f.new_path) for f in fixes if f.is_rename]:
-            if old not in seen and old not in failed:
-                seen.add(old)
-                renames.append((old, new))
-        self._apply_collection_moves(zip_path, info, rows, renames, "\n\n".join(summary))
-
-    def _convert_collection_files(self, zip_path: str, info, rows: list, conversions: list, summary: list[str],
-                                  failed: set[str]) -> None:
-        """Convert to CBZ for the ticked CBR/CB7/CBT rows: converted and
-        verified by _convert_path() (a mislabeled .cbz is relabeled first),
-        original ALWAYS to the Recycle Bin (the Convert to CBZ dialog's
-        checkbox is not consulted here), and the scan row swapped for the
-        new file's. A file whose .cbz name is taken is skipped and reported."""
-        from core import collection_scan as scan
-
-        errors: list[str] = []
-        converted = 0
-        index = {row.path: i for i, row in enumerate(rows)}
-        resize = self._resize_for_convert(len(conversions))
-
-        def _convert(fix, _index: int) -> None:
-            nonlocal converted
-            source = scan.full_path(info.root, fix.path)
-            new_path = self._convert_path(scan.long_path(source), True, errors, resize)
-            if new_path is None:
-                failed.add(fix.path)
-                return
-            converted += 1
-            new_rel = posixpath.splitext(fix.path)[0] + ".cbz"
-            stat = os.stat(new_path)
-            row = scan.read_comic(info.root, scan.Listed(new_rel, stat.st_size, scan._stamp(stat.st_mtime)))
-            if fix.path in index:
-                rows[index[fix.path]] = row
-                index[new_rel] = index.pop(fix.path)
-
-        finished = self._run_conversions(conversions, _convert, lambda fix: f"Converting: {fix.path.rsplit('/', 1)[-1]}")
-        summary.append(f"{converted} file(s) converted to CBZ; the originals are in the Recycle Bin (always, for this "
-                       "scan: the Convert to CBZ checkbox does not apply here)."
-                       + ("" if finished else " Stopped before the rest."))
-        if errors:
-            summary.append(f"{len(errors)} not converted:\n" + "\n".join(errors[:10]))
-        try:
-            run_busy(self, "Saving the scan...", scan.write_scan, zip_path, info, rows)
-        except OSError:
-            pass
-
-    def _apply_collection_moves(self, zip_path: str, info, rows: list, pairs: list[tuple[str, str]],
-                                intro: str = "") -> None:
-        from core import collection_scan as scan
-
-        done: list[tuple[str, str]] = []
-        problems: list[str] = []
-        by_path: dict[str, list] = {}
-        for row in rows:
-            by_path.setdefault(row.path, []).append(row)
-
-        def _move(pair: tuple[str, str], _index: int) -> None:
-            old_rel, new_rel = pair
-            old = scan.full_path(info.root, old_rel)
-            new = scan.full_path(info.root, new_rel)
-            name = old_rel.rsplit("/", 1)[-1]
-            if not os.path.exists(scan.long_path(old)):
-                problems.append(f"{name}: no longer there")
-            elif os.path.exists(scan.long_path(new)):
-                problems.append(f"{name}: {new_rel} already exists")
-            elif not os.path.isdir(scan.long_path(os.path.dirname(new))):
-                problems.append(f"{name}: the folder {os.path.dirname(new_rel)} is gone")
-            else:
-                try:
-                    os.rename(scan.long_path(old), scan.long_path(new))
-                except OSError as exc:
-                    problems.append(f"{name}: {exc}")
-                    return
-                # The rename log keeps long paths in their "\?\" form, or
-                # Undo Last Rename couldn't reach them.
-                if max(len(old), len(new)) >= scan.WINDOWS_PATH_LIMIT - 10:
-                    done.append((scan.long_path(old), scan.long_path(new)))
-                else:
-                    done.append((old, new))
-                for row in by_path.pop(old_rel, []):
-                    row.path = new_rel
-
-        # A per-file loop on disk (network shares can be slow): progress, and Cancel
-        # between files -- what was moved so far is still logged for Undo Last Rename.
-        run_with_progress(
-            self, pairs, _move, "Moving and renaming files...", threshold=LOAD_PROGRESS_THRESHOLD,
-            label_for=lambda pair: f"Moving: {pair[0].rsplit('/', 1)[-1]}",
-        )
-        if done:
-            _rename_log().record("Collection Report", done)
-            moved = {os.path.normcase(os.path.abspath(o)): n for o, n in done}
-            for book in self.books:
-                target = moved.get(os.path.normcase(os.path.abspath(str(book.path))))
-                if target:
-                    book.path = target
-            self._rebuild_table()
-            try:
-                run_busy(self, "Saving the scan...", scan.write_scan, zip_path, info, rows)  # keep the report in step
-            except OSError:
-                pass
-        text = f"{len(done)} file(s) moved or renamed. File > Undo Last Rename takes them back." if pairs else ""
-        if intro:
-            text = f"{intro}\n\n{text}" if text else intro
-        if problems:
-            text += f"\n\n{len(problems)} skipped:\n" + "\n".join(problems[:15])
-            if len(problems) > 15:
-                text += f"\n… and {len(problems) - 15} more"
-        QMessageBox.information(self, "Collection Report", text)
+        CollectionReportDialog(info, len(rows), report, self).exec()
 
     def open_find_duplicates_dialog(self) -> None:
         """Operations > Find Duplicates...: the same comic loaded more than
@@ -3557,7 +3382,7 @@ class MainWindow(QMainWindow):
         self._commit_current_edits()
         books = [b for b in self._target_books() if not b.load_error and b.page_names]
         if len(books) < 2:
-            QMessageBox.information(self, "Find Duplicates", "Load (or select) at least two files to compare.")
+            QMessageBox.information(self, "Find Duplicates", "Open (or select) at least two files to compare.")
             return
         sizes = self._ensure_page_sizes(books)
         self._ensure_fingerprints(books)
@@ -3715,7 +3540,7 @@ class MainWindow(QMainWindow):
             f"Convert {len(books)} file(s) to CBZ?\n\n"
             "Each converted file is checked (it opens, and has as many pages "
             f"as the original) before anything else happens. {originals}\n\n"
-            "(Change this in Tools > Conversion Settings...)",
+            "(Change this in Tools > Preferences > Conversion.)",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.Yes,
         )
@@ -3728,9 +3553,6 @@ class MainWindow(QMainWindow):
         from gui.preferences import make_dialog
 
         make_dialog(self).exec()
-
-    def open_conversion_settings_dialog(self) -> None:
-        ConversionSettingsDialog(self).exec()
 
     def open_gcd_local_settings_dialog(self) -> None:
         from gui.gcd_local_settings_dialog import GcdLocalSettingsDialog
@@ -3844,7 +3666,7 @@ class MainWindow(QMainWindow):
                 f"{which} still CBR/CB7/CBT (or not really a ZIP), and this app only edits CBZ files. "
                 "Convert them first: right-click > Convert ... to CBZ, or Repair > Convert to CBZ."
             )
-        return "No Files", "Load some files first" + (f" (or select the ones to {verb})." if verb else ".")
+        return "No Files", "Open some files first" + (f" (or select the ones to {verb})." if verb else ".")
 
     def _tell_no_targets(self, verb: str = "") -> None:
         QMessageBox.information(self, *self._no_targets_message(verb))

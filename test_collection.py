@@ -13,7 +13,7 @@ from PyQt6.QtWidgets import QApplication, QFileDialog, QMessageBox
 
 from core import collection_scan as scan
 from core.collection_names import library_name, number3, parse_file_name, parse_folder_name, series_key
-from core.collection_report import build_report, report_list
+from core.collection_report import build_report, fix_summary, report_list
 
 _app = QApplication.instance() or QApplication(sys.argv)
 
@@ -229,6 +229,16 @@ def test_report_finds_what_is_out_of_place(library):
 
     listed = report_list(report)
     assert {row[0] for row in listed} >= {"Move", "File name", "Duplicate", "Name vs ComicInfo", "Format / missing"}
+    # Report-only: each finding names the app action that fixes it.
+    fix_with = {(row[1], row[3].split(":")[0].split(" —")[0]): row[5] for row in listed if row[0] == "Format / missing"}
+    assert fix_with[("Renamed Zip 001 (Boom, 2020-01).cbr", "named CBR but really ZIP")] == "Repair > Convert to CBZ"
+    assert fix_with[("The Incredible Hulk 103 (Marvel, 1968-05).cbz", "PageCount says 30, the archive has 3 pages")] == \
+        "Repair > Validate and Fix"
+    assert fix_with[("The Incredible Hulk v1 003 (Marvel, 1962-09).cbz", "no ComicInfo.xml")].startswith(
+        "Metadata > Parse Filename")
+    assert {row[5] for row in listed if row[0] == "Move"} == {"File > Rename / Export / Move"}
+    summary = dict(fix_summary(report))
+    assert summary["Repair > Convert to CBZ"] == 1 and summary["File > Rename / Export / Move"] == 4
 
 
 def test_numbered_tpbs_with_titles_are_not_duplicates(tmp_path):
@@ -270,7 +280,24 @@ def test_long_paths_are_flagged(library):
 # The window
 # ---------------------------------------------------------------------------
 
-def test_scan_report_apply_and_undo(library, monkeypatch):
+def _snapshot(root):
+    """Every file under root with its size and contents' hash."""
+    import hashlib
+    found = {}
+    for folder, _dirs, files in os.walk(scan.long_path(root)):
+        for name in files:
+            path = os.path.join(folder, name)
+            with open(path, "rb") as handle:
+                found[os.path.relpath(path, scan.long_path(root))] = hashlib.sha1(handle.read()).hexdigest()
+    return found
+
+
+def test_collection_report_is_report_only(library, monkeypatch):
+    # C1 (2026-10-14): the report no longer applies anything -- no Apply
+    # button, no tickboxes, no Fixes tab; each finding names the app action
+    # that fixes it instead, and no file under the collection changes.
+    from PyQt6.QtWidgets import QDialogButtonBox
+
     from gui import collection_report_dialog
     from gui.main_window import MainWindow, _collection_scan_path
 
@@ -281,30 +308,34 @@ def test_scan_report_apply_and_undo(library, monkeypatch):
     monkeypatch.setattr(MainWindow, "_ask_cover_mode", lambda self, had: "none")
     window.scan_collection_folder()
     assert os.path.exists(_collection_scan_path())
-
+    before = _snapshot(library)
     seen = {}
 
-    def tick_moves(dialog):
-        seen["apply_visible"] = not dialog.apply_button.isHidden()
-        dialog._tick_all(dialog.moves_table, collection_report_dialog.Qt.CheckState.Checked)
+    def look(dialog):
+        Qt = collection_report_dialog.Qt
+        tabs = [dialog.tabs.tabText(i) for i in range(dialog.tabs.count())]
+        seen["fixes_tab"] = any(t.startswith("Fixes") for t in tabs)
+        buttons = dialog.findChild(QDialogButtonBox).buttons()
+        seen["buttons"] = sorted(b.text() for b in buttons)
+        table = dialog.moves_table
+        seen["moves"] = table.rowCount()
+        seen["checkable"] = any(table.item(r, 0).data(Qt.ItemDataRole.CheckStateRole) is not None
+                                for r in range(table.rowCount()))
+        seen["fix_with"] = table.horizontalHeaderItem(table.columnCount() - 1).text()
+        seen["intro"] = dialog.intro.text()
         return dialog.DialogCode.Accepted
 
-    monkeypatch.setattr(collection_report_dialog.CollectionReportDialog, "exec", tick_moves)
+    monkeypatch.setattr(collection_report_dialog.CollectionReportDialog, "exec", look)
     window.open_collection_report()
-    assert seen["apply_visible"]
-    boom = os.path.join(library, *BOOM.split("/"), "3 Guns")
-    assert _exists(boom, "3 Guns 005 (Boom, 2013-12).webp.cbz")
-    assert _exists(library, "Incoming", "3 Guns 002 (Boom, 2013-09).webp.cbz")  # never overwrites
-    _info, rows = scan.read_scan(_collection_scan_path())
-    assert f"{BOOM}/3 Guns/3 Guns 005 (Boom, 2013-12).webp.cbz" in {r.path for r in rows}  # scan kept in step
-
-    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.Yes)
-    window.undo_last_rename()
-    assert _exists(library, "Incoming", "3 Guns 005 (Boom, 2013-12).webp.cbz")
-    assert not _exists(boom, "3 Guns 005 (Boom, 2013-12).webp.cbz")
+    assert not seen["fixes_tab"] and not seen["checkable"]
+    assert seen["buttons"] == ["Close", "Save List..."]
+    assert seen["moves"] == 4 and seen["fix_with"] == "Fix with"
+    assert "changes nothing" in seen["intro"] and "Use Repair &gt; Convert to CBZ on 1 file(s)." in seen["intro"]
+    assert _snapshot(library) == before  # nothing moved, renamed, converted or rewritten
+    assert not hasattr(window, "_apply_collection_changes") and not hasattr(window, "_convert_collection_files")
 
 
-def test_report_elsewhere_is_read_only(library, monkeypatch):
+def test_report_of_a_folder_elsewhere_opens(library, monkeypatch):
     from gui import collection_report_dialog
     from gui.main_window import MainWindow, _collection_scan_path
 
@@ -314,14 +345,12 @@ def test_report_elsewhere_is_read_only(library, monkeypatch):
     seen = {}
 
     def look(dialog):
-        seen["apply_visible"] = not dialog.apply_button.isHidden()
-        seen["checkable"] = bool(dialog._checkable_tables)
         seen["moves"] = dialog.moves_table.rowCount()
         return dialog.DialogCode.Rejected
 
     monkeypatch.setattr(collection_report_dialog.CollectionReportDialog, "exec", look)
     MainWindow().open_collection_report()
-    assert seen == {"apply_visible": False, "checkable": False, "moves": 4}
+    assert seen == {"moves": 4}
 
 
 # ---------------------------------------------------------------------------
@@ -426,129 +455,14 @@ def test_suggested_names_keep_the_title_and_never_rewrite_other_parts(tmp_path):
     assert issue.suggested == "Alpha 004 - Wolves' Wages (Cinebook, 2009-04).cbz"  # its own publisher and date
 
 
-# ---------------------------------------------------------------------------
-# Apply: fixes
-# ---------------------------------------------------------------------------
-
-def test_report_offers_fixes_and_applies_them(library, monkeypatch):
-    from core.collection_fix import KIND_COMICINFO_FROM_NAME, KIND_PAGECOUNT, KIND_RENAME_FROM_COMICINFO, KIND_NEW_COMICINFO
-    from gui import collection_report_dialog
-    from gui.main_window import MainWindow, _collection_scan_path
-
-    info, rows = _scan(library)
-    report = build_report(info, rows)
-    kinds = {(f.path.rsplit("/", 1)[-1], f.kind) for f in report.fixes}
-    assert ("The Incredible Hulk 103 (Marvel, 1968-05).cbz", KIND_PAGECOUNT) in kinds
-    assert ("The Incredible Hulk v1 003 (Marvel, 1962-09).cbz", KIND_NEW_COMICINFO) in kinds
-    odd = "3 Guns 003 (Boom, 2013-10).webp.cbz"  # the name says 003, ComicInfo says 4: either way round
-    assert {(odd, KIND_COMICINFO_FROM_NAME), (odd, KIND_RENAME_FROM_COMICINFO)} <= kinds
-
-    monkeypatch.setattr(QFileDialog, "getExistingDirectory", lambda *a, **k: library)
-    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.No)
-    monkeypatch.setattr(QMessageBox, "information", lambda *a, **k: None)
-    window = MainWindow()
-    monkeypatch.setattr(MainWindow, "_ask_cover_mode", lambda self, had: "none")
-    window.scan_collection_folder()
-    seen = {}
-
-    def tick(dialog):
-        table = dialog.fixes_table
-        Qt = collection_report_dialog.Qt
-        for row in range(table.rowCount()):
-            item = table.item(row, 0)
-            fix = item.data(collection_report_dialog._FIX_ROLE)
-            if fix.kind in (KIND_PAGECOUNT, KIND_NEW_COMICINFO) or (fix.path.endswith(odd) and fix.kind == KIND_COMICINFO_FROM_NAME):
-                item.setCheckState(Qt.CheckState.Checked)
-        for row in range(table.rowCount()):  # ticking the rename alternative unticks the ComicInfo one
-            item = table.item(row, 0)
-            fix = item.data(collection_report_dialog._FIX_ROLE)
-            if fix.path.endswith(odd) and fix.kind == KIND_RENAME_FROM_COMICINFO:
-                item.setCheckState(Qt.CheckState.Checked)
-                break
-        seen["ticked"] = sorted((f.path.rsplit("/", 1)[-1], f.kind) for f in dialog.ticked_fixes())
-        seen["text"] = dialog.apply_button.text()
-        for row in range(table.rowCount()):  # ...and back again: settle it by rewriting ComicInfo
-            item = table.item(row, 0)
-            fix = item.data(collection_report_dialog._FIX_ROLE)
-            if fix.path.endswith(odd) and fix.kind == KIND_COMICINFO_FROM_NAME:
-                item.setCheckState(Qt.CheckState.Checked)
-        return dialog.DialogCode.Accepted
-
-    monkeypatch.setattr(collection_report_dialog.CollectionReportDialog, "exec", tick)
-    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.Yes)
-    window.open_collection_report()
-    assert (odd, KIND_RENAME_FROM_COMICINFO) in seen["ticked"] and (odd, KIND_COMICINFO_FROM_NAME) not in seen["ticked"]
-
-    info2, rows2 = _scan(library)
-    report2 = build_report(info2, rows2)
-    left = {(f.path.rsplit("/", 1)[-1], f.kind) for f in report2.fixes}
-    assert ("The Incredible Hulk 103 (Marvel, 1968-05).cbz", KIND_PAGECOUNT) not in left
-    assert ("The Incredible Hulk v1 003 (Marvel, 1962-09).cbz", KIND_NEW_COMICINFO) not in left
-    assert not [f for f in report2.fixes if f.path.endswith(odd) and f.kind == KIND_COMICINFO_FROM_NAME]
-    hulk = next(r for r in rows2 if r.file == "The Incredible Hulk v1 003 (Marvel, 1962-09).cbz")
-    assert (hulk.comicinfo, hulk.series, hulk.number) == ("yes", "The Incredible Hulk", "3")
-    _saved, saved_rows = scan.read_scan(_collection_scan_path())
-    assert next(r for r in saved_rows if r.file == hulk.file).comicinfo == "yes"  # the saved scan followed the edit
-
-
-def test_fixes_are_read_only_where_the_folder_is_not_present(library, monkeypatch):
-    from gui import collection_report_dialog
-    from gui.main_window import MainWindow, _collection_scan_path
-
-    info, rows = _scan(library)
-    info.root = r"E:\eLib\741.59 - Comic Books" if os.name != "nt" else "/nowhere/741.59 - Comic Books"
-    scan.write_scan(_collection_scan_path(), info, rows)
-    seen = {}
-
-    def look(dialog):
-        item = dialog.fixes_table.item(0, 0)
-        seen["checkable"] = item.data(collection_report_dialog.Qt.ItemDataRole.CheckStateRole) is not None
-        seen["rows"] = dialog.fixes_table.rowCount()
-        return dialog.DialogCode.Rejected
-
-    monkeypatch.setattr(collection_report_dialog.CollectionReportDialog, "exec", look)
-    MainWindow().open_collection_report()
-    assert seen["rows"] > 0 and not seen["checkable"]
-
-
-def test_a_cbt_in_the_collection_is_converted_from_the_fixes_tab(library, monkeypatch):
-    import io
-    import tarfile
-
-    from core.collection_fix import KIND_CONVERT
-    from gui import collection_report_dialog
-    from gui.main_window import MainWindow
-
-    cbt = scan.long_path(os.path.join(library, "Incoming", "Tar Comic 001 (Boom, 2020-03).cbt"))
-    with tarfile.open(cbt, "w") as archive:
-        for page in ("001.jpg", "002.jpg"):
-            entry = tarfile.TarInfo(page)
-            entry.size = 4
-            archive.addfile(entry, io.BytesIO(b"jpeg"))
-    trashed = []
-    monkeypatch.setattr("gui.main_window.move_to_trash", lambda path: (trashed.append(path), os.remove(path)))
-    monkeypatch.setattr(QFileDialog, "getExistingDirectory", lambda *a, **k: library)
-    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.No)
-    monkeypatch.setattr(QMessageBox, "information", lambda *a, **k: None)
-    window = MainWindow()
-    monkeypatch.setattr(MainWindow, "_ask_cover_mode", lambda self, had: "none")
-    window.scan_collection_folder()
-
-    def tick_convert(dialog):
-        table = dialog.fixes_table
-        for row in range(table.rowCount()):
-            item = table.item(row, 0)
-            if item.data(collection_report_dialog._FIX_ROLE).kind == KIND_CONVERT:
-                item.setCheckState(collection_report_dialog.Qt.CheckState.Checked)
-        assert [f.path.rsplit("/", 1)[-1] for f in dialog.ticked_fixes()] == ["Tar Comic 001 (Boom, 2020-03).cbt"]
-        return dialog.DialogCode.Accepted
-
-    monkeypatch.setattr(collection_report_dialog.CollectionReportDialog, "exec", tick_convert)
-    window.open_collection_report()
-    assert _exists(library, "Incoming", "Tar Comic 001 (Boom, 2020-03).cbz") and not _exists(cbt)
-    assert len(trashed) == 1
-    _info, rows = _scan(library)
-    assert next(r for r in rows if r.file == "Tar Comic 001 (Boom, 2020-03).cbz").pages == "2"
+def test_a_cbt_in_the_collection_is_reported_with_convert_to_cbz(tmp_path):
+    # The report used to convert it from a Fixes tab; now it names the action.
+    rows = [scan.ScanRow("Incoming/Tar Comic 001 (Boom, 2020-03).cbt", format="CBT", container="tar", comicinfo="no")]
+    report = build_report(scan.new_info(str(tmp_path), True), rows)
+    assert not hasattr(report, "fixes")
+    fix_with = {row[3].split(" (")[0]: row[5] for row in report_list(report)}
+    assert fix_with["CBT"] == "Repair > Convert to CBZ"
+    assert ("Repair > Convert to CBZ", 1) in fix_summary(report)
 
 
 # ---------------------------------------------------------------------------
@@ -760,7 +674,6 @@ def test_a_date_in_the_name_is_not_an_issue_number_mismatch(tmp_path):
 
 def test_a_big_report_tab_is_filled_only_when_shown(tmp_path):
     from PyQt6.QtWidgets import QApplication
-    from PyQt6.QtCore import Qt
     from gui.collection_report_dialog import CollectionReportDialog
 
     QApplication.instance() or QApplication([])
@@ -768,14 +681,10 @@ def test_a_big_report_tab_is_filled_only_when_shown(tmp_path):
     rows += [scan.ScanRow(f"S/x {i}.cbz", container="zip", pages="5", page_count="9", comicinfo="yes") for i in range(2100)]
     info = scan.new_info(str(tmp_path), True)
     report = build_report(info, rows)
-    dialog = CollectionReportDialog(info, len(rows), report, True)
+    dialog = CollectionReportDialog(info, len(rows), report)
     formats = next(i for i in range(dialog.tabs.count()) if dialog.tabs.tabText(i).startswith("Formats"))
-    table = dialog.tabs.widget(formats).findChild(type(dialog.fixes_table))
+    table = dialog.formats_table
     assert table.rowCount() == 0  # not built yet
     dialog.tabs.setCurrentIndex(formats)
-    assert table.rowCount() == len(report.formats)
-    dialog.tabs.setCurrentIndex(0)
-    dialog._fill_first_tab()
-    assert dialog.fixes_table.rowCount() == len(report.fixes) and len(report.fixes) > 2000
-    dialog._tick_fixes(Qt.CheckState.Checked, "PageCount")
-    assert len(dialog.ticked_fixes()) == 2100
+    assert table.rowCount() == len(report.formats) > 2000
+    assert table.item(0, 3).text() == "Repair > Validate and Fix"
