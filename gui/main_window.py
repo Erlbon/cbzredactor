@@ -70,7 +70,8 @@ from redactor_common.gui.menu_builder import MenuAction, Separator, Submenu
 from redactor_common.gui.overwrite_review_dialog import resolve_overwrite_conflicts
 from redactor_common.gui.parse_filename_dialog import ParseFilenameDialog
 from redactor_common.gui.move_runner import run_planned_moves
-from redactor_common.gui.progress import ProgressReporter, run_with_progress
+from redactor_common.gui.folder_options import attach_include_subfolders, include_subfolders_slot
+from redactor_common.gui.progress import ProgressReporter, run_busy, run_with_progress
 from redactor_common.gui.redact_dialog import (
     RecipeEditorDialog,
     RedactResultsDialog,
@@ -391,19 +392,22 @@ def resource_path(*parts: str) -> str:
     running from source or frozen -- see core.app_paths.asset_path()."""
     return asset_path(*parts)
 
-def comic_files_in_folder(folder: str) -> list[str]:
+def comic_files_in_folder(folder: str, recursive: bool = False) -> list[str]:
     """Every archive this app opens (.cbz, plus CBR/CBT/CB7 offered for
-    conversion) directly inside `folder`, sorted, non-recursive. Shared
-    by Load Folder and Refresh List so the two can't disagree."""
+    conversion) inside `folder`, sorted; the folder's subfolders too when
+    `recursive` (File > Include Subfolders). Shared by Load Folder and
+    Refresh List so the two can't disagree."""
+    wanted = (".cbz",) + FOREIGN_ARCHIVE_EXTENSIONS
+    if recursive:
+        found = []
+        for root, _dirs, files in os.walk(folder):
+            found.extend(os.path.join(root, name) for name in files if name.lower().endswith(wanted))
+        return sorted(found)
     try:
         names = sorted(os.listdir(folder))
     except OSError:
         return []
-    return [
-        os.path.join(folder, name)
-        for name in names
-        if name.lower().endswith((".cbz",) + FOREIGN_ARCHIVE_EXTENSIONS)
-    ]
+    return [os.path.join(folder, name) for name in names if name.lower().endswith(wanted)]
 
 
 def _file_size_bytes(path: str) -> int | None:
@@ -554,6 +558,7 @@ class MainWindow(QMainWindow):
         file_items = standard_file_items(
             open_files=self.load_files_dialog,
             open_folder=self.load_folder_dialog,
+            include_subfolders=include_subfolders_slot(),
             save_as=self.save_current_as,
             save_all=self.save_all_changed,
             rename_file=self.rename_selected_file,
@@ -663,6 +668,9 @@ class MainWindow(QMainWindow):
         )
         build_standard_menu_bar(self, spec)
         registry = get_action_registry(self)
+        attach_include_subfolders(
+            registry["include_subfolders"], load=app_settings.load_include_subfolders, save=app_settings.save_include_subfolders,
+        )
         # Save All is Ctrl+Shift+A (family key); the old Ctrl+S now saves all
         # changed files too, as a secondary shortcut (drop after one release).
         with_aliases(registry["save_all"], "Ctrl+S")
@@ -966,10 +974,13 @@ class MainWindow(QMainWindow):
         if not folder:
             return
         app_settings.save_last_directory(folder)
-        paths = comic_files_in_folder(folder)
+        recursive = app_settings.load_include_subfolders()
+        paths = run_busy(self, "Looking for comic files...", comic_files_in_folder, folder, recursive)
         if not paths:
             QMessageBox.information(
-                self, "No Files Found", "No .cbz, .cbr, .cbt, or .cb7 files were found in that folder."
+                self, "No Files Found",
+                "No .cbz, .cbr, .cbt, or .cb7 files were found in that folder"
+                + (" or its subfolders." if recursive else " (File > Include Subfolders is off)."),
             )
             return
         self._load_paths(paths)
@@ -1973,7 +1984,11 @@ class MainWindow(QMainWindow):
         # for .cbz/.cbr, so a CBT/CB7 dropped into a loaded folder never
         # showed up on refresh.
         existing_paths = [os.path.normpath(book.path) for book in self.books]
-        new_paths = find_new_files_in_loaded_folders(existing_paths, comic_files_in_folder)
+        recursive = app_settings.load_include_subfolders()
+        new_paths = run_busy(
+            self, "Looking for new files...", find_new_files_in_loaded_folders,
+            existing_paths, lambda folder: comic_files_in_folder(folder, recursive),
+        )
         # Files that are gone from disk are dropped; only present ones are shown.
         present_paths = [p for p in existing_paths if os.path.exists(p)]
         removed_count = len(existing_paths) - len(present_paths)

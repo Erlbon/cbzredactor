@@ -257,6 +257,15 @@ def default_comicrack_database_path() -> str:
     return os.path.join(base_dir(), "comicrack_library.db")
 
 
+def load_include_subfolders() -> bool:
+    """File > Include Subfolders: ON unless the user turned it off (the shared setting every Redactor app has)."""
+    return _settings().value("include_subfolders", True, type=bool)
+
+
+def save_include_subfolders(on: bool) -> None:
+    _settings().setValue("include_subfolders", bool(on))
+
+
 def load_last_directory() -> str:
     """Returns "" if nothing's been remembered yet, or the remembered
     directory no longer exists (e.g. a removable drive that's since

@@ -47,7 +47,7 @@ def test_top_level_menus_follow_the_skeleton():
 def test_file_menu_structure():
     menu = _menus(MainWindow())["File"]
     assert _texts(menu) == [
-        "Open Files…", "Open Folder…", "---",
+        "Open Files…", "Open Folder…", "Include Subfolders", "---",
         "Save As…", "Save All", "---",
         "Rename File…", "Undo Last Rename", "Rename / Export / Move…", "Rename / Export / Move Macros", "---",
         "Export Settings…", "Import Settings…", "---",
@@ -300,3 +300,16 @@ def test_save_all_with_nothing_changed_is_a_status_message_not_a_dialog(tmp_path
     monkeypatch.setattr(QMessageBox, "information", lambda *a, **k: (_ for _ in ()).throw(AssertionError("dialog")))
     window.actions_["save_all"].trigger()
     assert "No files have unsaved changes" in window.statusBar().currentMessage()
+
+
+def test_comic_files_in_folder_recursive_flag(tmp_path):
+    import os
+
+    from gui.main_window import comic_files_in_folder
+
+    (tmp_path / "sub").mkdir()
+    for name in ("a.cbz", "b.CBR", "notes.txt", "sub/c.cb7", "sub/d.jpg"):
+        (tmp_path / name).write_text("x")
+    names = lambda ps: [os.path.basename(p) for p in ps]  # noqa: E731
+    assert names(comic_files_in_folder(str(tmp_path))) == ["a.cbz", "b.CBR"]  # default: the folder only
+    assert names(comic_files_in_folder(str(tmp_path), recursive=True)) == ["a.cbz", "b.CBR", "c.cb7"]

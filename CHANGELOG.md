@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-10-13#01 -- Shared Include Subfolders item; Load Folder can look in subfolders; folder scans show progress
+
+- **File > Include Subfolders** is now in this app too (redactor_common's shared item, on by default, remembered). Load Folder and Refresh List follow it: before, Load Folder only ever looked at the files directly in the folder, while the command line (`--no-recurse` to turn it off) always looked in subfolders. Untick it to get the old behaviour.
+- Load Folder and Refresh List scan in the background under a progress dialog; "No Files Found" now says whether subfolders were searched.
+- Requires redactor_common 2026-10-13-02.
+
 ## 2026-10-11#01 -- Manga lookup: AniList + MangaUpdates
 
 - **New: Metadata > Look Up > Manga (AniList + MangaUpdates)...** A manga source that needs no key. Both services describe the SERIES, so every volume gets the same answer (a series is asked about once per batch) and the volume number is never touched. AniList and MangaUpdates are paired by title and start year and merged: series title, summary, start date, genres and best-rated tags, author and artist (as Writer and Penciller), the publisher (the English one when known), the volume count of a finished series, the community rating, Manga = YesAndRightToLeft for Japanese manga, an adults-only age rating where AniList flags it, and the AniList page in Web. Other matching series are under Other Matches, the found cover is shown for confirmation only, and if one service is down the other still answers. Requests are spaced to respect AniList's low limit.
