@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026-10-14#01 -- Redact no longer freezes the window on a slow file
+
+- Redact now runs each file on a worker thread (redactor_common 2026-10-13-06): the window keeps painting and Cancel stays clickable while a big rewrite, a conversion or a lookup is running. Before, the window could freeze for the whole length of one slow file and the Cancel click was only seen between files.
+- Requires redactor_common 2026-10-13-06.
+
 ## 2026-10-13#03 -- Tidy-up: progress everywhere, safer replace, clearer messages
 
 - **Progress dialogs for the slow work that still had none:** Validate and Fix's scan stamping, Find Duplicates' cover reading and Recycle Bin moves, the Collection Report's moves and renames, reading and saving the collection scan file, a single Save or Save As, the Credit Pages thumbnail read, Check File on the GCD / ComicRack databases, writing the GCD comparison's spreadsheets, Test Login, and every Comic Vine request (now with Cancel instead of only a wait cursor). The collection folder listing and the report analysis use the shared busy dialog instead of a hand-rolled one; conversions wait in a real event loop instead of a polling loop.
