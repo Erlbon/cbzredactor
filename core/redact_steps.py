@@ -385,7 +385,8 @@ class ConvertStep(Step):
     description = (
         "Converts a CBR, CB7 or CBT (or a file whose extension doesn't match what it really is) to a real "
         "CBZ, checked before anything else happens. The finished file is saved under the .cbz name and the "
-        "foreign original goes to the Recycle Bin. If Tools > Preferences > Conversion says to always resize "
+        "foreign original ALWAYS goes to the Recycle Bin here (the Convert to CBZ dialog's 'Move the originals "
+        "to the Recycle Bin' checkbox does not apply to Redact). If Tools > Preferences > Conversion says to always resize "
         "pages while converting, the pages are also shrunk in the same pass (Redact never asks). "
         "Needs rarfile + an unrar tool for CBR and py7zr for CB7."
     )

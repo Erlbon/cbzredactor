@@ -44,5 +44,9 @@ def save_with_fallback_prompt(parent, save: Callable[[bool | None], object]) -> 
         return False
     app_settings.save_allow_unencrypted_fallback(True)
     secret_store.set_allow_unencrypted_fallback(True)
-    save(True)
+    try:
+        save(True)
+    except secret_store.SecretStoreUnavailable as exc:  # e.g. the fallback file can't be written
+        QMessageBox.warning(parent, "Couldn't Save", str(exc))
+        return False
     return True

@@ -748,7 +748,7 @@ def test_the_review_tick_box_is_remembered_and_added_to_a_dialog():
     assert mw._add_review_checkbox(QDialog()) is None  # no layout to add it to
 
 
-# -- Rename / Export / Move macros (Ctrl+Alt+1..5) -----------------------------------------------------
+# -- Rename / Export / Move macros (Ctrl+Shift+1..5) -----------------------------------------------------
 
 
 def _macro_window(window, tmp_path):
@@ -763,7 +763,7 @@ def test_a_saved_macro_labels_its_menu_item_and_survives_a_reload(window):
     assert window.actions_["rename_macro_1"].text() == "1: (empty)"
     window._save_rename_macro(0, {"pattern": "%series% %number%", "mode": "rename"})
     assert window.actions_["rename_macro_1"].text() == "1: Rename: %series% %number%"
-    assert window.actions_["rename_macro_1"].shortcut().toString() == "Ctrl+Alt+1"
+    assert window.actions_["rename_macro_1"].shortcut().toString() == "Ctrl+Shift+1"
     assert app_settings.load_rename_macros()[0]["pattern"] == "%series% %number%"
     window._save_rename_macro(0, {})
     assert app_settings.load_rename_macros()[0] == {} and window.actions_["rename_macro_1"].text() == "1: (empty)"

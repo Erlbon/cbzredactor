@@ -417,11 +417,19 @@ class CbzBook:
         fingerprint) into the metadata and marks the book dirty so Save
         writes it. A book that failed to load, needs converting, or whose
         archive can't be fingerprinted gets no stamp (a failed scan never
-        describes the file). Returns whether a stamp was recorded."""
+        describes the file). Returns whether a NEW stamp was recorded: False also when the file already
+        carries this exact result for these exact pages (nothing to write)."""
         if self.load_error or self.needs_conversion or not status:
             return False
         fingerprint = cbz_fingerprint(self.path)
         if not fingerprint:
+            return False
+        current = self.stamp
+        if current is not None and current.status == status and current.fingerprint == fingerprint:
+            # The file already carries this exact result for these exact pages: re-stamping would only
+            # change the time and make Save rewrite the archive for nothing (thousands of them after a
+            # Validate / Fix Issues over a library).
+            self.stamp_stale = False
             return False
         self.metadata.scan_stamp = make_stamp(status, fingerprint).to_text()
         self.stamp_stale = False

@@ -49,6 +49,7 @@ from redactor_common.gui.async_icon_cache import AsyncIconCache, IdentityWeakDic
 from redactor_common.gui.async_preview import AsyncPreviewLoader
 from redactor_common.gui.background_call import call_in_background
 from redactor_common.gui.visible_rows import VisibleRowsWatcher
+from redactor_common.core.rename_pattern import unique_path
 from redactor_common.core.folder_refresh import find_new_files_in_loaded_folders
 from redactor_common.core.undo import UndoManager
 from redactor_common.gui.about_dialog import AboutDialog, ChangelogDialog, CreditsDialog
@@ -574,7 +575,7 @@ class MainWindow(QMainWindow):
             extra_rename=[Submenu("Rename / Export / Move Macros", [
                 MenuAction(
                     f"rename_macro_{slot + 1}", f"{slot + 1}: (empty)",
-                    lambda n=slot: self.run_rename_macro(n), shortcut=f"Ctrl+Alt+{slot + 1}",
+                    lambda n=slot: self.run_rename_macro(n), shortcut=f"Ctrl+Shift+{slot + 1}",
                 )
                 for slot in range(app_settings.RENAME_MACRO_SLOTS)
             ])],
@@ -2086,7 +2087,7 @@ class MainWindow(QMainWindow):
         app_settings.save_rename_macro(slot, state)
         self._refresh_macro_actions()
         self.statusBar().showMessage(
-            f"Macro {slot + 1} {'saved' if state else 'cleared'} (Ctrl+Alt+{slot + 1}).", 6000
+            f"Macro {slot + 1} {'saved' if state else 'cleared'} (Ctrl+Shift+{slot + 1}).", 6000
         )
 
     def _refresh_macro_actions(self) -> None:
@@ -2097,7 +2098,7 @@ class MainWindow(QMainWindow):
                 action.setToolTip(label or "Empty: save one from Rename / Export / Move > Save as Macro.")
 
     def run_rename_macro(self, slot: int) -> None:
-        """Ctrl+Alt+1..5: runs macro `slot` straight on the selected files (never on the whole
+        """Ctrl+Shift+1..5: runs macro `slot` straight on the selected files (never on the whole
         list), with no dialog: the saved pattern, action and options go through the very same
         planning and execution as the Rename / Export / Move window."""
         state = app_settings.load_rename_macros()[slot]
@@ -2389,22 +2390,35 @@ class MainWindow(QMainWindow):
         self._push_undo("Search & Replace", target_books)
         errors: list[str] = []
         renamed: list[tuple[str, str]] = []
-        for index, new_value in changes.items():
-            book = target_books[index]
-            if field_key == FILENAME_FIELD_KEY:
+        if field_key == FILENAME_FIELD_KEY:
+            # Physical renames, like epubredactor's: under a progress dialog, and a name that is already
+            # on disk or claimed earlier in this batch gets " (2)" instead of failing or clobbering.
+            taken: set[str] = set()
+
+            def _rename(item: tuple[int, str], _n: int) -> None:
+                book = target_books[item[0]]
                 old_path = book.path
-                ext = os.path.splitext(old_path)[1]
-                new_path = os.path.join(os.path.dirname(old_path), new_value + ext)
+                stem, ext = os.path.splitext(item[1])
                 try:
+                    new_path = unique_path(os.path.dirname(old_path), stem, ext or os.path.splitext(old_path)[1], taken, own_path=old_path)
                     os.rename(old_path, new_path)
                     book.path = new_path
                     renamed.append((old_path, new_path))
+                    taken.add(os.path.normcase(os.path.abspath(new_path)))
                 except OSError as exc:
                     errors.append(f"{os.path.basename(old_path)}: {exc}")
-            else:
+                self._refresh_edited_row(book)
+
+            run_with_progress(
+                self, list(changes.items()), _rename, "Renaming files...", threshold=LOAD_PROGRESS_THRESHOLD,
+                label_for=lambda item: f"Renaming: {os.path.basename(target_books[item[0]].path)}",
+            )
+        else:
+            for index, new_value in changes.items():
+                book = target_books[index]
                 setattr(book.metadata, field_key, new_value)
                 book.dirty = True
-            self._refresh_edited_row(book)
+                self._refresh_edited_row(book)
         _rename_log().record("Search/Replace (filename)", renamed)
 
         if errors:
@@ -3399,8 +3413,9 @@ class MainWindow(QMainWindow):
                                   failed: set[str]) -> None:
         """Convert to CBZ for the ticked CBR/CB7/CBT rows: converted and
         verified by _convert_path() (a mislabeled .cbz is relabeled first),
-        original to the Recycle Bin, and the scan row swapped for the new
-        file's. A file whose .cbz name is taken is skipped and reported."""
+        original ALWAYS to the Recycle Bin (the Convert to CBZ dialog's
+        checkbox is not consulted here), and the scan row swapped for the
+        new file's. A file whose .cbz name is taken is skipped and reported."""
         from core import collection_scan as scan
 
         errors: list[str] = []
@@ -3424,7 +3439,8 @@ class MainWindow(QMainWindow):
                 index[new_rel] = index.pop(fix.path)
 
         finished = self._run_conversions(conversions, _convert, lambda fix: f"Converting: {fix.path.rsplit('/', 1)[-1]}")
-        summary.append(f"{converted} file(s) converted to CBZ; originals are in the Recycle Bin."
+        summary.append(f"{converted} file(s) converted to CBZ; the originals are in the Recycle Bin (always, for this "
+                       "scan: the Convert to CBZ checkbox does not apply here)."
                        + ("" if finished else " Stopped before the rest."))
         if errors:
             summary.append(f"{len(errors)} not converted:\n" + "\n".join(errors[:10]))

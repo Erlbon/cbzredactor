@@ -1,5 +1,14 @@
 # Changelog
 
+## 2026-10-13#02 -- Macros move to Ctrl+Shift+1..5; review fixes (A12, A14, A15b, A15d)
+
+- **Rename / Export / Move macros are now Ctrl+Shift+1 to Ctrl+Shift+5.** Ctrl+Alt+1..5 was AltGr+1..5 on a Norwegian (and other European) keyboard, so typing characters could run a macro by accident. redactor_common's menu lint now rejects every Ctrl+Alt shortcut.
+- **Search/Replace on filenames** now renames under a progress dialog and never clobbers: a name already on disk, or claimed earlier in the same batch, becomes "Name (2)" instead of failing or overwriting.
+- **Validate / Fix Issues no longer make thousands of files "unsaved":** a check that finds the same result for the same pages leaves the existing stamp alone, so Save All does not rewrite those archives for nothing.
+- Saving an API secret when the fallback file cannot be written now shows a message instead of an uncaught error.
+- Redact's Convert step and the collection scan's Convert text now say what really happens: the original ALWAYS goes to the Recycle Bin there (the "Move the originals to the Recycle Bin" checkbox belongs to the Convert to CBZ dialog only).
+- Requires redactor_common 2026-10-13-05.
+
 ## 2026-10-13#01 -- Shared Include Subfolders item; Load Folder can look in subfolders; folder scans show progress
 
 - **File > Include Subfolders** is now in this app too (redactor_common's shared item, on by default, remembered). Load Folder and Refresh List follow it: before, Load Folder only ever looked at the files directly in the folder, while the command line (`--no-recurse` to turn it off) always looked in subfolders. Untick it to get the old behaviour.
