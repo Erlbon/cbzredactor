@@ -2,6 +2,7 @@
 CbzBook.clean_contents, the dialog and the window flow) and the
 numeric-aware page order it relies on (cbz_file.page_sort_key)."""
 
+import os
 import sys
 import zipfile
 
@@ -77,7 +78,7 @@ def test_clean_contents_keeps_pages_order_and_comicinfo(tmp_path):
     book = CbzBook(path)
     trashed = []
     plan = book.clean_contents(dispose_original=trashed.append)
-    assert plan.needed and trashed == [path]
+    assert plan.needed and trashed == [str(tmp_path / "x.redact-orig.cbz")]  # the set-aside original
     with zipfile.ZipFile(path) as zf:
         assert zf.namelist() == ["001.jpg", "002.jpg", "003.jpg", "ComicInfo.xml"]  # stored in reading order
         assert [zf.read(n) for n in ("001.jpg", "002.jpg", "003.jpg")] == [b"page 1", b"page 2", b"page 10"]
@@ -155,6 +156,6 @@ def test_window_reviews_then_cleans_the_ticked_files(window, tmp_path, monkeypat
     window._selected_rows = []
     window.open_clean_contents_dialog()
     assert offered["rows"] == 2  # the clean file isn't offered
-    assert window.trashed == [scene]
+    assert window.trashed == [os.path.splitext(scene)[0] + ".redact-orig.cbz"]
     assert zipfile.ZipFile(scene).namelist()[0] == "001.jpg"
     assert zipfile.ZipFile(also).namelist()[0].startswith(SCENE)  # unticked: untouched

@@ -35,7 +35,7 @@ def _make(path, comment=b"", pages=("001.jpg", "002.jpg")) -> str:
 
 @pytest.fixture(autouse=True)
 def _fast_retries(monkeypatch):
-    monkeypatch.setattr(zip_rewrite, "_REPLACE_DELAY", 0)  # the retry loop lives in core/zip_rewrite.py
+    monkeypatch.setattr(zip_rewrite, "_LOCK_RETRY", {"delay": 0})  # the retry lives in core/zip_rewrite.py
 
 
 def _tmp_files(tmp_path):
@@ -128,26 +128,23 @@ def test_decompression_bomb_page_counts_as_failed(tmp_path, monkeypatch):
     assert _tmp_files(tmp_path) == []
 
 
-def test_replace_failure_after_dispose_keeps_temp_and_names_it(tmp_path, monkeypatch):
+def test_replace_failure_keeps_the_original_and_never_trashes_it(tmp_path, monkeypatch):
+    # T7: the original used to be trashed before the replace was tried.
     path = _make(tmp_path / "a.cbz", pages=("001.jpg", "002.jpg", "003.jpg"))
     book = CbzBook(path)
-
-    def trash(p):
-        os.remove(p)  # what the Recycle Bin does to the original
+    trashed = []
 
     def fail_replace(a, b):
         raise PermissionError("locked")
 
     monkeypatch.setattr(cbz_file.os, "replace", fail_replace)
-    with pytest.raises(CbzError) as info:
-        book.remove_pages(["003.jpg"], dispose_original=trash)
+    with pytest.raises(CbzError):
+        book.remove_pages(["003.jpg"], dispose_original=trashed.append)
     monkeypatch.undo()
-    kept = path + ".tmp_pages"
-    assert kept in str(info.value)
-    assert os.path.exists(kept)
-    assert CbzBook.__name__  # temp is a complete CBZ
-    with zipfile.ZipFile(kept) as zf:
-        assert "003.jpg" not in zf.namelist()
+    assert trashed == [] and _tmp_files(tmp_path) == []
+    assert sorted(os.listdir(tmp_path)) == ["a.cbz"]
+    with zipfile.ZipFile(path) as zf:
+        assert "003.jpg" in zf.namelist()
 
 
 def test_replace_failure_without_dispose_still_removes_temp(tmp_path, monkeypatch):

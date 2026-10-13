@@ -132,7 +132,7 @@ def test_remove_pages_rewrites_archive_and_renumbers_pages(tmp_path):
 
     removed = book.remove_pages(["001.jpg", "003.jpg"], dispose_original=disposed.append)
 
-    assert removed == 2 and disposed == [path]
+    assert removed == 2 and disposed == [str(tmp_path / "b.redact-orig.cbz")]  # the set-aside original
     assert book.page_names == ["000.jpg", "002.jpg"]
     with zipfile.ZipFile(path) as zf:
         assert sorted(n for n in zf.namelist() if n.endswith(".jpg")) == ["000.jpg", "002.jpg"]

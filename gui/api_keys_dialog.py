@@ -8,17 +8,16 @@ redactor_common's secret store (OS credential store, or an opt-in
 unencrypted file), never in the settings file; the GCD username is kept in
 the settings file (gui/app_settings.py).
 
-The single-purpose dialogs (gui/comicvine_key_dialog.py, which the Comic
-Vine lookup still opens when no key is stored yet, and
-gui/gcd_account_dialog.py) are unchanged; this one has the same fields
-and the same save rules, so the two ways in agree.
+The single-purpose gui/comicvine_key_dialog.py (which the Comic Vine lookup
+still opens when no key is stored yet) has the same field and save rules, so
+the two ways in agree. (The old single-purpose GCD account dialog was no
+longer opened from anywhere and is gone; this is the one place for it.)
 """
 
 from __future__ import annotations
 
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
-    QApplication,
     QDialog,
     QDialogButtonBox,
     QFormLayout,
@@ -32,9 +31,11 @@ from PyQt6.QtWidgets import (
 
 from core.gcd_lookup import GcdAuthError, GcdLookupError, check_login
 from gui import app_settings
-from gui.gcd_account_dialog import GCD_SITE_URL
 from gui.secret_prompts import save_with_fallback_prompt
+from redactor_common.gui.progress import run_busy
 from redactor_common.gui.secret_field import SecretField
+
+GCD_SITE_URL = "https://www.comics.org/"
 
 
 class ApiKeysDialog(QDialog):
@@ -106,18 +107,22 @@ class ApiKeysDialog(QDialog):
         if not username or not password:
             QMessageBox.information(self, "Test Login", "Enter a username and password first.")
             return
-        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        # A network round trip: off the GUI thread, under a busy dialog with Cancel
+        # (it used to block the window behind a wait cursor).
+        cancelled = object()
         try:
-            check_login(username, password)
+            outcome = run_busy(
+                self, "Checking the login with comics.org...", check_login, username, password,
+                cancellable=True, title="Test Login", on_cancel=cancelled,
+            )
         except GcdAuthError:
-            QApplication.restoreOverrideCursor()
             QMessageBox.warning(self, "Test Login", "GCD didn't accept that username/password.")
             return
         except GcdLookupError as exc:
-            QApplication.restoreOverrideCursor()
             QMessageBox.warning(self, "Test Login", f"Couldn't check the login: {exc}")
             return
-        QApplication.restoreOverrideCursor()
+        if outcome is cancelled:
+            return
         QMessageBox.information(self, "Test Login", "Login accepted.")
 
     def _remove_account(self) -> None:

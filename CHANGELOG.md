@@ -1,5 +1,18 @@
 # Changelog
 
+## 2026-10-13#03 -- Tidy-up: progress everywhere, safer replace, clearer messages
+
+- **Progress dialogs for the slow work that still had none:** Validate and Fix's scan stamping, Find Duplicates' cover reading and Recycle Bin moves, the Collection Report's moves and renames, reading and saving the collection scan file, a single Save or Save As, the Credit Pages thumbnail read, Check File on the GCD / ComicRack databases, writing the GCD comparison's spreadsheets, Test Login, and every Comic Vine request (now with Cancel instead of only a wait cursor). The collection folder listing and the report analysis use the shared busy dialog instead of a hand-rolled one; conversions wait in a real event loop instead of a polling loop.
+- **Replacing an original is safer:** Remove Credit Pages, Clean Up Archive Contents and Resize Images in place now set the original aside (`name.redact-orig.cbz`) until the new file has taken its name, and only then send it to the Recycle Bin; before, the original went to the bin first. A refused Recycle Bin still changes nothing. The replace now also rides out a sharing violation from a virus scanner or sync client (Windows error 32/33), not only "access denied".
+- **Redact's Rename step is off by default**, like Move into folders (it used to switch itself on as soon as any rename pattern was saved). A recipe you saved keeps your choice; tick it in Edit > Edit Redact Recipe.
+- **Remove from List asks first** when a removed file has unsaved edits.
+- Commands on a selection of only CBR/CB7/CBT rows now say to Convert to CBZ first instead of "Load some files first".
+- Commands that could not act said nothing; they now say why in the status bar: F2 with no row or several rows selected, Remove from List / Clear List / Refresh List with nothing to act on, a macro on unconverted rows, Number Issues and Credit Pages without a usable selection.
+- **Conversion settings:** the convert-on-load question's "remember" box now remembers ONLY whether to convert (never the Recycle Bin or resize choices); the resize question's box says exactly what it stores (Resize While Converting = Always resize, lossy) and the status bar confirms it. Tools > Conversion Settings now shows the same three settings, with the same labels, as Tools > Preferences > Conversion.
+- A hand-edited settings file with a non-number in a Resize or padding setting no longer crashes the Resize / Rename dialogs; the default is used.
+- Removed: two unreachable dialogs (the old single-purpose GCD account dialog -- Tools > API Keys is the place -- and an unused Comic Vine key entry), the stale "v0.1 Initial Scaffold" label in About, and two stray test copies of Saga in the repository.
+- Docs: the README lists the real menus and shortcuts (File > Include Subfolders, macros on Ctrl+Shift+1..5), and README / ABOUT no longer claim the app never touches page images or converts CBR on import.
+
 ## 2026-10-13#02 -- Macros move to Ctrl+Shift+1..5; review fixes (A12, A14, A15b, A15d)
 
 - **Rename / Export / Move macros are now Ctrl+Shift+1 to Ctrl+Shift+5.** Ctrl+Alt+1..5 was AltGr+1..5 on a Norwegian (and other European) keyboard, so typing characters could run a macro by accident. redactor_common's menu lint now rejects every Ctrl+Alt shortcut.

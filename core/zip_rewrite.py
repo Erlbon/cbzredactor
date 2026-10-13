@@ -11,15 +11,14 @@ hold for every rewrite now lives here, once:
 - the source is never written to: the new archive goes to a temp file
   beside the destination, is checked, and only then replaces the
   destination (os.replace, retried briefly when another reader holds the
-  file open);
+  file open); when the original goes to the Recycle Bin it is first renamed
+  aside, so it exists under some name until the new file is in place;
 - every entry's ZIP metadata is carried over (timestamp, compression,
   attributes, creating system, entry comment, and the extra fields that
   stay valid), and so is the archive comment unless the caller replaces it;
 - the temp file is removed on EVERY failure (a bad archive, an encrypted or
   unsupported-compression entry, a full disk, a caller's own exception, a
-  cancel) -- except when the original was already sent to the Recycle Bin
-  and the replace then failed: the temp is then the only full copy, so it
-  is kept and the error names it;
+  cancel, a refused Recycle Bin);
 - the zip library's many failure types all surface as CbzError.
 
 The caller describes the rewrite with a RewritePlan: a per-entry decision
@@ -39,6 +38,7 @@ from collections import deque
 from dataclasses import dataclass, field
 from typing import Callable, Optional, Union
 
+from redactor_common.core.os_utils import replace_with_retry, retry_on_lock
 from redactor_common.core.save_errors import describe_save_error
 
 from core.zip_names import RawNameInfo, legacy_raw_name, open_zip, raw_names_supported
@@ -80,56 +80,84 @@ class RewriteCancelled(CbzError):
 
 # --- committing the temp file ------------------------------------------------
 
-_REPLACE_ATTEMPTS = 5
-_REPLACE_DELAY = 0.1  # seconds between attempts
+# Keyword arguments for redactor_common's retry_on_lock (tests set the delay to 0).
+_LOCK_RETRY: dict = {}
 
 
 def _replace(tmp_path: str, path: str) -> None:
-    """os.replace, retried briefly on PermissionError: on Windows another
-    reader holding the file open for a moment (the app's own cover and
-    page-size scans, a virus scanner) fails the rename, where the old
-    shutil.move silently fell back to copying over it."""
-    for attempt in range(_REPLACE_ATTEMPTS):
-        try:
-            os.replace(tmp_path, path)
-            return
-        except PermissionError:
-            if attempt == _REPLACE_ATTEMPTS - 1:
-                raise
-            time.sleep(_REPLACE_DELAY)
+    """os.replace, retried through a transient Windows lock (PermissionError
+    or winerror 5/32/33: the app's own cover and page-size scans, a virus
+    scanner, the indexer, a sync client)."""
+    replace_with_retry(tmp_path, path, **_LOCK_RETRY)
 
 
-class _ReplaceFailedAfterDispose(OSError):
-    """The original was already sent to the Recycle Bin when the rewritten
-    file failed to replace it; the rewrite is still at `tmp_path`."""
+def _rename(src: str, dst: str) -> None:
+    retry_on_lock(os.rename, src, dst, **_LOCK_RETRY)
 
-    def __init__(self, tmp_path: str, cause: BaseException):
-        super().__init__(
-            f"the original is in the Recycle Bin and the rewritten copy was kept at "
-            f"{tmp_path} ({describe_save_error(cause)})"
-        )
-        self.tmp_path = tmp_path
+
+def backup_name(path: str) -> str:
+    """`<stem>.redact-orig<ext>` beside `path` (numbered if taken): where the
+    original waits while the rewritten file takes its name -- the same
+    sibling redactor_common's commit_in_place uses."""
+    stem, ext = os.path.splitext(path)
+    candidate = f"{stem}.redact-orig{ext}"
+    n = 1
+    while os.path.lexists(candidate):
+        n += 1
+        candidate = f"{stem}.redact-orig{n}{ext}"
+    return candidate
+
+
+class _OriginalKeptAside(OSError):
+    """Putting the original back failed after a later step failed; it is
+    safe under its `.redact-orig` name, which the message gives."""
 
 
 def _dispose_then_replace(dispose_original, tmp_path: str, path: str) -> None:
-    """`dispose_original(path)` (Recycle Bin) then os.replace(tmp, path).
-    If the replace fails after the original is gone, the temp file is the
-    only full copy: it is kept, and the error names it."""
-    if dispose_original is not None:
-        dispose_original(path)
+    """Puts `tmp_path` in place of `path` and hands the original to
+    `dispose_original` (the Recycle Bin), never leaving the original
+    without a name on disk until the new file is in place:
+
+      1. rename the original aside to `<stem>.redact-orig<ext>`;
+      2. os.replace(tmp, path) -- on failure the original is renamed back;
+      3. dispose_original(<the .redact-orig file>) -- on failure the
+         original is put back over the new file, so a refused Recycle Bin
+         still means "nothing was changed", as before.
+
+    A dispose that returns but leaves the sibling behind (a bin that did not
+    take it) keeps it: a doubtful trash never becomes a delete.
+    (commit_in_place itself does not fit: it keeps the new file when the
+    trash fails, where this app's callers promise nothing changed.)"""
+    if dispose_original is None or not os.path.exists(path):
+        _replace(tmp_path, path)
+        return
+    backup = backup_name(path)
+    _rename(path, backup)
     try:
         _replace(tmp_path, path)
-    except OSError as exc:
-        if dispose_original is not None and not os.path.exists(path):
-            raise _ReplaceFailedAfterDispose(tmp_path, exc) from exc
+    except BaseException as exc:
+        _restore(backup, path, exc)
+        raise
+    try:
+        dispose_original(backup)
+    except BaseException as exc:
+        _restore(backup, path, exc, replace=True)
         raise
 
 
+def _restore(backup: str, path: str, cause: BaseException, replace: bool = False) -> None:
+    try:
+        (_replace if replace else _rename)(backup, path)
+    except OSError as rb_exc:
+        raise _OriginalKeptAside(
+            f"{describe_save_error(cause)}, and putting the original back failed "
+            f"({describe_save_error(rb_exc)}): your original is safe at {backup}"
+        ) from cause
+
+
 def _discard_temp(exc: BaseException, tmp_path: str) -> None:
-    """Removes a rewriter's temp file after a failure -- except when it
-    holds the only remaining copy (see _ReplaceFailedAfterDispose)."""
-    if isinstance(exc, _ReplaceFailedAfterDispose):
-        return
+    """Removes a rewriter's temp file after a failure (it is never the only
+    copy: the original is still on disk under its own or its backup name)."""
     try:
         os.remove(tmp_path)
     except OSError:
@@ -292,9 +320,11 @@ def rewrite_archive(
 
     The output is built at `dst_path + temp_suffix`, checked (entry count,
     plus whatever the plan asks for), and only then moved over `dst_path`.
-    `dispose_original(path)` runs on the destination just before that move
-    (the GUI passes "move to the Recycle Bin"); if it raises, nothing is
-    replaced. `progress(done, total)` follows each source entry;
+    With `dispose_original` (the GUI passes "move to the Recycle Bin") the
+    existing destination is renamed aside to `<stem>.redact-orig<ext>`, the
+    new file takes its name, and only then is dispose_original called on
+    the renamed original; if it raises, the original is put back and
+    nothing is replaced. `progress(done, total)` follows each source entry;
     `should_cancel()` is polled before each entry is written.
 
     Raises RewriteError (a CbzError, message starting with `error_prefix`)

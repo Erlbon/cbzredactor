@@ -138,8 +138,15 @@ def test_default_enabled_states(env):
         "tag_low_res": True,
         "rename": False, "move_into_folders": False,
     }
+    # T1: a saved rename pattern no longer switches the step on by itself...
     env.pattern_history = ["%series% %number%"]
-    assert {s.key: s.default_enabled for s in build_catalogue(env)}["rename"] is True
+    steps = build_catalogue(env)
+    rename = next(s for s in steps if s.key == "rename")
+    assert rename.default_enabled is False and "Edit Redact Recipe" in rename.description
+    # ...and a recipe the user saved with it ticked keeps it ticked.
+    saved = Recipe(order=[s.key for s in steps], enabled={"rename": True})
+    assert "rename" in [s.key for s, _ in saved.resolve(steps)]
+    assert "rename" not in [s.key for s, _ in Recipe(order=[s.key for s in steps]).resolve(steps)]
 
 
 def test_rename_and_move_are_pinned_last_and_guard_first(env):
@@ -524,7 +531,7 @@ def test_rename_runs_after_the_save_and_is_logged(env, tmp_path):
     env.pattern_history = ["%series% %number%"]
     path = _cbz(tmp_path / "old name.cbz", extra=[("Thumbs.db", b"x")])
     book = CbzBook(path)
-    entry = _only(_run(env, [book], _recipe(env, disable=("filename_tags",))))
+    entry = _only(_run(env, [book], _recipe(env, enable=("rename",), disable=("filename_tags",))))
     new = str(tmp_path / "Saga 1.cbz")
     assert entry.status is FileStatus.CHANGED and book.path == new and os.path.exists(new)
     assert not os.path.exists(path) and book.metadata.series == "Saga"
@@ -538,7 +545,7 @@ def test_rename_alone_does_not_rewrite_the_archive(env, tmp_path):
     path = _cbz(tmp_path / "old name.cbz")
     original = open(path, "rb").read()
     book = CbzBook(path)
-    entry = _only(_run(env, [book], _recipe(env, disable=("filename_tags",))))
+    entry = _only(_run(env, [book], _recipe(env, enable=("rename",), disable=("filename_tags",))))
     assert entry.status is FileStatus.CHANGED and env.bin == []
     assert open(book.path, "rb").read() == original
 
@@ -547,7 +554,7 @@ def test_rename_numbers_a_collision_instead_of_overwriting(env, tmp_path):
     env.pattern_history = ["%series% %number%"]
     taken = _cbz(tmp_path / "Saga 1.cbz", comicinfo=b"<ComicInfo><Title>other</Title></ComicInfo>")
     book = CbzBook(_cbz(tmp_path / "old.cbz"))
-    _only(_run(env, [book], _recipe(env, disable=("filename_tags",))))
+    _only(_run(env, [book], _recipe(env, enable=("rename",), disable=("filename_tags",))))
     assert os.path.basename(book.path) == "Saga 1 (2).cbz" and CbzBook(taken).metadata.title == "other"
 
 
@@ -731,10 +738,12 @@ def test_pattern_preview_uses_the_first_book_or_a_builtin_sample(env):
 def test_stored_pattern_wins_and_empty_follows(env, tmp_path):
     env.pattern_history = ["%series% %number%"]
     stored = CbzBook(_cbz(tmp_path / "a.cbz"))
-    _only(_run(env, [stored], _recipe(env, disable=("filename_tags",), options={"rename": {"pattern": "%series%-x"}})))
+    _only(_run(env, [stored], _recipe(
+        env, enable=("rename",), disable=("filename_tags",), options={"rename": {"pattern": "%series%-x"}},
+    )))
     assert os.path.basename(stored.path) == "Saga-x.cbz"  # the stored pattern, not the history's
     follow = CbzBook(_cbz(tmp_path / "b.cbz"))
-    _only(_run(env, [follow], _recipe(env, disable=("filename_tags",))))
+    _only(_run(env, [follow], _recipe(env, enable=("rename",), disable=("filename_tags",))))
     assert os.path.basename(follow.path) == "Saga 1.cbz"
 
 
@@ -748,6 +757,7 @@ def test_pinned_pattern_ignores_a_later_history_change(env, tmp_path):
     env.pattern_history = ["%publisher% %year%", "%series% %number%"]  # the user later saves another pattern
     book = CbzBook(_cbz(tmp_path / "old.cbz"))
     stored.enabled["filename_tags"] = False
+    stored.enabled["rename"] = True
     _only(_run(env, [book], stored))
     assert os.path.basename(book.path) == "Saga 1.cbz"
     # an empty pin (Use fallback) follows the history again

@@ -932,10 +932,13 @@ class RenameStep(Step):
     description = (
         "Renames the saved file with a pattern, without overwriting anything; logged for File > Undo Last "
         "Rename. Leave the pattern blank to use the newest saved Rename / Export pattern without a '/'. It "
-        "runs after the file is saved and before Move into folders. On only once such a pattern exists."
+        "runs after the file is saved and before Move into folders. Off by default, like Move into folders: "
+        "to turn it on, tick it here in Edit > Edit Redact Recipe (a recipe you saved keeps your choice)."
     )
+    default_enabled = False  # renames files: only when the user ticks it
+
     def __init__(self, env: RedactEnv | None = None):
-        super().__init__(default_enabled=bool(env and env.rename_pattern()))
+        super().__init__()
         self.options = (_pattern_option(
             env, label="Pattern", tooltip="e.g. %series% %number% - %title%", kind="name",
             fallback=lambda: env.rename_pattern() if env else "",
@@ -1138,8 +1141,8 @@ FINALIZE_LABEL = "Save"
 def build_catalogue(env: RedactEnv | None = None) -> list[Step]:
     """The steps the recipe editor offers, in default order: structure
     first (convert, cleanup, pages, resize), then metadata (path, filename,
-    lookup, fixes, tag), then the two pinned-last steps. `env` decides
-    whether Rename starts enabled (only once a pattern exists)."""
+    lookup, fixes, tag), then the two pinned-last steps (Rename and Move,
+    both off until the user ticks them). `env` supplies the patterns."""
     return [
         ConvertStep(),
         CleanContentsStep(),

@@ -1,10 +1,15 @@
 """
 gui/conversion_settings_dialog.py
 
-Settings > Converting to CBZ... -- what happens when Load Files/Load
-Folder meets a file that isn't a real CBZ (CBR/CBT/CB7, or a
-mislabeled archive), and whether converted originals are moved to the
-Recycle Bin. Both are stored via gui/app_settings.py.
+Tools > Conversion Settings... -- the same three settings as Tools >
+Preferences > Conversion, shown with the same labels and read from / written
+to the same gui/app_settings.py storage (the controls are built from
+gui/preferences.py's Conversion page, so the two can never disagree):
+
+- what happens when Load Files/Load Folder meets a file that isn't a real
+  CBZ (CBR/CBT/CB7, or a mislabeled archive);
+- whether converted originals are moved to the Recycle Bin;
+- whether a conversion also resizes the pages (Ask / Always / Never).
 """
 
 from __future__ import annotations
@@ -21,75 +26,76 @@ from PyQt6.QtWidgets import (
 )
 
 from gui import app_settings
+from gui import preferences
 
-_BEHAVIOR_CHOICES = [
-    (
-        app_settings.FOREIGN_LOAD_UNCONVERTED,
-        "Add to the list unconverted (recommended)",
-        "Listed as greyed, read-only rows. Sort by Ext, select, then "
-        "right-click > Convert to CBZ. Nothing is written until you ask.",
-    ),
-    (
-        app_settings.FOREIGN_LOAD_CONVERT,
-        "Convert automatically",
-        "Converted while loading, without asking.",
-    ),
-    (
-        app_settings.FOREIGN_LOAD_ASK,
-        "Ask each time",
-        "One prompt per load: Convert Now, Add Unconverted, or Skip.",
-    ),
-]
+
+def _conversion_specs() -> dict:
+    section = next(s for s in preferences.preference_sections() if s.key == "conversion")
+    return {spec.key: spec for spec in section.specs}
+
+
+def _hint(text: str, indent: bool = False) -> QLabel:
+    label = QLabel(text)
+    label.setWordWrap(True)
+    label.setStyleSheet("font-size: 11px;" + (" margin-left: 22px; margin-bottom: 4px;" if indent else ""))
+    return label
 
 
 class ConversionSettingsDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Converting to CBZ")
+        self.setWindowTitle("Conversion Settings")
         self.setMinimumWidth(460)
         outer = QVBoxLayout(self)
+        specs = _conversion_specs()
 
-        behavior_box = QGroupBox("When loading CBR/CBT/CB7 (or mislabeled) files")
-        behavior_layout = QVBoxLayout(behavior_box)
-        self._group = QButtonGroup(self)
-        self._radios: dict[str, QRadioButton] = {}
-        current = app_settings.load_foreign_load_behavior()
-        for key, label, help_text in _BEHAVIOR_CHOICES:
-            radio = QRadioButton(label)
-            radio.setChecked(key == current)
-            self._group.addButton(radio)
-            self._radios[key] = radio
-            behavior_layout.addWidget(radio)
-            hint = QLabel(help_text)
-            hint.setWordWrap(True)
-            hint.setStyleSheet("font-size: 11px; margin-left: 22px; margin-bottom: 4px;")
-            behavior_layout.addWidget(hint)
-        outer.addWidget(behavior_box)
+        self._group, self._radios = self._choice_box(
+            outer, specs[preferences.KEY_ON_LOAD], app_settings.load_foreign_load_behavior()
+        )
 
-        self.recycle_check = QCheckBox("Move originals to the Recycle Bin after a successful conversion")
+        recycle = specs[preferences.KEY_RECYCLE_ORIGINALS]
+        self.recycle_check = QCheckBox(recycle.label)
         self.recycle_check.setChecked(app_settings.load_recycle_originals())
         outer.addWidget(self.recycle_check)
-        note = QLabel(
-            "Applies to every conversion. An original is only moved after its "
-            "new .cbz opened cleanly with the same number of pages -- never "
-            "deleted permanently, never after a failure."
+        outer.addWidget(_hint(recycle.help))
+
+        self._resize_group, self._resize_radios = self._choice_box(
+            outer, specs[preferences.KEY_RESIZE_ON_CONVERT], app_settings.load_resize_on_convert()
         )
-        note.setWordWrap(True)
-        note.setStyleSheet("font-size: 11px;")
-        outer.addWidget(note)
 
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         outer.addWidget(buttons)
 
+    def _choice_box(self, outer, spec, current: str):
+        box = QGroupBox(spec.label)
+        layout = QVBoxLayout(box)
+        group = QButtonGroup(self)
+        radios: dict[str, QRadioButton] = {}
+        for key, label in spec.choices:
+            radio = QRadioButton(label)
+            radio.setChecked(key == current)
+            group.addButton(radio)
+            radios[key] = radio
+            layout.addWidget(radio)
+        if spec.help:
+            layout.addWidget(_hint(spec.help, indent=True))
+        outer.addWidget(box)
+        return group, radios
+
+    @staticmethod
+    def _checked(radios: dict, fallback: str) -> str:
+        return next((key for key, radio in radios.items() if radio.isChecked()), fallback)
+
     def selected_behavior(self) -> str:
-        for key, radio in self._radios.items():
-            if radio.isChecked():
-                return key
-        return app_settings.FOREIGN_LOAD_UNCONVERTED
+        return self._checked(self._radios, app_settings.FOREIGN_LOAD_UNCONVERTED)
+
+    def selected_resize_on_convert(self) -> str:
+        return self._checked(self._resize_radios, app_settings.RESIZE_ON_CONVERT_ASK)
 
     def accept(self) -> None:
         app_settings.save_foreign_load_behavior(self.selected_behavior())
         app_settings.save_recycle_originals(self.recycle_check.isChecked())
+        app_settings.save_resize_on_convert(self.selected_resize_on_convert())
         super().accept()

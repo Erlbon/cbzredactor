@@ -33,7 +33,7 @@ def _read_all(path):
 
 
 def _leftovers(tmp_path):
-    return sorted(p.name for p in tmp_path.iterdir() if p.name.endswith(".tmp_write") or ".tmp" in p.name)
+    return sorted(p.name for p in tmp_path.iterdir() if ".tmp" in p.name or ".redact-orig" in p.name)
 
 
 def _rewrite(src, plan=None, dst=None, **kwargs):
@@ -129,17 +129,21 @@ def test_writes_to_another_path_and_leaves_the_source(tmp_path):
     assert [n for n, _ in _read_all(dst)] == ["b.txt", "c.txt"]
 
 
-def test_dispose_original_runs_before_the_replace(tmp_path):
+def test_dispose_original_runs_after_the_new_file_is_in_place(tmp_path):
+    # T7: the original keeps a name on disk (x.redact-orig.zip) until the
+    # rewritten file has taken its place; only then does it go to the bin.
     src = _make(tmp_path / "x.zip")
     order = []
 
     def dispose(path):
-        order.append(("dispose", os.path.exists(path), os.path.exists(path + ".tmp_write")))
+        order.append((os.path.basename(path), os.path.exists(path), os.path.exists(src),
+                      os.path.exists(src + ".tmp_write")))
         os.remove(path)
 
-    _rewrite(src, dispose_original=dispose)
-    assert order == [("dispose", True, True)]
-    assert os.path.exists(src)
+    _rewrite(src, dispose_original=dispose, plan=RewritePlan(decide=lambda e, r: Action(drop=e.name == "a.txt")))
+    assert order == [("x.redact-orig.zip", True, True, False)]
+    assert [n for n, _ in _read_all(src)] == ["b.txt", "c.txt"]
+    assert _leftovers(tmp_path) == []
 
 
 def test_temp_suffix_names_the_temp_file(tmp_path):
@@ -393,18 +397,46 @@ def test_dispose_failure_replaces_nothing_and_removes_the_temp(tmp_path):
     assert _read_all(src) == before and _leftovers(tmp_path) == []
 
 
-def test_replace_failure_after_dispose_keeps_the_only_full_copy(tmp_path, monkeypatch):
+def test_a_failed_replace_puts_the_original_back_and_never_disposes_it(tmp_path, monkeypatch):
+    # T7: the original used to go to the bin BEFORE the replace was tried.
     import core.zip_rewrite as zip_rewrite
 
-    monkeypatch.setattr(zip_rewrite, "_REPLACE_DELAY", 0)
+    monkeypatch.setattr(zip_rewrite, "_LOCK_RETRY", {"delay": 0})
     src = _make(tmp_path / "x.zip")
+    before = _read_all(src)
+    disposed = []
     monkeypatch.setattr(os, "replace", lambda a, b: (_ for _ in ()).throw(PermissionError("locked")))
-    with pytest.raises(CbzError) as info:
-        _rewrite(src, dispose_original=os.remove, temp_suffix=".tmp_keep")
+    with pytest.raises(CbzError):
+        _rewrite(src, dispose_original=disposed.append, temp_suffix=".tmp_keep")
     monkeypatch.undo()
-    kept = src + ".tmp_keep"
-    assert kept in str(info.value) and os.path.exists(kept)
-    assert [n for n, _ in _read_all(kept)] == ["a.txt", "b.txt", "c.txt"]
+    assert disposed == [] and _read_all(src) == before and _leftovers(tmp_path) == []
+
+
+def test_a_sharing_violation_on_replace_is_retried(tmp_path, monkeypatch):
+    # T7: winerror 32 (another program has the file open) is an OSError, not a
+    # PermissionError -- the old retry loop gave up on it at once.
+    import sys
+
+    import core.zip_rewrite as zip_rewrite
+
+    monkeypatch.setattr(zip_rewrite, "_LOCK_RETRY", {"delay": 0})
+    monkeypatch.setattr(sys, "platform", "win32")
+    src = _make(tmp_path / "x.zip")
+    real = os.replace
+    calls = []
+
+    def flaky(a, b):
+        calls.append(b)
+        if len(calls) < 3:
+            err = OSError("in use")
+            err.winerror = 32
+            raise err
+        real(a, b)
+
+    monkeypatch.setattr(os, "replace", flaky)
+    _rewrite(src, RewritePlan(decide=lambda e, r: Action(drop=e.name == "a.txt")))
+    monkeypatch.undo()
+    assert len(calls) == 3 and [n for n, _ in _read_all(src)] == ["b.txt", "c.txt"]
 
 
 def test_cancel_before_any_work_and_midway(tmp_path):

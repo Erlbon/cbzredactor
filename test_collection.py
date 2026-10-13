@@ -688,6 +688,40 @@ def test_scanning_another_folder_keeps_the_first_scan(library, tmp_path, monkeyp
         os.path.normcase(str(other))]
 
 
+def test_scan_and_report_use_the_shared_busy_dialog(library, monkeypatch):
+    # P1: the folder listing and the report analysis were a hand-rolled thread /
+    # QProgressDialog; reading and saving the scan file had no dialog at all.
+    import gui.main_window as mw
+    from gui.main_window import MainWindow
+
+    real = mw.run_busy
+    labels = []
+
+    def recording(parent, label, fn, *a, **k):
+        labels.append(label)
+        return real(parent, label, fn, *a, **k)
+
+    monkeypatch.setattr(mw, "run_busy", recording)
+    monkeypatch.setattr(QFileDialog, "getExistingDirectory", lambda *a, **k: library)
+    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.No)
+    monkeypatch.setattr(MainWindow, "_ask_cover_mode", lambda self, had: "none")
+    window = MainWindow()
+    window.scan_collection_folder()
+    assert "Listing comics…" in labels and "Saving the scan..." in labels
+
+    # Cancel while listing: nothing is read or written.
+    labels.clear()
+    monkeypatch.setattr(mw, "run_busy", lambda parent, label, fn, *a, **k: (
+        labels.append(label), k.get("on_cancel") if label.startswith("Listing") else fn(*a))[1])
+    window.scan_collection_folder()
+    assert labels[-1] == "Listing comics…"
+
+    built = []
+    monkeypatch.setattr(mw, "run_busy", lambda parent, label, fn, *a, **k: built.append(label) or fn(*a))
+    window._build_report_in_background(lambda info, rows: "report", None, [1, 2])
+    assert built and built[0].startswith("Analysing")
+
+
 def _walk_cbz(root):
     for folder, _dirs, files in os.walk(root):
         for name in files:

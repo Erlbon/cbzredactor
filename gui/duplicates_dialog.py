@@ -11,7 +11,7 @@ is marked; the others start ticked for removal (to the Recycle Bin).
 from __future__ import annotations
 
 from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QPixmap
+from PyQt6.QtGui import QImage, QPixmap
 from PyQt6.QtWidgets import (
     QCheckBox,
     QDialog,
@@ -73,7 +73,10 @@ class DuplicatesDialog(QDialog):
                 cover = QLabel()
                 cover.setAlignment(Qt.AlignmentFlag.AlignCenter)
                 pixmap = QPixmap()
-                if covers[index] and pixmap.loadFromData(covers[index]):
+                data = covers[index]
+                if isinstance(data, QImage):  # already decoded small (the window does it under progress)
+                    pixmap = QPixmap.fromImage(data)
+                if not pixmap.isNull() or (isinstance(data, (bytes, bytearray)) and data and pixmap.loadFromData(data)):
                     cover.setPixmap(pixmap.scaledToHeight(COVER_HEIGHT, Qt.TransformationMode.SmoothTransformation))
                 else:
                     cover.setText("(no cover)")

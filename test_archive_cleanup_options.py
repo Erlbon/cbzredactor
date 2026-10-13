@@ -3,6 +3,7 @@ pages out of folders, rename pages to numbers (core/archive_contents.py,
 CbzBook.clean_contents), the dialog's checkboxes and their persistence, and
 the Redact step's matching options (rename off by default there)."""
 
+import os
 import sys
 import zipfile
 
@@ -290,7 +291,7 @@ def test_window_applies_and_remembers_the_chosen_options(window, tmp_path, monke
     window._selected_rows = []
     window.open_clean_contents_dialog()
     assert seen["initial"] == CleanupOptions()  # first time: all on, as before
-    assert window.trashed == [scene]
+    assert window.trashed == [os.path.splitext(scene)[0] + ".redact-orig.cbz"]
     names = zipfile.ZipFile(scene).namelist()
     assert not any(j in names for j in JUNK) and any(n.startswith(SCENE + "/") for n in names)  # pages stayed put
     assert app_settings.load_cleanup_options() == JUNK_ONLY

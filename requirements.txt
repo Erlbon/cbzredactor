@@ -2,17 +2,18 @@ PyQt6>=6.6
 lxml>=5.0
 pyinstaller>=6.3
 
-# Page-image resizing (Operations > Resize Images...). A pure-Python
+# Page-image resizing (Repair > Resize Images...). A pure-Python
 # wheel -- bundles straight into the PyInstaller build with no extra
 # install step, unlike CBR conversion's external-unrar-tool requirement
 # below.
 Pillow>=10.0
 
-# Moves converted originals to the Recycle Bin/Trash instead of
-# deleting them permanently (core/trash.py). Cross-platform.
+# Moves replaced or converted originals to the Recycle Bin/Trash instead
+# of deleting them permanently (redactor_common.core.trash, which this
+# app uses via move_to_trash). Cross-platform.
 send2trash>=1.8
 
-# Optional: only needed for Import > Convert to CBZ on a .cbr file.
+# Optional: only needed for Repair > Convert to CBZ on a .cbr file.
 # Also needs a real unrar/unar/bsdtar-compatible binary on PATH --
 # rarfile itself just shells out to one. See
 # core/foreign_archive_convert.py and README.md's "Foreign archive
@@ -21,12 +22,12 @@ send2trash>=1.8
 # separate binary required.
 rarfile>=4.1
 
-# Optional: only needed for Import > Convert to CBZ on a .cb7 file. A
+# Optional: only needed for Repair > Convert to CBZ on a .cb7 file. A
 # normal pip-installable dependency -- no separate 7z binary needed,
 # unlike rarfile above.
 py7zr>=1.0
 
-# Optional: only needed for Import > Look Up via Bedetheque. The site
+# Optional: only needed for Metadata > Look Up > Bedetheque. The site
 # sits behind Cloudflare (a plain HTTP request gets 403 on every page)
 # -- cloudscraper mimics a real browser's TLS fingerprint and solves
 # Cloudflare's JS challenge programmatically, avoiding the far heavier

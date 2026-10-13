@@ -183,6 +183,25 @@ def test_add_unconverted_lists_the_file_read_only(window, tmp_path, monkeypatch)
     assert not (tmp_path / "book.cbz").exists()  # nothing written yet
 
 
+def test_only_unconverted_rows_selected_says_convert_first_not_load_files(window, tmp_path, monkeypatch):
+    # T3: a command on a selection of only CBR/CB7/CBT rows used to say "Load some files first".
+    cbt_path = tmp_path / "book.cbt"
+    _make_cbt(cbt_path, {"page001.jpg": b"data"})
+    _make_real_cbz(tmp_path / "native.cbz")
+    monkeypatch.setattr(window, "_prompt_convert_foreign_archives", lambda paths: (FOREIGN_UNCONVERTED, False))
+    window._load_paths([str(cbt_path), str(tmp_path / "native.cbz")])
+    shown = []
+    monkeypatch.setattr(QMessageBox, "information", lambda parent, title, text, *a, **k: shown.append((title, text)))
+    window.table.selectRow(0)
+    window.open_search_replace_dialog()
+    window.open_comicvine_lookup_dialog()
+    assert [title for title, _ in shown] == ["Convert to CBZ First"] * 2
+    assert all("Convert" in text and "Load some files" not in text for _, text in shown)
+    # Nothing loaded at all still says to load files.
+    window.clear_list()
+    assert window._no_targets_message("search") == ("No Files", "Load some files first (or select the ones to search).")
+
+
 def test_convert_from_the_table_replaces_the_row_in_place(window, tmp_path, monkeypatch):
     cbt_path = tmp_path / "book.cbt"
     _make_cbt(cbt_path, {"page001.jpg": b"data", "page002.jpg": b"data"})
@@ -257,10 +276,14 @@ def test_remember_my_choice_saves_the_setting(window, settings, tmp_path, monkey
         next(b for b in box.buttons() if b.text() == "Convert Now").click()
 
     monkeypatch.setattr(QMessageBox, "exec", _click)
+    resize_before = app_settings.load_resize_on_convert()
     choice, delete = window._prompt_convert_foreign_archives([str(cbt_path)])
 
     assert (choice, delete) == (FOREIGN_CONVERT, True)
-    assert settings == {"behavior": app_settings.FOREIGN_LOAD_CONVERT, "recycle": True}
+    # T6: only the convert-or-not answer is remembered -- not the Recycle Bin
+    # box (this load only) and never the resize-on-convert setting.
+    assert settings == {"behavior": app_settings.FOREIGN_LOAD_CONVERT, "recycle": False}
+    assert app_settings.load_resize_on_convert() == resize_before
 
 
 def test_skip_is_never_remembered(window, settings, tmp_path, monkeypatch):
@@ -283,8 +306,29 @@ def test_settings_dialog_saves_both_choices(settings):
     dialog = ConversionSettingsDialog()
     dialog._radios[app_settings.FOREIGN_LOAD_CONVERT].setChecked(True)
     dialog.recycle_check.setChecked(True)
+    dialog._resize_radios[app_settings.RESIZE_ON_CONVERT_NO].setChecked(True)
     dialog.accept()
     assert settings == {"behavior": app_settings.FOREIGN_LOAD_CONVERT, "recycle": True}
+    assert app_settings.load_resize_on_convert() == app_settings.RESIZE_ON_CONVERT_NO
+
+
+def test_settings_dialog_shows_what_preferences_shows(settings):
+    # T6: Tools > Conversion Settings and Tools > Preferences > Conversion are one
+    # set of values with one set of labels (the dialog lacked the resize choice).
+    from gui import preferences
+    from gui.conversion_settings_dialog import ConversionSettingsDialog
+
+    settings["behavior"], settings["recycle"] = app_settings.FOREIGN_LOAD_CONVERT, True
+    app_settings.save_resize_on_convert(app_settings.RESIZE_ON_CONVERT_YES)
+    dialog = ConversionSettingsDialog()
+    assert dialog.selected_behavior() == app_settings.FOREIGN_LOAD_CONVERT
+    assert dialog.recycle_check.isChecked() is True
+    assert dialog.selected_resize_on_convert() == preferences.make_backend().get(preferences.KEY_RESIZE_ON_CONVERT)
+    assert dialog.selected_resize_on_convert() == app_settings.RESIZE_ON_CONVERT_YES
+    section = next(s for s in preferences.preference_sections() if s.key == "conversion")
+    labels = {spec.key: spec.label for spec in section.specs}
+    assert dialog.recycle_check.text() == labels[preferences.KEY_RECYCLE_ORIGINALS]
+    assert dialog._resize_radios[app_settings.RESIZE_ON_CONVERT_YES].text() == "Always resize"
 
 
 @pytest.mark.parametrize(

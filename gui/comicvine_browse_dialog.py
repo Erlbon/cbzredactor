@@ -31,7 +31,7 @@ import os
 from typing import Optional
 
 from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QColor, QGuiApplication, QPixmap
+from PyQt6.QtGui import QColor, QPixmap
 from PyQt6.QtWidgets import (
     QAbstractItemView,
     QDialog,
@@ -51,8 +51,8 @@ from PyQt6.QtWidgets import (
 )
 
 from redactor_common.core.error_summary import wrapped_errors
-from redactor_common.gui.background_call import call_in_background
 from redactor_common.gui.image_label import AspectRatioImageLabel
+from redactor_common.gui.progress import run_busy
 from redactor_common.gui.sortable_table import NumericTableWidgetItem, suspend_sorting
 
 from core.cbz_file import CbzBook
@@ -79,6 +79,12 @@ HASH_TOP_VOLUMES = 8
 STEP_SERIES, STEP_ISSUES = 0, 1
 _GOOD = QColor(30, 130, 60)
 COVER_MIN_SIZE = (200, 300)
+
+_CANCELLED = object()  # run_busy's answer when Cancel was clicked
+
+
+class _Cancelled(ComicVineLookupError):
+    """The user cancelled a Comic Vine request (see ComicVineBrowseDialog._bg)."""
 
 
 def _series_key(series: str) -> str:
@@ -283,25 +289,29 @@ class ComicVineBrowseDialog(QDialog):
     # ------------------------------------------------------------------
     # Network, kept off the GUI thread
 
-    def _bg(self, fn, *args):
-        """Runs `fn` on a worker thread while the window stays painted but
-        unclickable; re-raises whatever `fn` raised."""
-        self.setEnabled(False)
-        QGuiApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
-        try:
-            return call_in_background(fn, *args)
-        finally:
-            QGuiApplication.restoreOverrideCursor()
-            self.setEnabled(True)
+    def _bg(self, fn, *args, label: str = "Asking Comic Vine..."):
+        """Runs `fn` on a worker thread under the shared busy dialog (shown
+        after a moment, with Cancel); re-raises whatever `fn` raised. Cancel
+        abandons the request and raises _Cancelled (a ComicVineLookupError,
+        so every caller's existing error path handles it, without a warning)."""
+        result = run_busy(self, label, fn, *args, cancellable=True, title="Comic Vine", on_cancel=_CANCELLED)
+        if result is _CANCELLED:
+            raise _Cancelled("Cancelled")
+        return result
 
     def _warn(self, exc: Exception) -> None:
+        if isinstance(exc, _Cancelled):
+            return  # the user stopped it: nothing to explain
         QMessageBox.warning(self, "Comic Vine", wrapped_errors([str(exc)]))
 
     def _image_for(self, url: str) -> Optional[bytes]:
         if not url:
             return None
         if url not in self._image_cache:
-            fetched = self._bg(_fetch_images, [url])
+            try:
+                fetched = self._bg(_fetch_images, [url], label="Downloading the cover...")
+            except _Cancelled:
+                return None
             if url in fetched:
                 self._image_cache[url] = fetched[url]
         return self._image_cache.get(url)

@@ -19,6 +19,7 @@ from PyQt6.QtWidgets import QFileDialog, QMessageBox, QWidget
 from redactor_common.core.dump_import import DumpImportError
 from redactor_common.core.local_db import LocalDatabaseError, forget_cached
 from redactor_common.gui.dump_import_runner import run_dump_import
+from redactor_common.gui.progress import run_busy
 
 from core.gcd_compare import compare_with_gcd, export_csv
 from gui import app_settings
@@ -51,7 +52,7 @@ def compare_library_with_gcd(parent: Optional[QWidget]) -> Optional[str]:
         if summary is None:
             return None
         folder = os.path.splitext(dest)[0] + " csv"
-        export_csv(dest, folder)
+        run_busy(parent, "Writing the spreadsheets (CSV)...", export_csv, dest, folder, title=TITLE)
     except (DumpImportError, LocalDatabaseError, OSError) as exc:
         QMessageBox.warning(parent, TITLE, str(exc))
         return None

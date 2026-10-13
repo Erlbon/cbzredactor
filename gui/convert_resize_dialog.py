@@ -9,8 +9,9 @@ page, pack, one check) instead of converting and then rewriting the whole file
 a second time.
 
 It shows the saved Resize defaults (the same box the Resize Images dialog has)
-so they can be changed on the spot, and a "Remember my choice" box that turns
-the question into a setting (Tools > Preferences > Conversion), so the
+so they can be changed on the spot, and a "Don't ask again" box that turns
+the clicked button into the Always / Never setting (Tools > Preferences >
+Conversion; its text says which button sets which), so the
 convert-on-load flow does not nag forever. Redact never shows this: it follows
 the saved setting.
 """
@@ -28,6 +29,13 @@ from PyQt6.QtWidgets import (
 
 from core.image_resize import ResizeOptions
 from gui.resize_dialog import ResizeOptionsForm
+
+# Says exactly what ticking it stores (T6: it used to read "Remember my choice",
+# and a Yes silently became the lossy "Always resize" for every later conversion).
+REMEMBER_TEXT = (
+    "Don't ask again: the button I click becomes the setting for every later conversion\n"
+    "(Resize While Converting = Always resize, lossy; Convert Without Resizing = Never resize)"
+)
 
 
 class ConvertResizeDialog(QDialog):
@@ -51,10 +59,11 @@ class ConvertResizeDialog(QDialog):
         self.form = ResizeOptionsForm(options, title="Resize with")
         outer.addWidget(self.form)
 
-        self.remember_check = QCheckBox("Remember my choice (change it in Tools > Preferences > Conversion)")
+        self.remember_check = QCheckBox(REMEMBER_TEXT)
         self.remember_check.setToolTip(
-            "Remembers Yes or No for every later conversion, so this question is not asked again. "
-            "Closing this window with the X is never remembered."
+            "Sets Tools > Preferences > Conversion > 'Resize pages while converting' to the button you click: "
+            "'Always resize' (pages re-encoded, lossy) or 'Never resize'. Closing this window with the X is "
+            "never remembered. Change it back there at any time."
         )
         outer.addWidget(self.remember_check)
 

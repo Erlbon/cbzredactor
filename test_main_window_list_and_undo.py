@@ -207,3 +207,77 @@ def test_rename_selected_file_noop_on_load_error(window, monkeypatch):
     )
 
     window.rename_selected_file()
+
+
+def _status_messages(window, monkeypatch):
+    shown = []
+    monkeypatch.setattr(window.statusBar(), "showMessage", lambda text, *a: shown.append(text))
+    return shown
+
+
+def test_f2_without_exactly_one_row_says_why(window, monkeypatch):
+    # T4: F2 with zero or several rows selected used to do nothing, silently.
+    window.books = [_fake_book(title="A"), _fake_book(title="B")]
+    window._rebuild_table()
+    monkeypatch.setattr(window, "rename_single_file", lambda book: pytest.fail("ambiguous selection"))
+    shown = _status_messages(window, monkeypatch)
+    window._selected_rows = []
+    window.rename_selected_file()
+    window._selected_rows = [0, 1]
+    window.rename_selected_file()
+    assert len(shown) == 2 and all("exactly one" in text for text in shown)
+    assert "2 are selected" in shown[1]
+
+
+def test_silent_no_ops_now_explain_themselves(window, monkeypatch):
+    # T4: Remove from List / Refresh / Clear with nothing to act on, and F2 on an unreadable file.
+    shown = _status_messages(window, monkeypatch)
+    window.remove_selected()
+    window.refresh_list()
+    window.clear_list()
+    book = _fake_book(title="Broken")
+    book.load_error = "zip file is corrupt"
+    window.books = [book]
+    window._rebuild_table()
+    window._selected_rows = [0]
+    window.rename_selected_file()
+    assert len(shown) == 4 and "select the rows" in shown[0] and "could not be read" in shown[3]
+
+
+def test_validate_stamping_runs_under_a_progress_dialog(window, monkeypatch):
+    # P1: stamping reopens every archive (fingerprint) and used to be a bare loop.
+    import gui.main_window as mw
+
+    runs = []
+    monkeypatch.setattr(mw, "run_with_progress", lambda parent, items, step, label, **k: runs.append((list(items), label)))
+    books = [_fake_book(title=str(i)) for i in range(5)]
+    window._stamp_scans(books)
+    assert runs == [(books, "Stamping scan results...")]
+
+
+def test_remove_from_list_asks_before_dropping_unsaved_edits(window, monkeypatch):
+    # T2: removing a row with unsaved edits used to lose them without a word.
+    window.books = [_fake_book(title="Edited"), _fake_book(title="Clean")]
+    window.books[0].dirty = True
+    window._rebuild_table()
+    asked = []
+
+    def answer(reply):
+        def question(*a, **k):
+            asked.append(a[2])
+            return reply
+        return question
+
+    window._selected_rows = [0, 1]
+    monkeypatch.setattr(QMessageBox, "question", answer(QMessageBox.StandardButton.No))
+    window.remove_selected()
+    assert len(window.books) == 2 and asked and "1 with unsaved edits" in asked[0]
+
+    window._selected_rows = [1]  # a clean row goes without a question
+    window.remove_selected()
+    assert [b.metadata.title for b in window.books] == ["Edited"] and len(asked) == 1
+
+    window._selected_rows = [0]
+    monkeypatch.setattr(QMessageBox, "question", answer(QMessageBox.StandardButton.Yes))
+    window.remove_selected()
+    assert window.books == [] and len(asked) == 2

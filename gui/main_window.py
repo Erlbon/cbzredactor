@@ -134,7 +134,7 @@ from core.redact_steps import (
 )
 from core.credit_pages import KnownCreditPages, credit_matches, scan_book
 from core.duplicates import BookFacts, find_duplicates, fingerprint_book
-from core.version import APP_NAME, APP_REPO_URL, APP_VERSION, RELEASE_LABEL
+from core.version import APP_NAME, APP_REPO_URL, APP_VERSION
 from gui import app_settings
 from gui.bedetheque_lookup_dialog import BedethequeLookupDialog
 from gui.manga_lookup_dialog import MangaLookupDialog
@@ -1020,8 +1020,13 @@ class MainWindow(QMainWindow):
         options_layout.setContentsMargins(0, 0, 0, 0)
         delete_checkbox = QCheckBox("Move the originals to the Recycle Bin after a successful conversion")
         delete_checkbox.setChecked(app_settings.load_recycle_originals())
-        remember_checkbox = QCheckBox("Remember my choice (change it in Tools > Conversion Settings...)")
-        remember_checkbox.setToolTip("Remembers Convert Now or Add Unconverted; Skip is never remembered.")
+        remember_checkbox = QCheckBox(
+            "Remember Convert Now / Add Unconverted for later loads (Tools > Preferences > Conversion)"
+        )
+        remember_checkbox.setToolTip(
+            "Remembers ONLY whether CBR/CB7/CBT files are converted on load. Skip is never remembered; "
+            "the Recycle Bin box above applies to this load only, and resizing is never switched on here."
+        )
         options_layout.addWidget(delete_checkbox)
         options_layout.addWidget(remember_checkbox)
         box.layout().addWidget(options, box.layout().rowCount(), 0, 1, box.layout().columnCount())
@@ -1040,10 +1045,10 @@ class MainWindow(QMainWindow):
             return FOREIGN_SKIP, False
 
         if remember_checkbox.isChecked():
+            # Only the convert-or-not answer: never the Recycle Bin or resize settings.
             app_settings.save_foreign_load_behavior(
                 app_settings.FOREIGN_LOAD_CONVERT if choice == FOREIGN_CONVERT else app_settings.FOREIGN_LOAD_UNCONVERTED
             )
-            app_settings.save_recycle_originals(delete_checkbox.isChecked())
         return choice, choice == FOREIGN_CONVERT and delete_checkbox.isChecked()
 
     def _resolve_foreign_choice(self, paths: list[str]) -> tuple[str, bool]:
@@ -1061,8 +1066,9 @@ class MainWindow(QMainWindow):
         """Whether this batch of conversions also resizes the pages, and how: asked ONCE
         per batch, never per file. Tools > Preferences > Conversion decides: Always
         resizes with the saved Resize defaults, Never doesn't, Ask shows the one
-        question (gui/convert_resize_dialog.py), whose "Remember my choice" turns it
-        into Always/Never. Returns the options, or None for no resize."""
+        question (gui/convert_resize_dialog.py), whose "Don't ask again" box turns the
+        clicked button into Always/Never (and says so in the status bar). Returns the
+        options, or None for no resize."""
         saved = app_settings.load_resize_on_convert()
         if saved == app_settings.RESIZE_ON_CONVERT_YES:
             return app_settings.load_resize_options()
@@ -1075,6 +1081,10 @@ class MainWindow(QMainWindow):
         if dialog.remember():
             app_settings.save_resize_on_convert(
                 app_settings.RESIZE_ON_CONVERT_YES if dialog.resize_pages else app_settings.RESIZE_ON_CONVERT_NO
+            )
+            self.statusBar().showMessage(
+                f"Later conversions will {'always' if dialog.resize_pages else 'never'} resize pages without asking "
+                "(Tools > Preferences > Conversion changes it).", 12000,
             )
         return dialog.options() if dialog.resize_pages else None
 
@@ -1462,11 +1472,15 @@ class MainWindow(QMainWindow):
     def _credit_pages_for_selection(self) -> None:
         if len(self._selected_rows) == 1 and self._editable_selected_rows():
             self.open_credit_pages_dialog(self.books[self._selected_rows[0]])
+        else:
+            self.statusBar().showMessage("Credit Pages works on one CBZ file: select exactly one row.", 8000)
 
     def _number_issues_for_selection(self) -> None:
         rows = self._editable_selected_rows()
         if rows:
             self._quick_number_issues([self.books[r] for r in rows])
+        else:
+            self.statusBar().showMessage(f"Number Issues: {self._no_targets_message('number')[1]}", 8000)
 
     def _show_idle_panel(self) -> None:
         """The panel's state when no single file is being shown: with files
@@ -1544,7 +1558,7 @@ class MainWindow(QMainWindow):
         else:
             target_books = [self.books[row] for row in self._editable_selected_rows()]
         if not target_books:
-            QMessageBox.information(self, "No Files", "Load some files first.")
+            self._tell_no_targets("")
             return
         if all_mode and len(target_books) > APPLY_ALL_CONFIRM_ABOVE:
             names = ", ".join(attr.replace("_", " ").title() for attr in changed_fields)
@@ -1767,8 +1781,13 @@ class MainWindow(QMainWindow):
         identical in-memory state would compare equal) and impossible
         (TypeError: unhashable) rather than just imprecise."""
         if not self._selected_rows:
+            self.statusBar().showMessage("Remove from List: select the rows to remove first.", 8000)
             return
         to_remove = set(self._selected_rows)
+        # Unsaved edits live only in memory: removing the row loses them (as mp3redactor asks too).
+        dirty = sum(1 for i, book in enumerate(self.books) if i in to_remove and book.dirty)
+        if dirty and not self._confirm_discard(f"remove {len(to_remove)} file(s) from the list, {dirty} with unsaved edits"):
+            return
         self.books = [book for i, book in enumerate(self.books) if i not in to_remove]
         self._selected_rows = []
         self.undo_manager.clear()  # its entries would reference book objects just discarded
@@ -1780,6 +1799,7 @@ class MainWindow(QMainWindow):
 
     def clear_list(self) -> None:
         if not self.books:
+            self.statusBar().showMessage("Clear List: the list is already empty.", 5000)
             return
         if self._count_dirty() and not self._confirm_discard("clear the entire list"):
             return
@@ -1976,6 +1996,7 @@ class MainWindow(QMainWindow):
         clears the undo stack, since its entries would reference book
         objects this replaces."""
         if not self.books:
+            self.statusBar().showMessage("Refresh List: nothing is loaded yet (File > Open Folder... first).", 8000)
             return
         if self._count_dirty() and not self._confirm_discard("refresh the list (discarding unsaved changes)"):
             return
@@ -2026,7 +2047,8 @@ class MainWindow(QMainWindow):
     def _save_book(self, row: int, output_path: str | None = None) -> None:
         book = self.books[row]
         try:
-            book.save(output_path)
+            # Saving rewrites the whole archive (seconds for a big one): off the GUI thread.
+            run_busy(self, f"Saving: {os.path.basename(output_path or book.path)}", book.save, output_path)
         except CbzError as exc:
             QMessageBox.critical(self, "Save Failed", str(exc))
         self._refresh_table_row(row, book)
@@ -2057,10 +2079,20 @@ class MainWindow(QMainWindow):
                 errors.append(f"{os.path.basename(book.path)}: {exc}")
             self._refresh_table_row(row, book)
 
-        run_with_progress(
-            self, rows, _step, "Saving files...", threshold=SAVE_PROGRESS_THRESHOLD, cancellable=True,
-            label_for=lambda row: f"Saving: {os.path.basename(self.books[row].path)}",
-        )
+        if len(rows) == 1:
+            # One file: the busy dialog (shown only if the rewrite takes a moment),
+            # the save itself off the GUI thread. Saving rewrites the whole archive.
+            book = self.books[rows[0]]
+            try:
+                run_busy(self, f"Saving: {os.path.basename(book.path)}", book.save)
+            except CbzError as exc:
+                errors.append(f"{os.path.basename(book.path)}: {exc}")
+            self._refresh_table_row(rows[0], book)
+        else:
+            run_with_progress(
+                self, rows, _step, "Saving files...", threshold=2, cancellable=True,  # 2+: always a dialog
+                label_for=lambda row: f"Saving: {os.path.basename(self.books[row].path)}",
+            )
 
         if errors:
             from redactor_common.core.error_summary import wrapped_errors
@@ -2075,7 +2107,7 @@ class MainWindow(QMainWindow):
         self._commit_current_edits()
         target_books = self._target_books()
         if not target_books:
-            QMessageBox.information(self, "No Files", "Load some files first (or select the ones to rename).")
+            self._tell_no_targets("rename")
             return
 
         dialog = self._make_rename_dialog(target_books)
@@ -2115,6 +2147,7 @@ class MainWindow(QMainWindow):
             return
         target_books = self._target_books()
         if not target_books:
+            self.statusBar().showMessage(f"Macro {slot + 1}: {self._no_targets_message()[1]}", 10000)
             return
         dialog = self._make_rename_dialog(target_books)  # never shown: only its planning is used
         try:
@@ -2209,7 +2242,7 @@ class MainWindow(QMainWindow):
         self._commit_current_edits()
         target_books = self._target_books()
         if not target_books:
-            QMessageBox.information(self, "No Files", "Load some files first (or select the ones to parse).")
+            self._tell_no_targets("parse")
             return
 
         dialog = ParseFilenameDialog(
@@ -2263,7 +2296,7 @@ class MainWindow(QMainWindow):
         self._commit_current_edits()
         target_books = self._target_books()
         if not target_books:
-            QMessageBox.information(self, "No Files", "Load some files first (or select the ones to read).")
+            self._tell_no_targets("read")
             return
 
         changes: dict[int, dict[str, str]] = {}
@@ -2313,8 +2346,12 @@ class MainWindow(QMainWindow):
         if not (0 <= row < len(self.books)):
             return
         book = self.books[row]
-        if not book.load_error:
-            self.rename_single_file(book)
+        if book.load_error:
+            self.statusBar().showMessage(
+                f"{os.path.basename(book.path)} could not be read, so it is not renamed here.", 8000,
+            )
+            return
+        self.rename_single_file(book)
 
     def rename_single_file(self, book: CbzBook) -> None:
         """Quick, direct rename of a single file on disk -- for fixing a
@@ -2353,16 +2390,27 @@ class MainWindow(QMainWindow):
         File..." item uses (exactly one row selected, no load error),
         since F2 and that menu item are the same action reached two
         ways."""
-        if len(self._selected_rows) == 1:
-            book = self.books[self._selected_rows[0]]
-            if not book.load_error:
-                self.rename_single_file(book)
+        if len(self._selected_rows) != 1:
+            self.statusBar().showMessage(
+                "Rename File (F2) renames one file: select exactly one row"
+                + (f" ({len(self._selected_rows)} are selected; use Rename / Export / Move for several)."
+                   if self._selected_rows else "."),
+                8000,
+            )
+            return
+        book = self.books[self._selected_rows[0]]
+        if book.load_error:
+            self.statusBar().showMessage(
+                f"Rename File: {os.path.basename(book.path)} could not be read, so it is not renamed here.", 8000,
+            )
+            return
+        self.rename_single_file(book)
 
     def open_search_replace_dialog(self) -> None:
         self._commit_current_edits()
         target_books = self._target_books()
         if not target_books:
-            QMessageBox.information(self, "No Files", "Load some files first (or select the ones to search).")
+            self._tell_no_targets("search")
             return
 
         def get_value(book: CbzBook, field_key: str) -> str:
@@ -2430,7 +2478,7 @@ class MainWindow(QMainWindow):
         self._commit_current_edits()
         target_books = self._target_books()
         if not target_books:
-            QMessageBox.information(self, "No Files", "Load some files first (or select the ones to convert).")
+            self._tell_no_targets("change the case of")
             return
 
         def get_value(book: CbzBook, field_key: str) -> str:
@@ -2464,7 +2512,7 @@ class MainWindow(QMainWindow):
         self._commit_current_edits()
         target_books = self._target_books()
         if not target_books:
-            QMessageBox.information(self, "No Files", "Load some files first (or select the ones to number).")
+            self._tell_no_targets("number")
             return
 
         def get_value(book: CbzBook, field_key: str) -> str:
@@ -2523,7 +2571,7 @@ class MainWindow(QMainWindow):
         self._commit_current_edits()
         target_books = self._target_books()
         if not target_books:
-            QMessageBox.information(self, "No Files", "Load some files first (or select the ones to resize).")
+            self._tell_no_targets("resize")
             return
 
         sizes = self._ensure_page_sizes(target_books)
@@ -2685,7 +2733,7 @@ class MainWindow(QMainWindow):
         self._commit_current_edits()
         target_books = self._target_books()
         if not target_books:
-            QMessageBox.information(self, "No Files", "Load some files first (or select the ones to check).")
+            self._tell_no_targets("check")
             return
 
         sizes = self._ensure_page_sizes(target_books)
@@ -2769,7 +2817,12 @@ class MainWindow(QMainWindow):
                 self, "Credit Pages", "This file has unsaved changes -- save it first, then remove pages."
             )
             return
-        candidates = call_in_background(scan_book, book.path, list(book.page_names), True)
+        # Decodes the first/last pages: off the GUI thread, under a busy dialog that keeps the
+        # window from being used meanwhile (call_in_background alone left it clickable).
+        candidates = run_busy(
+            self, f"Reading the first and last pages of {os.path.basename(book.path)}...",
+            scan_book, book.path, list(book.page_names), True,
+        )
         dialog = CreditPagesDialog(os.path.basename(book.path), candidates, self._known_credits, self)
         if dialog.exec() != dialog.DialogCode.Accepted:
             return
@@ -2947,9 +3000,16 @@ class MainWindow(QMainWindow):
         like any edit, written on Save. A book that can't be stamped is left
         as it was. Rows are reloaded via _refresh_edited_row: the selected
         book's panel would otherwise write its stale values back over this."""
-        for book in books:
+        def _stamp(book: CbzBook, _index: int) -> None:
+            # record_scan reopens the archive to fingerprint its pages: per-file I/O.
             if book.record_scan(scan_status(check_book(book))):
                 self._refresh_edited_row(book)
+
+        run_with_progress(
+            self, books, _stamp, "Stamping scan results...", threshold=LOAD_PROGRESS_THRESHOLD,
+            cancellable=False, update_every=20,
+            label_for=lambda book: f"Stamping: {os.path.basename(book.path)}",
+        )
         self._update_status()
 
     def open_clean_contents_dialog(self) -> None:
@@ -3153,14 +3213,13 @@ class MainWindow(QMainWindow):
         (core/collection_scan.py) -- only when asked, nothing is watched.
         Files unchanged since the last scan of the same folder aren't read
         again; a stopped scan keeps what it read."""
-        from PyQt6.QtWidgets import QApplication, QProgressDialog
         from core import collection_scan as scan
 
         zip_path = _collection_scan_path()
         previous_info, previous_rows = None, []
         if os.path.exists(zip_path):
             try:
-                previous_info, previous_rows = scan.read_scan(zip_path)
+                previous_info, previous_rows = run_busy(self, "Reading the last collection scan...", scan.read_scan, zip_path)
             except scan.ScanFileError:
                 pass
         start = previous_info.root if previous_info and os.path.isdir(previous_info.root) else ""
@@ -3174,7 +3233,7 @@ class MainWindow(QMainWindow):
         if not same_root and os.path.exists(stashed):
             # This folder was scanned before, then another one replaced it as the current scan.
             try:
-                _old_info, old_rows = scan.read_scan(stashed)
+                _old_info, old_rows = run_busy(self, "Reading the earlier scan of this folder...", scan.read_scan, stashed)
                 previous = {row.path: row for row in old_rows}
                 previous_rows = old_rows
             except scan.ScanFileError:
@@ -3184,20 +3243,15 @@ class MainWindow(QMainWindow):
             return
         covers, stamp = mode != "none", mode == "store"
 
-        listing = QProgressDialog("Listing comics…", "Cancel", 0, 0, self)
-        listing.setWindowTitle("Scan Collection Folder")
-        listing.setWindowModality(Qt.WindowModality.WindowModal)
-        listing.setMinimumDuration(0)
-        listing.show()
-        listed = []
-        for item in scan.list_comics(root, listing.wasCanceled):
-            listed.append(item)
-            if len(listed) % 200 == 0:
-                listing.setLabelText(f"Listing comics… {len(listed):,} found")
-                QApplication.processEvents()
-        cancelled = listing.wasCanceled()
-        listing.close()
-        if cancelled:
+        # The folder walk runs on a worker thread under the shared busy dialog; Cancel
+        # returns at once and the event stops the walk (it checks it between entries).
+        stop = threading.Event()
+        listed = run_busy(
+            self, "Listing comics…", lambda: list(scan.list_comics(root, stop.is_set)),
+            cancellable=True, title="Scan Collection Folder", on_cancel=None,
+        )
+        if listed is None:
+            stop.set()
             return
         if not listed:
             QMessageBox.information(self, "Scan Collection Folder", f"No comics found in:\n{root}")
@@ -3227,12 +3281,15 @@ class MainWindow(QMainWindow):
             for item in to_read:  # not reached: keep what the last scan knew
                 if item.path not in rows and item.path in previous:
                     rows[item.path] = previous[item.path]
-        try:
+        def _save() -> None:
             if previous_info is not None and not same_root and os.path.exists(zip_path):
                 scan.stash_current(zip_path, previous_info)  # the other folder's scan is kept, not overwritten
             scan.write_scan(zip_path, scan.new_info(root, complete, APP_VERSION), list(rows.values()))
             if os.path.exists(stashed):
                 os.remove(stashed)  # now the current scan
+
+        try:
+            run_busy(self, "Saving the scan...", _save, title="Scan Collection Folder")
         except OSError as exc:
             QMessageBox.warning(self, "Scan Collection Folder", f"Couldn't save the scan:\n{exc}")
             return
@@ -3250,35 +3307,10 @@ class MainWindow(QMainWindow):
 
     def _build_report_in_background(self, build_report, info, rows):
         """build_report() on a worker thread, with a progress dialog, so the
-        window stays alive while a collection of 100,000+ comics is analysed."""
-        import threading
-        from PyQt6.QtWidgets import QApplication, QProgressDialog
-
-        result: dict = {}
-
-        def work() -> None:
-            try:
-                result["report"] = build_report(info, rows)
-            except BaseException as exc:  # re-raised on the GUI thread below
-                result["error"] = exc
-
-        thread = threading.Thread(target=work, daemon=True)
-        thread.start()
-        dialog = None
-        if len(rows) > 500:
-            dialog = QProgressDialog(f"Analysing {len(rows):,} comics…", None, 0, 0, self)
-            dialog.setWindowTitle("Collection Report")
-            dialog.setWindowModality(Qt.WindowModality.WindowModal)
-            dialog.setMinimumDuration(0)
-            dialog.show()
-        while thread.is_alive():
-            QApplication.processEvents()
-            thread.join(0.05)
-        if dialog is not None:
-            dialog.close()
-        if "error" in result:
-            raise result["error"]
-        return result["report"]
+        window stays alive while a collection of 100,000+ comics is analysed.
+        The shared run_busy (it used to be a hand-rolled thread + dialog that
+        only appeared above 500 rows)."""
+        return run_busy(self, f"Analysing {len(rows):,} comics…", build_report, info, rows, title="Collection Report")
 
     def _ask_cover_mode(self, had_covers: bool) -> str | None:
         """What a scan does about covers: "none", "scan" (fingerprint each
@@ -3317,7 +3349,7 @@ class MainWindow(QMainWindow):
         if others and os.path.exists(zip_path):
             from PyQt6.QtWidgets import QInputDialog
             try:
-                current_info = scan.read_scan(zip_path)[0]
+                current_info = run_busy(self, "Reading the collection scan...", scan.read_scan, zip_path)[0]
             except scan.ScanFileError:
                 current_info = None
             options = {}
@@ -3338,7 +3370,8 @@ class MainWindow(QMainWindow):
             )
             return
         try:
-            info, rows = scan.read_scan(zip_path)
+            info, rows = run_busy(self, "Reading the collection scan...", scan.read_scan, zip_path,
+                                  title="Collection Report")
         except scan.ScanFileError as exc:
             QMessageBox.warning(self, "Collection Report", str(exc))
             return
@@ -3397,7 +3430,7 @@ class MainWindow(QMainWindow):
             if errors:
                 summary.append(f"{len(errors)} failed:\n" + "\n".join(errors[:10]))
             try:
-                scan.write_scan(zip_path, info, rows)
+                run_busy(self, "Saving the scan...", scan.write_scan, zip_path, info, rows)
             except OSError:
                 pass
         if conversions:
@@ -3445,7 +3478,7 @@ class MainWindow(QMainWindow):
         if errors:
             summary.append(f"{len(errors)} not converted:\n" + "\n".join(errors[:10]))
         try:
-            scan.write_scan(zip_path, info, rows)
+            run_busy(self, "Saving the scan...", scan.write_scan, zip_path, info, rows)
         except OSError:
             pass
 
@@ -3455,7 +3488,12 @@ class MainWindow(QMainWindow):
 
         done: list[tuple[str, str]] = []
         problems: list[str] = []
-        for old_rel, new_rel in pairs:
+        by_path: dict[str, list] = {}
+        for row in rows:
+            by_path.setdefault(row.path, []).append(row)
+
+        def _move(pair: tuple[str, str], _index: int) -> None:
+            old_rel, new_rel = pair
             old = scan.full_path(info.root, old_rel)
             new = scan.full_path(info.root, new_rel)
             name = old_rel.rsplit("/", 1)[-1]
@@ -3470,16 +3508,22 @@ class MainWindow(QMainWindow):
                     os.rename(scan.long_path(old), scan.long_path(new))
                 except OSError as exc:
                     problems.append(f"{name}: {exc}")
-                    continue
+                    return
                 # The rename log keeps long paths in their "\?\" form, or
                 # Undo Last Rename couldn't reach them.
                 if max(len(old), len(new)) >= scan.WINDOWS_PATH_LIMIT - 10:
                     done.append((scan.long_path(old), scan.long_path(new)))
                 else:
                     done.append((old, new))
-                for row in rows:
-                    if row.path == old_rel:
-                        row.path = new_rel
+                for row in by_path.pop(old_rel, []):
+                    row.path = new_rel
+
+        # A per-file loop on disk (network shares can be slow): progress, and Cancel
+        # between files -- what was moved so far is still logged for Undo Last Rename.
+        run_with_progress(
+            self, pairs, _move, "Moving and renaming files...", threshold=LOAD_PROGRESS_THRESHOLD,
+            label_for=lambda pair: f"Moving: {pair[0].rsplit('/', 1)[-1]}",
+        )
         if done:
             _rename_log().record("Collection Report", done)
             moved = {os.path.normcase(os.path.abspath(o)): n for o, n in done}
@@ -3489,7 +3533,7 @@ class MainWindow(QMainWindow):
                     book.path = target
             self._rebuild_table()
             try:
-                scan.write_scan(zip_path, info, rows)  # keep the report in step with the files
+                run_busy(self, "Saving the scan...", scan.write_scan, zip_path, info, rows)  # keep the report in step
             except OSError:
                 pass
         text = f"{len(done)} file(s) moved or renamed. File > Undo Last Rename takes them back." if pairs else ""
@@ -3506,7 +3550,9 @@ class MainWindow(QMainWindow):
         once (another release, resolution or format), with the best copy
         suggested -- see core/duplicates.py. Ticked copies go to the
         Recycle Bin and leave the list."""
-        from gui.duplicates_dialog import DuplicatesDialog
+        from redactor_common.gui.image_decode import decode_scaled
+
+        from gui.duplicates_dialog import COVER_HEIGHT, DuplicatesDialog
 
         self._commit_current_edits()
         books = [b for b in self._target_books() if not b.load_error and b.page_names]
@@ -3544,9 +3590,18 @@ class MainWindow(QMainWindow):
             return
         labels = [os.path.basename(b.path) for b in kept_books]
         covers = [None] * len(kept_books)
-        for group in groups:
-            for index in group.members:
-                covers[index] = kept_books[index].read_first_page_bytes()
+
+        def _read_cover(index: int, _n: int) -> None:
+            # Read and decoded straight to thumbnail size here, under the progress dialog
+            # (the dialog used to decode every full-size cover while it was being built).
+            image = decode_scaled(kept_books[index].read_first_page_bytes(), QSize(COVER_HEIGHT * 2, COVER_HEIGHT))
+            covers[index] = image if not image.isNull() else None
+
+        run_with_progress(
+            self, [index for group in groups for index in group.members], _read_cover, "Reading covers...",
+            threshold=LOAD_PROGRESS_THRESHOLD, cancellable=False,
+            label_for=lambda index: f"Reading: {labels[index]}",
+        )
         dialog = DuplicatesDialog(groups, facts, labels, covers, self)
         if dialog.exec() != dialog.DialogCode.Accepted:
             return
@@ -3559,12 +3614,18 @@ class MainWindow(QMainWindow):
 
         errors: list[str] = []
         gone: list[CbzBook] = []
-        for book in doomed:
+
+        def _trash(book: CbzBook, _index: int) -> None:
             try:
                 _trash_retrying(book.path)
                 gone.append(book)
             except TrashError as exc:
                 errors.append(f"{os.path.basename(book.path)}: {exc}")
+
+        run_with_progress(
+            self, doomed, _trash, "Moving duplicates to the Recycle Bin...", threshold=LOAD_PROGRESS_THRESHOLD,
+            label_for=lambda book: f"Recycling: {os.path.basename(book.path)}",
+        )
         if gone:
             gone_ids = {id(b) for b in gone}
             self.books = [b for b in self.books if id(b) not in gone_ids]
@@ -3642,6 +3703,7 @@ class MainWindow(QMainWindow):
         whether to move the originals to the Recycle Bin."""
         books = [book for book in books if book.needs_conversion]
         if not books:
+            self.statusBar().showMessage("Convert to CBZ: those files are already real CBZ files.", 8000)
             return
         recycle = app_settings.load_recycle_originals()
         originals = (
@@ -3729,11 +3791,6 @@ class MainWindow(QMainWindow):
             factory=lambda books: GcdLocalLookupDialog(books, database, self),
         )
 
-    def open_gcd_account_dialog(self) -> None:
-        from gui.gcd_account_dialog import GcdAccountDialog
-
-        GcdAccountDialog(self).exec()
-
     def _convert_books(
         self, books: list[CbzBook], delete_originals: bool, resize: ResizeOptions | None = None
     ) -> None:
@@ -3775,6 +3832,23 @@ class MainWindow(QMainWindow):
             return [self.books[row] for row in self._editable_selected_rows()]
         return [book for book in self.books if not book.needs_conversion]
 
+    def _no_targets_message(self, verb: str = "") -> tuple[str, str]:
+        """(title, text) for a command that found nothing in _target_books():
+        nothing loaded, or only rows still waiting for Convert to CBZ selected
+        (or loaded) -- which used to be told "Load some files first"."""
+        selected = [self.books[r] for r in self._selected_rows if r < len(self.books)]
+        pool = selected or self.books
+        if pool and all(book.needs_conversion for book in pool):
+            which = "The selected file(s) are" if selected else "Every loaded file is"
+            return "Convert to CBZ First", (
+                f"{which} still CBR/CB7/CBT (or not really a ZIP), and this app only edits CBZ files. "
+                "Convert them first: right-click > Convert ... to CBZ, or Repair > Convert to CBZ."
+            )
+        return "No Files", "Load some files first" + (f" (or select the ones to {verb})." if verb else ".")
+
+    def _tell_no_targets(self, verb: str = "") -> None:
+        QMessageBox.information(self, *self._no_targets_message(verb))
+
     def _run_lookup_dialog(self, dialog_class, label: str, factory=None) -> None:
         """Shared flow for every online lookup dialog (Comic Vine, GCD,
         ...): they all take (target_books, parent) and expose the same
@@ -3787,7 +3861,7 @@ class MainWindow(QMainWindow):
         self._commit_current_edits()
         target_books = self._target_books()
         if not target_books:
-            QMessageBox.information(self, "No Files", "Load some files first.")
+            self._tell_no_targets("")
             return
 
         dialog = factory(target_books) if factory else dialog_class(target_books, self)
@@ -3878,11 +3952,6 @@ class MainWindow(QMainWindow):
 
         ApiKeysDialog(self).exec()
 
-    def change_comicvine_api_key(self) -> None:
-        from gui.comicvine_key_dialog import ComicVineKeyDialog
-
-        ComicVineKeyDialog(self).exec()
-
     # ------------------------------------------------------------------
     # Settings menu: Genres / Languages
     # ------------------------------------------------------------------
@@ -3945,7 +4014,7 @@ class MainWindow(QMainWindow):
         dialog = AboutDialog(
             app_name=APP_NAME,
             app_version=APP_VERSION,
-            release_label=RELEASE_LABEL,
+            release_label="",  # the dated APP_VERSION is the release name ("ver 2026-...")
             icon_path=resource_path("assets", "icon.ico"),
             about_path=resource_path("ABOUT.md"),
             component_versions={"redactor_common": REDACTOR_COMMON_VERSION},

@@ -2,8 +2,10 @@
 
 A PyQt6 desktop tool for viewing and editing the `ComicInfo.xml`
 metadata embedded in CBZ comic book archives -- title, series,
-credits, publisher, classification, and more -- without touching the
-actual page images. Part of the "Redactor" family alongside the
+credits, publisher, classification, and more. Saving metadata never
+re-encodes a page image; only Repair > Resize Images (or resizing while
+converting a CBR/CB7/CBT, when you ask for it) changes the pixels. Part
+of the "Redactor" family alongside the
 [epubredactor](https://github.com/Erlbon/epubredactor),
 [mp3redactor](https://github.com/Erlbon/mp3redactor), and
 [videoredactor](https://github.com/Erlbon/videoredactor) tools,
@@ -35,6 +37,42 @@ treats it as a plain editable field, same as any other -- see
 Features below for the v2.1 draft fields ComicTagger already
 understands that this app now supports too).
 
+## Menus and shortcuts
+
+The menu bar follows the layout every Redactor app shares (File, Edit,
+View, then this app's Metadata and Repair, then Tools and Help). Every
+command is also searchable in the **Command Palette** (Ctrl+K).
+
+- **File**: Open Files... (Ctrl+O), Open Folder... (Ctrl+Shift+O),
+  **Include Subfolders** (a tick: Open Folder and Refresh List also look
+  in subfolders), Save As... (Ctrl+Shift+S), Save All (Ctrl+Shift+A;
+  Ctrl+S also still saves all changed files), Rename File... (F2), Undo
+  Last Rename, Rename / Export / Move... (Ctrl+E), Rename / Export / Move
+  Macros (slots 1-5 on **Ctrl+Shift+1** to **Ctrl+Shift+5**), Export /
+  Import Settings..., Remove from List (Del), Clear List, Exit.
+- **Edit**: Undo (Ctrl+Z), Redo (Ctrl+Y), Apply to Selected
+  (Ctrl+Enter), **Redact** (Ctrl+Shift+E), Edit Redact Recipe..., Search
+  and Replace... (Ctrl+H), Change Case..., Auto-Number....
+- **View**: Show Metadata Panel, Zoom In / Zoom Out (Ctrl++ / Ctrl+-),
+  Reset Zoom (Ctrl+0), Refresh List (F5 or Ctrl+R), Command Palette...
+  (Ctrl+K).
+- **Metadata**: Parse Filename... (Ctrl+I), Read Filename Tags, Look Up
+  (Comic Vine, Grand Comics Database, GCD Local Database, ComicRack
+  Library, Bedetheque, Manga), Credit Pages..., Number Issues....
+- **Repair**: Validate and Fix..., Resize Images..., Tag Low-Res Scans,
+  Remove Credit Pages..., Clean Up Archive Contents..., Convert to
+  CBZ..., Find Duplicates....
+- **Tools**: Preferences... (Ctrl+,), API Keys..., Known Credit Pages...,
+  Conversion Settings..., GCD Local Database..., ComicRack Library
+  Database..., Collection (Scan Collection Folder..., Collection
+  Report..., Compare Library with GCD...), Columns..., Genres...,
+  Languages....
+- **Help**: Changelog..., Credits..., About.
+
+There are no Ctrl+Alt shortcuts (they clash with AltGr on many keyboard
+layouts). Right-clicking a row offers the same commands for the
+selection.
+
 ## Features
 
 - Uses the same explicit light/dark theme as every other Redactor app
@@ -51,23 +89,24 @@ understands that this app now supports too).
   zoom control pushed to the far right -- matching epubredactor's own
   toolbar shape exactly, sharing the same `QAction`s as the menus so
   neither drifts out of sync with the other.
-- **Undo** (Ctrl+Z, or the toolbar/Operations menu) reverts the last
+- **Undo** (Ctrl+Z, or the toolbar/Edit menu) reverts the last
   in-memory metadata edit -- bulk edit, a lookup apply, Parse Filename,
   Search/Replace, or Case Conversion -- up to 5 deep. Deliberately
   doesn't cover physical file operations (Rename/Export, Save): those
   are already deliberate, confirmed actions of their own.
-- **Search/Replace...** and **Case Conversion...** (Operations menu)
+- **Search and Replace...** (Ctrl+H) and **Change Case...** (Edit menu)
   work across any ComicInfo field (Search/Replace can also target the
   filename itself, actually renaming the file on accept) -- both show
   a before/after preview with a per-row Apply checkbox before anything
   is written.
-- **Remove Files** (Delete key), **Refresh List** (F5), and **Clear
+- **Remove from List** (Del), **Refresh List** (F5, View menu), and **Clear
   List** (File menu) manage the loaded list itself -- Remove/Clear only
-  ever touch the in-memory list, never disk; Refresh re-scans the
+  ever touch the in-memory list, never disk (both ask first when a
+  removed file has unsaved edits); Refresh re-scans the
   folders your loaded files live in for new ones and re-reads
   everything still present, discarding unsaved edits (confirmed first).
 - **Columns are drag-to-reorder** (grab a header) **and hideable** (right-
-  click a header, or Settings > Add/Remove Columns...) -- both the
+  click a header, or Tools > Columns...) -- both the
   order and which columns are visible persist across restarts, keyed
   by column name so a future column added in code can't silently
   scramble a saved preference. Right-clicking a row offers "Open
@@ -81,18 +120,23 @@ understands that this app now supports too).
   still exists and is still written to by a lookup, Parse Filename,
   Search/Replace, or Case Conversion while hidden; only the on-screen
   row disappears.
-- **Rename / Export Files...** (File menu, F2) renders a `%series%
+- **Rename / Export / Move...** (File menu, Ctrl+E) renders a `%series%
   %number% - %title%`-style pattern (any ComicInfo field as a
   placeholder, not just a curated subset) into a new filename for
   every selected file, previewed before you commit -- rename in place
-  or export renamed copies to a folder, originals untouched either way.
-- **Parse Filename...** (Import menu, F3) is the reverse: extracts
+  or export renamed copies to a folder, originals untouched either way,
+  or move the files into a folder tree under a library root. **Save as
+  Macro** stores the dialog's setup in one of five slots, run straight on
+  the selected files with **Ctrl+Shift+1** to **Ctrl+Shift+5** (File >
+  Rename / Export / Move Macros).
+- **Parse Filename...** (Metadata menu, Ctrl+I) is the reverse: extracts
   metadata FROM a filename using the same pattern syntax, auto-
   detecting which of your past patterns fits the current batch best.
   Routed through the same overwrite-conflict protection as a lookup
   (see below) -- it won't silently clobber a field you've already set.
-- **Quick single-file rename**: double-click a Filename cell, or
-  right-click a single selected file > Rename File..., to fix a typo
+- **Quick single-file rename**: double-click a Filename cell, press
+  F2 (File > Rename File...), or right-click a single selected file >
+  Rename File..., to fix a typo
   directly without the pattern-based tool above --
   `redactor_common.gui.rename_single_file.rename_single_file()`.
   Both dialogs share one pattern history.
@@ -105,8 +149,8 @@ understands that this app now supports too).
   than one file switches
   the panel to **bulk edit** mode: every field starts blank, and only
   the ones you actually fill in get applied -- to every selected file
-  at once -- via the toolbar/Operations menu's "Apply to N Selected
-  Files" action. A field left blank is left untouched on every file,
+  at once -- via the toolbar/Edit menu's "Apply to N Selected" action
+  (Ctrl+Enter). A field left blank is left untouched on every file,
   not cleared.
 - Sidebar shows the first page (by filename sort order) as a cover
   thumbnail (single-file selection only -- bulk mode hides it, since
@@ -116,7 +160,7 @@ understands that this app now supports too).
   divider to give the cover more (or less) room.
 - Genre and Language (ISO) each have a "+" quick-pick button next to
   the field -- a curated default list plus your own custom entries,
-  managed via Settings > Add/Remove Genres.../Add/Remove Languages...
+  managed via Tools > Genres... / Tools > Languages...
   (built on the same hideable-defaults-plus-custom-list pattern
   epubredactor uses). Picking a genre adds it alongside whatever's
   already typed; picking a language sets the ISO code. The picker is a
@@ -149,7 +193,7 @@ understands that this app now supports too).
 - **Ext column**: each file's extension, plus its real format when the
   two disagree -- `CBR → ZIP` for a ZIP someone renamed to .cbr, `CBZ →
   RAR` for the reverse. Sort by it to group what still needs converting.
-- **Import > Read Filename Tags** fills ComicInfo from scene-style
+- **Metadata > Read Filename Tags** fills ComicInfo from scene-style
   filenames with no pattern to type: series, issue number, "3 of 12"
   counts, `v01` volumes, "001 - Title" issue titles, and years (a year
   before the issue number, as in `Batman (2016) 045`, is the series'
@@ -164,7 +208,7 @@ understands that this app now supports too).
   per-field review; undoable. The same parser now seeds every online
   lookup, which previously found no issue number at all for
   `.webp.cbz` names.
-- `Import > Convert to CBZ` converts CBR/CBT/CB7 and mislabeled files
+- `Repair > Convert to CBZ...` converts CBR/CBT/CB7 and mislabeled files
   (see "Foreign archive formats" below).
 - **Size column**: each book's typical page width, colored **yellow**
   (low-res, under 1000px), **green** (acceptable, 1000-1599px) or
@@ -177,9 +221,9 @@ understands that this app now supports too).
   first 2 and last 4 pages as thumbnails. Tick the credit page and
   Remove: it's removed from the file and **remembered**, like
   epubredactor's Junk Cover flag. From then on the **Credit Pages**
-  column flags every file containing that page, and **Operations >
+  column flags every file containing that page, and **Repair >
   Remove Credit Pages...** removes them all after a thumbnail review.
-- **Operations > Validate / Fix Issues...** (selected files, or all)
+- **Repair > Validate and Fix...** (selected files, or all)
   checks each ComicInfo.xml and proposes a fix per problem: PageCount
   out of step with the archive, impossible dates, scene tags or file
   extensions left in Series/Title ("Batman (Zone-Empire).webp"), GCD's
@@ -187,7 +231,7 @@ understands that this app now supports too).
   LanguageISO, and Black & White / Manga suggestions from the tags.
   Count lower than Number is reported. Reviewed per finding; the ticked
   fixes are ordinary edits -- one Undo step, written on Save.
-- **Operations > Clean Up Archive Contents...** (selected files, or
+- **Repair > Clean Up Archive Contents...** (selected files, or
   all) tidies the names *inside* each archive -- where release groups
   put their name too ("Zone-Empire/Batman 045 (2018) (Zone-Empire)
   p1.jpg"), and nested folders make paths too long once extracted.
@@ -200,7 +244,7 @@ understands that this app now supports too).
   ComicInfo.xml are unchanged. Reviewed first, per file; originals go
   to the Recycle Bin. The Redact step offers the same three options
   (page renaming is off there unless the recipe turns it on).
-- **Collection > Scan Collection Folder...** -- a snapshot of your
+- **Tools > Collection > Scan Collection Folder...** -- a snapshot of your
   whole organised collection, taken only when you press it (nothing is
   watched; cbzredactor stays a tool for incoming files). Every comic
   under the chosen folder becomes one row of a CSV -- path, size, date,
@@ -211,7 +255,7 @@ understands that this app now supports too).
   characters are read too. Rescanning re-reads only changed files, and
   a stopped scan keeps what it read and carries on next time. Run it on
   the collection's own computer and carry the zip wherever you like.
-- **Collection > Collection Report...** reads that scan (never the
+- **Tools > Collection > Collection Report...** reads that scan (never the
   files) and learns the folder layout from the collection itself: a
   series is its name plus its volume ("vN" in the file or folder
   name), TPBs sit with their series, spin-offs in their parent's folder
@@ -241,8 +285,8 @@ understands that this app now supports too).
   are never pre-ticked. Blank pages are never learned (they'd match
   every blank page). ComicInfo's PageCount and per-page entries are
   corrected; the original file goes to the Recycle Bin. Learned pages:
-  **Settings > Known Credit Pages...**, with Forget.
-- **Operations > Find Duplicates...** finds the same comic loaded more
+  **Tools > Known Credit Pages...**, with Forget.
+- **Repair > Find Duplicates...** finds the same comic loaded more
   than once -- another release, resolution or format -- and suggests
   the copy to keep: highest page resolution, then most pages (credit
   pages not counted), then the most filled-in ComicInfo, then the
@@ -254,14 +298,14 @@ understands that this app now supports too).
   labelled as such). Files sharing a Comic Vine/GCD link in Web are
   grouped too. Review with covers side by side; ticked copies go to
   the Recycle Bin and leave the list.
-- **Operations > Tag Low-Res Scans** adds a `Low-res scan` entry to the
+- **Repair > Tag Low-Res Scans** adds a `Low-res scan` entry to the
   ComicInfo **Tags** field of every low-res (yellow) book, so they can
   be found and replaced with better copies later (your comic server can
   filter on it too). Running it again removes the tag from books that
   are no longer low-res. Other tags are kept, `ScanInformation` (the
   scan group's credit) is never touched; undoable, written on Save.
   There's deliberately no upscaling: plain resampling can't add detail.
-- `Import > Look Up via Comic Vine...` goes through the files one at a
+- `Metadata > Look Up > Comic Vine...` goes through the files one at a
   time and you decide while looking at the covers, in two steps, after the
   ComicRack "Comic Vine Scraper" plugin. **1. Series:** the matching
   [Comic Vine](https://comicvine.gamespot.com/api/) volumes, best fit
@@ -274,8 +318,8 @@ understands that this app now supports too).
   you choose is remembered for the next file of the same series. Fills in
   series, title, summary, date, credits, characters/teams/locations and
   publisher (then the usual overwrite review). Needs a free Comic Vine API
-  key (Settings > Comic Vine API Key...).
-- `Import > Look Up via Grand Comics Database...` -- same Series +
+  key (Tools > API Keys...).
+- `Metadata > Look Up > Grand Comics Database...` -- same Series +
   Number search and review-then-Apply flow, against
   [comics.org](https://www.comics.org/)'s open API (no key needed).
   Best for older/obscure/international issues Comic Vine doesn't have.
@@ -292,13 +336,13 @@ understands that this app now supports too).
   ":" it stands for ("G.I. Joe - A Real American Hero" finds "G.I.
   Joe: A Real American Hero"), and record the issue's GCD page in
   **Web**. GCD limits anonymous use per hour; an optional free GCD
-  account (**Settings > GCD Account...**) raises that limit, and the
+  account (**Tools > API Keys...**) raises that limit, and the
   batch stops cleanly with a clear message when the limit is reached
   instead of failing every remaining file.
-- `Import > Look Up via GCD (Local Database)...` -- the same lookup
+- `Metadata > Look Up > GCD Local Database...` -- the same lookup
   against **your own downloaded copy** of the Grand Comics Database
   (its SQLite data dump, `current.zip`, free for registered comics.org
-  users -- see **Settings > GCD Local Database...** for step-by-step
+  users -- see **Tools > GCD Local Database...** for step-by-step
   instructions; the app never bundles or downloads it). Milliseconds
   per file instead of seconds, works offline, no hourly limit, and
   structured credits. Matching is word-based and ignores punctuation,
@@ -308,8 +352,8 @@ understands that this app now supports too).
   editions rank ahead of translated reprints, which are offered under
   Other Matches. No cover images (the dump has none). Never writes to
   the database file.
-- `Import > Look Up via ComicRack Library...` -- the same local lookup
-  against **your own ComicRack library**: **Settings > ComicRack
+- `Metadata > Look Up > ComicRack Library...` -- the same local lookup
+  against **your own ComicRack library**: **Tools > ComicRack
   Library Database... > Build from ComicRack Library...** converts
   ComicRack's `ComicDb.xml` (plain or zipped) into a database with the
   GCD dump's table layout -- about 30-40 s for a 234k-book library,
@@ -318,7 +362,7 @@ understands that this app now supports too).
   come along, file paths and reading history never do. A blank issue
   number now also finds a #1 (one-shots are #1 on Comic Vine), in this
   lookup and the GCD one.
-- `Import > Compare ComicRack Library with GCD...` -- compares that
+- `Tools > Collection > Compare Library with GCD...` -- compares that
   converted library with the local GCD database and saves the
   difference (a database plus CSV spreadsheets): series not found in
   GCD, issues GCD doesn't have, and GCD issues missing credits,
@@ -329,7 +373,7 @@ understands that this app now supports too).
   series and runs GCD splits over several series; every match records
   how it was made. GCD's dump holds no cover images, so covers aren't
   compared.
-- `Import > Look Up via Bedetheque...` -- same Series + Number
+- `Metadata > Look Up > Bedetheque...` -- same Series + Number
   search and review-then-Apply flow, against [Bedetheque](https://www.bedetheque.com/),
   the reference database for French-language "bande dessinée" (BD).
   Best for francophone comics Comic Vine and GCD tend to have thin or
@@ -378,7 +422,7 @@ understands that this app now supports too).
   (Empire).cbz` guesses series "Batman", number "1", not the whole
   bracketed mess. Still just a best-effort guess for a blank Series
   field; use the correction form above when it's wrong.
-- **Resize Images...** (Operations menu) shrinks oversized page images
+- **Resize Images...** (Repair menu) shrinks oversized page images
   down to a target maximum width -- for a library with extremely large
   scans, without needing an external tool like ImageMagick (uses
   [Pillow](https://python-pillow.org/) instead, which bundles straight
@@ -448,21 +492,27 @@ its extension. A `.cbr` that's really a ZIP converts by a plain copy
 (no unpacking); a `.cbz` that's really a RAR/7z/tar is first renamed to
 its true extension, then converted normally.
 
-What **Load Files**/**Load Folder** does with files that need
-converting is set in **Settings > Converting to CBZ...**:
+What **File > Open Files...**/**Open Folder...** does with files that
+need converting is set in **Tools > Preferences > Conversion** (the same
+settings are also under **Tools > Conversion Settings...**):
 
 - **Add to the list unconverted** (the default) -- listed as greyed,
   read-only rows (Status "Needs conversion"). Sort by Ext, then select
-  and right-click > **Convert to CBZ** (or use **Import > Convert to
-  CBZ**, which converts the selected unconverted rows, or all of them).
+  and right-click > **Convert to CBZ** (or use **Repair > Convert to
+  CBZ...**, which converts the selected unconverted rows, or all of them).
   Each row is replaced by its converted .cbz in place.
 - **Convert automatically** -- converted while loading, no prompt.
 - **Ask each time** -- one prompt per load: **Convert Now**, **Add
-  Unconverted**, or **Skip**, with a "Remember my choice" box that
-  saves Convert Now / Add Unconverted as the setting.
+  Unconverted**, or **Skip**, with a box that remembers ONLY Convert
+  Now / Add Unconverted as the setting (never the Recycle Bin or resize
+  choices).
 
-The same dialog has **Move originals to the Recycle Bin after a
-successful conversion** (off by default), used by every conversion.
+The same page has **Move originals to the Recycle Bin after a
+conversion** (off by default), used by every conversion, and **Resize
+pages while converting** (Ask once per batch / Always resize / Never
+resize). The per-batch question's "Don't ask again" box says which
+button sets which: Resize While Converting sets Always (lossy), Convert
+Without Resizing sets Never.
 
 Every conversion is checked before anything else happens: the new
 .cbz must open, pass its CRC checks, and hold as many page images as
@@ -633,7 +683,7 @@ has no name for is `skipped`. There is no undo for a move either: preview with `
 
 `cbzredactor redact [PATH...] [--recipe FILE] [--enable STEP] [--disable STEP] [--threshold N] [--trash-dir FOLDER] [--list-steps]`
 
-Runs the Redact recipe on the comics, the same steps as Operations > Redact: convert, clean up archive contents,
+Runs the Redact recipe on the comics, the same steps as Edit > Redact: convert, clean up archive contents,
 remove credit pages, resize, fill from the path and the filename, database lookups, fix ComicInfo issues, tag
 low-res scans, rename, move into folders. Each file is saved in place and its original goes to the Recycle Bin
 (or `--trash-dir`). Guesses below the confidence threshold are listed under "needs review" and not applied. There

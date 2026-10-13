@@ -77,6 +77,17 @@ def _settings():
     return QSettings(_settings_ini_path(), QSettings.Format.IniFormat)
 
 
+def _int_value(key: str, default: int, settings=None) -> int:
+    """An int setting that never raises: a hand-edited or damaged ini value
+    ("abc", "2.5", a list) gives `default`, not a crash when a dialog opens.
+    (QSettings.value(type=int) itself raises TypeError on such a value.)"""
+    raw = (settings or _settings()).value(key, default)
+    try:
+        return int(str(raw).strip())
+    except (TypeError, ValueError):
+        return default
+
+
 def _legacy_comicvine_api_key() -> str:
     return str(_settings().value(_COMICVINE_API_KEY, ""))
 
@@ -306,7 +317,7 @@ def save_cleanup_options(options) -> None:
 
 
 def load_resize_max_width() -> int:
-    return int(_settings().value(_RESIZE_MAX_WIDTH_KEY, _DEFAULT_RESIZE_MAX_WIDTH))
+    return _int_value(_RESIZE_MAX_WIDTH_KEY, _DEFAULT_RESIZE_MAX_WIDTH)
 
 
 def save_resize_max_width(max_width: int) -> None:
@@ -314,7 +325,7 @@ def save_resize_max_width(max_width: int) -> None:
 
 
 def load_resize_jpeg_quality() -> int:
-    return int(_settings().value(_RESIZE_JPEG_QUALITY_KEY, _DEFAULT_RESIZE_JPEG_QUALITY))
+    return _int_value(_RESIZE_JPEG_QUALITY_KEY, _DEFAULT_RESIZE_JPEG_QUALITY)
 
 
 def save_resize_jpeg_quality(quality: int) -> None:
@@ -356,7 +367,7 @@ def save_recycle_originals(enabled: bool) -> None:
 
 
 def load_resize_max_height() -> int:
-    return int(_settings().value(_RESIZE_MAX_HEIGHT_KEY, 0))
+    return _int_value(_RESIZE_MAX_HEIGHT_KEY, 0)
 
 
 def save_resize_max_height(max_height: int) -> None:
@@ -711,7 +722,7 @@ def load_rename_zero_pad() -> tuple[bool, int]:
     settings = _settings()
     return (
         bool(settings.value(_ZERO_PAD_ENABLED_KEY, False, type=bool)),
-        int(settings.value(_ZERO_PAD_WIDTH_KEY, 2, type=int)),
+        _int_value(_ZERO_PAD_WIDTH_KEY, 2, settings),
     )
 
 
@@ -723,7 +734,7 @@ def save_rename_zero_pad(enabled: bool, width: int) -> None:
 
 def load_auto_number_padding() -> int:
     """Auto-Numbering's "Zero-pad to" width, remembered between runs."""
-    return int(_settings().value(_AUTO_NUMBER_PADDING_KEY, 2, type=int))
+    return _int_value(_AUTO_NUMBER_PADDING_KEY, 2)
 
 
 def save_auto_number_padding(width: int) -> None:

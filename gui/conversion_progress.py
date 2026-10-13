@@ -26,8 +26,10 @@ import os
 import threading
 from typing import Any, Callable, Iterable, TypeVar
 
-from PyQt6.QtWidgets import QApplication, QWidget
+from PyQt6.QtCore import QTimer
+from PyQt6.QtWidgets import QWidget
 
+from redactor_common.gui.background_call import call_in_background
 from redactor_common.gui.progress import ProgressReporter
 
 T = TypeVar("T")
@@ -140,23 +142,21 @@ class ConversionRun:
         convert_to_cbz -- on a worker thread, keeping the dialog alive until it
         returns. Returns its result; an exception it raised (including
         ConversionCancelled) is re-raised here, on the GUI thread."""
-        outcome: dict[str, Any] = {}
-
-        def work() -> None:
-            try:
-                outcome["result"] = fn(*args, progress=self._on_progress, should_cancel=self._cancel.is_set, **kwargs)
-            except BaseException as exc:  # re-raised below
-                outcome["error"] = exc
-
-        thread = threading.Thread(target=work, name="convert-to-cbz", daemon=True)
-        thread.start()
-        while thread.is_alive():
-            thread.join(_POLL_SECONDS)
+        # The shared call_in_background waits in a real event loop (it used to be a
+        # join()/processEvents() spin here); a timer copies the worker's latest
+        # progress into the dialog meanwhile. Cancel is the run's own event, which
+        # convert_to_cbz polls, so the call is always waited for, never abandoned.
+        timer = QTimer()
+        timer.setInterval(int(_POLL_SECONDS * 1000))
+        timer.timeout.connect(self._refresh)
+        timer.start()
+        try:
+            return call_in_background(
+                fn, *args, progress=self._on_progress, should_cancel=self._cancel.is_set, **kwargs
+            )
+        finally:
+            timer.stop()
             self._refresh()
-            QApplication.processEvents()
-        if "error" in outcome:
-            raise outcome["error"]
-        return outcome["result"]
 
     def process(
         self, items: Iterable[T], step: Callable[[T, int], None], label_for: Callable[[T], str] | None = None

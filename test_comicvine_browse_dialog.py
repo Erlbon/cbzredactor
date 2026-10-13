@@ -75,7 +75,7 @@ def net(monkeypatch):
         return ComicVineIssueDetails(volume_name="Batman", issue_number="2", name=f"details of {detail_url}")
 
     monkeypatch.setattr("gui.app_settings.load_comicvine_api_key", lambda: "KEY")
-    monkeypatch.setattr(dlg_mod, "call_in_background", lambda fn, *a, **k: fn(*a))
+    monkeypatch.setattr(dlg_mod, "run_busy", lambda parent, label, fn, *a, **k: fn(*a))
     monkeypatch.setattr(dlg_mod, "search_volumes", search_volumes)
     monkeypatch.setattr(dlg_mod, "fetch_volume_issues", fetch_volume_issues)
     monkeypatch.setattr(dlg_mod, "download_image", download_image)
@@ -191,6 +191,21 @@ def test_an_api_error_is_shown_in_a_warning_not_raised(tmp_path, net, monkeypatc
     dialog = ComicVineBrowseDialog([_book(tmp_path)])
     assert shown and "Invalid API key" in shown[0]
     assert dialog.volume_table.rowCount() == 0
+
+
+def test_requests_run_under_a_cancellable_busy_dialog_and_cancel_is_quiet(tmp_path, net, monkeypatch):
+    # P1: the Comic Vine calls used to run with only a wait cursor (no dialog, no Cancel).
+    shown, seen = [], []
+    monkeypatch.setattr(dlg_mod.QMessageBox, "warning", lambda *a, **k: shown.append(a[2]))
+
+    def cancelled(parent, label, fn, *a, cancellable=False, on_cancel=None, **k):
+        seen.append(cancellable)
+        return on_cancel  # what run_busy returns when Cancel was clicked
+
+    monkeypatch.setattr(dlg_mod, "run_busy", cancelled)
+    dialog = ComicVineBrowseDialog([_book(tmp_path)])
+    assert seen and all(seen)
+    assert shown == [] and dialog.volume_table.rowCount() == 0 and net["search"] == 0
 
 
 def test_editing_the_series_and_searching_again_shows_the_new_results(tmp_path, net):

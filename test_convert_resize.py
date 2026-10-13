@@ -128,18 +128,18 @@ def test_pages_come_out_in_source_order_with_many_workers(tmp_path):
 # -- Recycle Bin on an in-place resize ----------------------------------------------------
 
 
-def test_in_place_resize_hands_the_original_to_dispose_before_replacing_it(tmp_path):
+def test_in_place_resize_hands_the_original_to_dispose_after_replacing_it(tmp_path):
     path = _zip(tmp_path / "b.cbz", _book_files(2))
     seen = []
 
     def dispose(p):
-        # The finished, checked file is waiting beside it, the original is still whole.
-        seen.append((p, _size_in(p, "000.jpg"), sorted(os.listdir(tmp_path))))
+        # The resized file already has the real name; the original is whole beside it.
+        seen.append((p, _size_in(p, "000.jpg"), _size_in(path, "000.jpg"), sorted(os.listdir(tmp_path))))
         os.remove(p)
 
     CbzBook(path).resize_images(1000, dispose_original=dispose)
-    assert seen[0][0] == path and seen[0][1] == (2000, 3000)
-    assert "b.cbz.tmp_resize" in seen[0][2]
+    assert seen[0][0] == str(tmp_path / "b.redact-orig.cbz") and seen[0][1] == (2000, 3000)
+    assert seen[0][2] == (1000, 1500) and seen[0][3] == ["b.cbz", "b.redact-orig.cbz"]
     assert _size_in(path, "000.jpg") == (1000, 1500) and _leftovers(tmp_path) == ["b.cbz"]
 
 
@@ -386,7 +386,8 @@ def test_resize_in_place_sends_the_original_to_the_recycle_bin_and_remembers_the
     monkeypatch.setattr(mw, "move_to_trash", fake_trash)
     monkeypatch.setattr(mw, "ResizeImagesDialog", _FakeResizeDialog)
     window.open_resize_images_dialog()
-    assert sorted(trashed) == sorted(paths)
+    # The bin gets each original under its set-aside name (core/zip_rewrite.py).
+    assert sorted(trashed) == sorted(os.path.splitext(p)[0] + ".redact-orig.cbz" for p in paths)
     assert all(_size_in(p, "000.jpg")[0] == 1000 for p in paths)
     assert app_settings.load_resize_in_place() is True and app_settings.load_resize_recycle_original() is True
     assert app_settings.load_resize_max_width() == 1000 and app_settings.load_resize_jpeg_quality() == 85
@@ -651,6 +652,9 @@ def test_the_dialog_class_is_the_one_the_window_asks_with():
     assert mw.ConvertResizeDialog is ConvertResizeDialog
     dialog = ConvertResizeDialog(5, ResizeOptions(1440, 90, None, None))
     assert not dialog.remember() and dialog.options() == ResizeOptions(1440, 90, None, None)
+    # T6: the box says what it stores (it used to read only "Remember my choice").
+    text = dialog.remember_check.text()
+    assert "Always resize" in text and "Never resize" in text and "lossy" in text
     dialog.remember_check.setChecked(True)
     assert not dialog.remember()  # closing with X (no button) is never remembered
     dialog.yes_button.click()

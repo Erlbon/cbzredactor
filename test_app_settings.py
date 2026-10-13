@@ -61,3 +61,24 @@ def test_padding_choices_are_remembered(monkeypatch, tmp_path):
     assert app_settings.load_auto_number_padding() == 2
     app_settings.save_auto_number_padding(4)
     assert app_settings.load_auto_number_padding() == 4
+
+
+def test_hand_edited_int_settings_fall_back_to_defaults(monkeypatch, tmp_path):
+    # T8: int(value) on "abc" crashed the Resize / Rename dialogs on open.
+    from gui import app_settings
+
+    ini = tmp_path / "s.ini"
+    ini.write_text(
+        "[resize]\nmax_width=wide\njpeg_quality=2.5\nmax_height=tall\n"
+        "[rename]\nzero_pad_width=x\n[auto_numbering]\npadding=two\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(app_settings, "_settings_ini_path", lambda: str(ini))
+    options = app_settings.load_resize_options()
+    assert options.max_width == app_settings._DEFAULT_RESIZE_MAX_WIDTH
+    assert options.jpeg_quality == app_settings._DEFAULT_RESIZE_JPEG_QUALITY
+    assert options.max_height is None
+    assert app_settings.load_rename_zero_pad()[1] == 2
+    assert app_settings.load_auto_number_padding() == 2
+    app_settings.save_resize_max_width(1200)
+    assert app_settings.load_resize_max_width() == 1200

@@ -22,6 +22,7 @@ from redactor_common.core.dump_import import DumpImportError
 from redactor_common.core.local_db import forget_cached
 from redactor_common.gui.dump_import_runner import run_dump_import
 from redactor_common.gui.local_db_settings_dialog import LocalDatabaseSettingsDialog
+from redactor_common.gui.progress import run_busy
 
 from core.comicrack_import import build_comicrack_database
 from core.gcd_local import GcdLocalDatabase, GcdLocalError
@@ -97,7 +98,8 @@ class ComicRackSettingsDialog(LocalDatabaseSettingsDialog):
             title="ComicRack Library Database",
             instructions_html=INSTRUCTIONS,
             path=app_settings.load_comicrack_database(),
-            check=_check,
+            # Counting a big library's rows can take a while: off the GUI thread.
+            check=lambda path: run_busy(self, "Checking the database...", _check, path, title="Check File"),
             save=app_settings.save_comicrack_database,
             error_types=(GcdLocalError,),
             build=lambda dialog: build_from_comicrack(dialog, dialog.path_edit.text().strip()),

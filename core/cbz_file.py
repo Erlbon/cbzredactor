@@ -260,8 +260,8 @@ def resize_zip(
     for in place). ONE pass: pages are read, resized on the thread pool and
     written in order; everything else is copied as it is, and the archive
     comment and every entry's metadata are kept (core/zip_rewrite.py).
-    `dispose_original(path)` runs on the destination just before the new file
-    replaces it (the Recycle Bin). Raises ResizeCancelled on cancel, CbzError
+    `dispose_original` gets the original (renamed aside to its
+    `.redact-orig` name) once the new file is in place (the Recycle Bin). Raises ResizeCancelled on cancel, CbzError
     otherwise; the temp file is removed in every case."""
     resizer: Optional[PageResizer] = None
     workers = workers or default_resize_workers()
@@ -587,10 +587,10 @@ class CbzBook:
         rest, so per-page tags stay on the right pages. Returns the
         number of pages removed.
 
-        `dispose_original(path)` is called on the original file just
-        before the new one replaces it -- the GUI passes "move to the
-        Recycle Bin", since this can't be undone. If it raises, nothing
-        is replaced.
+        `dispose_original` is called on the original (renamed aside to
+        its `.redact-orig` name) once the new file is in place -- the GUI
+        passes "move to the Recycle Bin", since this can't be undone. If
+        it raises, the original is put back and nothing is replaced.
 
         Refuses a book with unsaved metadata edits: this writes
         ComicInfo.xml too, and must not quietly save someone's
@@ -743,9 +743,10 @@ class CbzBook:
         a huge book is never held in memory all at once. Output order
         always matches the source's.
 
-        `dispose_original(path)` (in place only) is called on the original
-        just before the resized file replaces it -- the GUI passes "move to
-        the Recycle Bin"; if it raises, nothing is replaced.
+        `dispose_original` (in place only) is called on the original,
+        renamed aside to its `.redact-orig` name, once the resized file is
+        in place -- the GUI passes "move to the Recycle Bin"; if it raises,
+        the original is put back and nothing is replaced.
 
         `progress(done, total)` is called after each entry is written
         (safe to call from a worker thread: this method touches no GUI).

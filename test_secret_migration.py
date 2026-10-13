@@ -134,24 +134,30 @@ def test_comicvine_key_dialog_saves_to_store(fake_keyring, tmp_ini):
     assert "cv-old-key" not in text and "typed-key" not in text
 
 
-def test_gcd_dialog_saves_password_to_store(fake_keyring, tmp_ini):
-    from gui.gcd_account_dialog import GcdAccountDialog
-
-    dialog = GcdAccountDialog()
-    dialog.username_edit.setText("me")
-    dialog.password_field.edit.setText("hunter2")
-    dialog.accept()
-    assert app_settings.load_gcd_account() == ("me", "hunter2")
-    assert "hunter2" not in _ini_text(tmp_ini)
-
-
-def test_gcd_dialog_empty_password_keeps_stored(fake_keyring):
-    from gui.gcd_account_dialog import GcdAccountDialog
+def test_gcd_section_empty_password_keeps_stored(fake_keyring):
+    # The old single-purpose GCD account dialog is gone (nothing opened it); Tools >
+    # API Keys... is the one place, with the same rule.
+    from gui.api_keys_dialog import ApiKeysDialog
 
     app_settings.save_gcd_account("me", "kept")
-    dialog = GcdAccountDialog()
+    dialog = ApiKeysDialog()
     dialog.accept()
     assert app_settings.load_gcd_account() == ("me", "kept")
+
+
+def test_test_login_runs_off_the_gui_thread_under_a_busy_dialog(fake_keyring, monkeypatch):
+    # P1: check_login (a network call) used to run on the GUI thread behind a wait cursor.
+    import gui.api_keys_dialog as mod
+
+    calls, shown = [], []
+    monkeypatch.setattr(mod, "run_busy", lambda parent, label, fn, *a, **k: calls.append((fn, a, k)))
+    monkeypatch.setattr(QMessageBox, "information", lambda *a, **k: shown.append(a[2]))
+    dialog = mod.ApiKeysDialog()
+    dialog.username_edit.setText("me")
+    dialog.password_field.edit.setText("pw")
+    dialog._test_login()
+    assert calls and calls[0][0] is mod.check_login and calls[0][1] == ("me", "pw")
+    assert calls[0][2]["cancellable"] is True and shown == ["Login accepted."]
 
 
 def test_dialog_offers_fallback_and_remembers_yes(unavailable, monkeypatch, tmp_ini):

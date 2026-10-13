@@ -17,6 +17,11 @@ from gui import app_settings
 _app = QApplication.instance() or QApplication(sys.argv)
 
 
+def _aside(path):
+    """The name the original is set aside under before it goes to the bin."""
+    return path[: -len(".cbz")] + ".redact-orig.cbz"
+
+
 def _tag_page(w=1200, h=1800):
     image = Image.new("RGB", (w, h), (20, 20, 30))
     draw = ImageDraw.Draw(image)
@@ -82,7 +87,7 @@ def test_learn_in_one_book_then_find_and_remove_in_another(window, tmp_path, mon
     window.open_credit_pages_dialog(first)
 
     assert first.actual_page_count == 8
-    assert window.trashed == [raw]
+    assert window.trashed == [_aside(raw)]
     assert len(window._known_credits.pages) == 1
 
     # 2. The Credit Pages column flags the other, converted book.
@@ -104,7 +109,7 @@ def test_learn_in_one_book_then_find_and_remove_in_another(window, tmp_path, mon
 
     assert seen["rows"] == 1
     assert second.actual_page_count == 8
-    assert window.trashed == [raw, converted]
+    assert window.trashed == [_aside(raw), _aside(converted)]
     with zipfile.ZipFile(converted) as zf:
         assert "Other-0008.webp" not in zf.namelist()
     assert window.table.item(1, col).text() == ""
