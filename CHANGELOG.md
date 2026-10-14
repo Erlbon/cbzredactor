@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-10-14#10 -- A progress box could stay on screen for good
+
+- Fixed: a "Scanning..." (or similar) progress box could stay on screen permanently after its work had finished, when the work took about a third of a second or more. The box is now closed together with its work (redactor_common 2026-10-14-08). Nothing else changes.
+
 ## 2026-10-14#09 -- A smaller download
 
 - The Windows exe is about 8 MB smaller than the 2026-10-14#08 download (roughly 46 MB instead of 53.5 MB). The 2026-10-14#08 build had numpy bundled in by accident (it was installed on the build machine for another tool; this app never uses it). The build now leaves numpy out and is made in a clean environment. No change to what the app does.
