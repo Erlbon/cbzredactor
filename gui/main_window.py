@@ -49,7 +49,9 @@ from redactor_common.gui.async_preview import AsyncPreviewLoader
 from redactor_common.gui.background_call import call_in_background
 from redactor_common.gui.visible_rows import VisibleRowsWatcher
 from redactor_common.core.rename_pattern import unique_path
+from redactor_common.core.folder_discovery import find_by_extension
 from redactor_common.core.folder_refresh import find_new_files_in_loaded_folders
+from redactor_common.core.temp_names import is_app_temp_name
 from redactor_common.core.undo import UndoManager
 from redactor_common.gui.about_dialog import AboutDialog, ChangelogDialog, CreditsDialog
 from redactor_common.gui.action_factory import make_action
@@ -113,7 +115,7 @@ from core.cbz_file import CbzBook, CbzError, ResizeCancelled, path_needs_convers
 from core import history
 from core.comicinfo_check import SCAN_ISSUES, check_book, scan_status
 from core.foreign_archive_convert import relabel_mislabeled_cbz
-from redactor_common.core.trash import TrashError, move_to_trash
+from redactor_common.core.trash import TrashError, move_to_trash, trash_with_retries
 from core.image_resize import ResizeOptions
 from core.page_dimensions import SIZE_LOW, SIZE_OK, SIZE_OVERSIZED, PageSizeStats
 from core.scan_quality_tag import LOW_RES_TAG, add_tag, has_tag, remove_tag
@@ -334,36 +336,16 @@ def _add_review_checkbox(dialog) -> QCheckBox | None:
     return check
 
 
-def _shell_path(path: str) -> str:
-    """The plain form of a path the Windows shell (the Recycle Bin) accepts: no
-    extended-length prefix and one kind of slash. A path like \\\\?\\D:/Download\\x.cbz
-    makes the move fail with "[Errno 3] path not found" although the file is there."""
-    path = str(path)
-    ext = chr(92) * 2 + "?" + chr(92)
-    if path.startswith(ext):
-        rest = path[len(ext):]
-        unc = "UNC" + chr(92)
-        path = chr(92) * 2 + rest[len(unc):] if rest.startswith(unc) else rest
-    return os.path.normpath(path)
-
-
 def _trash_retrying(path: str, attempts: int = 8, delay: float = 0.25) -> None:
-    """move_to_trash(), tried again for a moment on failure: the app's own background
-    cover and page-size scans (or a virus scanner) may hold the file open for an instant,
-    which fails the move on Windows. A real, lasting failure still raises TrashError.
-    A file that is gone after a failed attempt has already been moved (the shell can
-    report an error after doing the move): retrying it only fails with "path not found"."""
-    path = _shell_path(path)
-    for attempt in range(attempts):
-        try:
-            move_to_trash(path)
-            return
-        except TrashError:
-            if attempt > 0 and not os.path.exists(path):
-                return
-            if attempt == attempts - 1:
-                raise
-            time.sleep(delay)
+    """move_to_trash(), tried again for a moment on failure (redactor_common's
+    trash_with_retries: plain shell path, a file already gone counts as done): the app's
+    own background cover and page-size scans (or a virus scanner) may hold the file open
+    for an instant, which fails the move on Windows. A real, lasting failure still raises
+    TrashError. This module's move_to_trash and time.sleep are looked up per call, so
+    tests can replace them."""
+    trash_with_retries(
+        lambda p: move_to_trash(p), attempts=attempts, delay=delay, sleep=lambda s: time.sleep(s),
+    )(path)
 # Slim strip, not zero -- keeps the panel's own toggle button reachable
 # (same convention as epubredactor's TAG_PANEL_COLLAPSED_WIDTH). Not
 # 32 (redactor_common's own doc-comment default): ComicInfoPanel's
@@ -402,18 +384,13 @@ def comic_files_in_folder(folder: str, recursive: bool = False) -> list[str]:
     """Every archive this app opens (.cbz, plus CBR/CBT/CB7 offered for
     conversion) inside `folder`, sorted; the folder's subfolders too when
     `recursive` (File > Include Subfolders). Shared by Open Folder and
-    Refresh List so the two can't disagree."""
-    wanted = (".cbz",) + FOREIGN_ARCHIVE_EXTENSIONS
-    if recursive:
-        found = []
-        for root, _dirs, files in os.walk(folder):
-            found.extend(os.path.join(root, name) for name in files if name.lower().endswith(wanted))
-        return sorted(found)
-    try:
-        names = sorted(os.listdir(folder))
-    except OSError:
-        return []
-    return [os.path.join(folder, name) for name in names if name.lower().endswith(wanted)]
+    Refresh List so the two can't disagree. redactor_common's
+    find_by_extension does the walk; the family's own temp and backup
+    files (a "x.redact-orig.cbz" left by an interrupted Redact) are not
+    listed."""
+    return find_by_extension(
+        [folder], (".cbz",) + FOREIGN_ARCHIVE_EXTENSIONS, recursive=recursive, skip=is_app_temp_name,
+    )
 
 
 def _file_size_bytes(path: str) -> int | None:

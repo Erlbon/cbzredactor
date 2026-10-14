@@ -31,7 +31,7 @@ from PyQt6.QtWidgets import (
 
 from core.gcd_lookup import GcdAuthError, GcdLookupError, check_login
 from gui import app_settings
-from gui.secret_prompts import save_with_fallback_prompt
+from redactor_common.gui.secret_prompts import save_with_fallback_prompt
 from redactor_common.gui.progress import run_busy
 from redactor_common.gui.secret_field import SecretField
 
@@ -146,6 +146,6 @@ class ApiKeysDialog(QDialog):
         app_settings.save_gcd_username(username)
 
     def accept(self) -> None:
-        if not save_with_fallback_prompt(self, self._save):
+        if not save_with_fallback_prompt(self, self._save, app_settings.remember_unencrypted_fallback, noun=app_settings.SECRET_NOUN):
             return  # declined: stay open, the typed values are kept
         super().accept()

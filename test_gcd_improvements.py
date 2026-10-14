@@ -13,6 +13,7 @@ from PyQt6.QtWidgets import QApplication
 
 from core.gcd_lookup import (
     GcdAuthError,
+    GcdLookupError,
     GcdRateLimitError,
     build_search_url,
     check_login,
@@ -132,7 +133,36 @@ def test_429_becomes_a_rate_limit_error_suggesting_an_account(monkeypatch):
 
     _patched_base(monkeypatch, refuse)
     with pytest.raises(GcdRateLimitError, match="API Keys"):
-        make_gcd_fetch()("https://www.comics.org/api/x")
+        search_gcd("Saga", "1", fetch=make_gcd_fetch())
+
+
+def test_429_with_a_login_does_not_suggest_an_account(monkeypatch):
+    def refuse(_request):
+        raise _http_error(429)
+
+    _patched_base(monkeypatch, refuse)
+    with pytest.raises(GcdRateLimitError) as caught:
+        check_login("reader", "s3cret")
+    assert "API Keys" not in str(caught.value)
+
+
+def test_403_without_a_login_is_a_plain_lookup_error(monkeypatch):
+    def refuse(_request):
+        raise _http_error(403)
+
+    _patched_base(monkeypatch, refuse)
+    with pytest.raises(GcdLookupError) as caught:
+        search_gcd("Saga", "1", fetch=make_gcd_fetch())
+    assert not isinstance(caught.value, GcdAuthError)
+
+
+def test_a_fetch_not_made_by_make_gcd_fetch_keeps_the_plain_error():
+    def fetch(_url):
+        raise _http_error(429)
+
+    with pytest.raises(GcdLookupError) as caught:
+        search_gcd("Saga", "1", fetch=fetch)
+    assert not isinstance(caught.value, GcdRateLimitError)
 
 
 def test_401_with_a_login_is_an_auth_error(monkeypatch):

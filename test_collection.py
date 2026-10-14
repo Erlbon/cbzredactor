@@ -688,3 +688,10 @@ def test_a_big_report_tab_is_filled_only_when_shown(tmp_path):
     dialog.tabs.setCurrentIndex(formats)
     assert table.rowCount() == len(report.formats) > 2000
     assert table.item(0, 3).text() == "Repair > Validate and Fix"
+
+
+def test_the_listing_leaves_out_the_family_temp_files(tmp_path):
+    root = str(tmp_path)
+    _cbz(root, "Incoming/Real 001 (Boom, 2020-01).cbz")
+    _cbz(root, "Incoming/Real 001 (Boom, 2020-01).redact-orig.cbz")
+    assert [item.path for item in scan.list_comics(root)] == ["Incoming/Real 001 (Boom, 2020-01).cbz"]

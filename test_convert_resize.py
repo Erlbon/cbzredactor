@@ -441,7 +441,7 @@ def test_a_move_that_happened_despite_an_error_is_not_retried_into_a_failure(tmp
     monkeypatch.setattr(mw, "move_to_trash", moves_then_errors)
     monkeypatch.setattr(mw.time, "sleep", lambda _s: None)
     mw._trash_retrying(str(path))  # does not raise: the original is gone, which is the goal
-    assert len(calls) == 2
+    assert len(calls) == 1  # and it is not tried again
 
     path.write_bytes(b"x")
     monkeypatch.setattr(mw, "move_to_trash", lambda p: (_ for _ in ()).throw(TrashError("locked")))

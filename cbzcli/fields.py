@@ -12,6 +12,7 @@ from core.comicinfo import (
     AGE_RATING_VALUES, ATTR_TO_TAG, BLACK_AND_WHITE_VALUES, INT_FIELDS, MANGA_VALUES, TAG_TO_ATTR,
 )
 from redactor_common.cli import CliError
+from redactor_common.cli.fields import FieldResolver, spelling_variants
 from redactor_common.cli.values import check_text, is_ascii_number
 
 # PageCount is always recomputed from the archive when saving; it is not a field to set.
@@ -27,22 +28,9 @@ _ENUMS = {
 }
 
 
-def _spellings(tag: str, attr: str) -> set[str]:
-    return {tag.lower(), attr.lower(), attr.replace("_", "").lower(), attr.replace("_", "-").lower()}
-
-
-_LOOKUP: dict[str, str] = {}
-for _tag, _attr in TAG_TO_ATTR.items():
-    for _spelling in _spellings(_tag, _attr):
-        _LOOKUP[_spelling] = _tag
-
-
 def resolve_field(name: str, settable: bool = False) -> tuple[str, str]:
     """(ComicInfo tag, metadata attribute) for what the user typed. Raises CliError listing the valid names."""
-    tag = _LOOKUP.get(name.strip().lower())
-    if tag is None or (settable and tag not in SETTABLE):
-        valid = ", ".join(sorted(attr for t, attr in TAG_TO_ATTR.items() if not settable or t in SETTABLE))
-        raise CliError(f"unknown field {name!r}. Fields: {valid}")
+    tag = RESOLVER.resolve(name, settable=settable)
     return tag, TAG_TO_ATTR[tag]
 
 
@@ -78,13 +66,21 @@ def check_value(tag: str, value: str) -> str:
     return value
 
 
+# The name lookup itself is redactor_common's FieldResolver: case-insensitive, and "cover artist",
+# "cover-artist", "cover_artist", "CoverArtist" and "coverartist" all find CoverArtist.
+RESOLVER = FieldResolver(
+    spellings={spelling: tag for tag, attr in TAG_TO_ATTR.items() for spelling in spelling_variants(tag, attr)},
+    names=sorted(TAG_TO_ATTR.values()),
+    check=check_value,
+    settable=SETTABLE,
+    settable_names=sorted(SETTABLE.values()),
+)
+
+
 def parse_assignment(text: str) -> tuple[str, str, str]:
     """"Series=Saga" -> (tag, attr, checked value). Splits on the first "="."""
-    if "=" not in text:
-        raise CliError(f"expected FIELD=VALUE, got {text!r}")
-    name, _, value = text.partition("=")
-    tag, attr = resolve_field(name, settable=True)
-    return tag, attr, check_value(tag, value)
+    tag, value = RESOLVER.parse_assignment(text)
+    return tag, TAG_TO_ATTR[tag], value
 
 
 # What `info` shows when no --fields or --all is given.

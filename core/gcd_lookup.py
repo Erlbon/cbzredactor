@@ -54,7 +54,6 @@ from __future__ import annotations
 import base64
 import json
 import re
-import urllib.error
 import urllib.request
 from dataclasses import dataclass
 from urllib.parse import quote
@@ -171,8 +170,11 @@ def make_gcd_fetch(username: str = "", password: str = "", timeout: float = 30.0
 
     Translates GCD's own refusals into specific errors: HTTP 429 ->
     GcdRateLimitError, and (only when credentials were sent) 401/403 ->
-    GcdAuthError. Everything else is left for fetch_json()'s usual
-    translation."""
+    GcdAuthError. The fetch is marked with `gcd_logged_in`; the
+    translation itself is done by redactor_common's fetch_json()/
+    fetch_bytes() `status_errors` (see _gcd_status()), so a fetch not
+    made here (a test double, the anonymous default) gets the plain
+    GcdLookupError, as before."""
     base_fetch = make_default_fetch(USER_AGENT, timeout=timeout)
     auth_header = ""
     if username and password:
@@ -183,17 +185,26 @@ def make_gcd_fetch(username: str = "", password: str = "", timeout: float = 30.0
         request = url if isinstance(url, urllib.request.Request) else urllib.request.Request(url)
         if auth_header:
             request.add_header("Authorization", auth_header)
-        try:
-            return base_fetch(request)
-        except urllib.error.HTTPError as exc:
-            if exc.code == 429:
-                hint = "" if auth_header else ", or add a free GCD account in Tools > API Keys... for a higher limit"
-                raise GcdRateLimitError(f"{RATE_LIMIT_MESSAGE}{hint}.") from exc
-            if exc.code in (401, 403) and auth_header:
-                raise GcdAuthError(AUTH_MESSAGE) from exc
-            raise
+        return base_fetch(request)
 
+    _fetch.gcd_logged_in = bool(auth_header)
     return _fetch
+
+
+def _gcd_status(fetch) -> dict:
+    """fetch_json()/fetch_bytes() keyword arguments turning GCD's refusals
+    into GcdRateLimitError/GcdAuthError -- only for a fetch made by
+    make_gcd_fetch(), and 401/403 only when it sends a login."""
+    logged_in = getattr(fetch, "gcd_logged_in", None)
+    if logged_in is None:
+        return {}
+    hint = "" if logged_in else ", or add a free GCD account in Tools > API Keys... for a higher limit"
+    errors = {429: GcdRateLimitError}
+    messages = {429: f"{RATE_LIMIT_MESSAGE}{hint}."}
+    if logged_in:
+        errors.update({401: GcdAuthError, 403: GcdAuthError})
+        messages.update({401: AUTH_MESSAGE, 403: AUTH_MESSAGE})
+    return {"status_errors": errors, "status_messages": messages}
 
 
 def check_login(username: str, password: str, fetch=None) -> None:
@@ -211,7 +222,7 @@ _SOURCE_NAME = "the Grand Comics Database"
 
 
 def _get_json(url: str, fetch) -> dict:
-    return fetch_json(url, fetch, error_cls=GcdLookupError, source_name=_SOURCE_NAME)
+    return fetch_json(url, fetch, error_cls=GcdLookupError, source_name=_SOURCE_NAME, **_gcd_status(fetch))
 
 
 _SERIES_YEAR_SUFFIX_RE = re.compile(r"\s*\(\d{4}(?:-\d{4})?\s*series\)\s*$")
@@ -337,7 +348,8 @@ def _search_pages(series: str, number: str, year: str, fetch) -> list[GcdCandida
     query = _comparable(series)
     all_candidates: list[GcdCandidate] = []
     for _ in range(MAX_SEARCH_PAGES):
-        data = fetch_json(url, fetch, error_cls=GcdLookupError, source_name=_SOURCE_NAME, ignore_404=True)
+        data = fetch_json(url, fetch, error_cls=GcdLookupError, source_name=_SOURCE_NAME, ignore_404=True,
+                          **_gcd_status(fetch))
         if data is None:
             break  # no such series/number at all -- not a real error, just nothing to find
 
@@ -483,4 +495,5 @@ def download_cover_image(details: GcdIssueDetails, fetch=None) -> bytes:
     if not details.cover_image_url:
         raise GcdLookupError("This issue has no cover image available.")
     fetch = fetch or _default_fetch
-    return fetch_bytes(details.cover_image_url, fetch, error_cls=GcdLookupError, what="cover image")
+    return fetch_bytes(details.cover_image_url, fetch, error_cls=GcdLookupError, what="cover image",
+                       **_gcd_status(fetch))

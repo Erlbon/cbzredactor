@@ -26,7 +26,8 @@ from core.app_paths import base_dir
 from core.comic_genres import COMMON_COMIC_GENRES
 from core.comic_languages import DEFAULT_LANGUAGES
 from core.image_resize import DEFAULT_MAX_WIDTH, ResizeOptions
-from redactor_common.core import managed_list, pattern_history, secret_store
+from redactor_common.core import secret_store
+from redactor_common.gui.qsettings_store import ColumnSettingsStore, ManagedListStore, PatternHistoryStore, QSettingsStore
 
 _SETTINGS_FILENAME = "cbzredactor_settings.ini"
 _COMICVINE_API_KEY = "comicvine/api_key"  # legacy plaintext; read for migration only
@@ -35,6 +36,8 @@ _COMICVINE_API_KEY = "comicvine/api_key"  # legacy plaintext; read for migration
 SECRET_APP = "cbzredactor"
 COMICVINE_SECRET = "comicvine_api_key"
 GCD_SECRET = "gcd_password"
+# What the "no secure storage" question calls the secret being saved.
+SECRET_NOUN = "key or password"
 _LAST_DIR_KEY = "files/last_directory"
 
 _PATTERN_HISTORY_KEY = "patterns/history"
@@ -69,23 +72,22 @@ def _settings_ini_path() -> str:
     return os.path.join(base_dir(), _SETTINGS_FILENAME)
 
 
+# redactor_common's typed, never-raising QSettings access over the same ini
+# file. The path is looked up on every access (tests point it elsewhere);
+# Qt is imported lazily, so importing this module needs no Qt platform.
+_STORE = QSettingsStore(lambda: _settings_ini_path())
+
+
 def _settings():
-    # Imported lazily so this module doesn't force a Qt platform
-    # backend to exist just to be imported (e.g. from a test).
-    from PyQt6.QtCore import QSettings
-
-    return QSettings(_settings_ini_path(), QSettings.Format.IniFormat)
+    """A QSettings on the ini file, for what the store's accessors don't cover."""
+    return _STORE.settings()
 
 
-def _int_value(key: str, default: int, settings=None) -> int:
+def _int_value(key: str, default: int) -> int:
     """An int setting that never raises: a hand-edited or damaged ini value
     ("abc", "2.5", a list) gives `default`, not a crash when a dialog opens.
     (QSettings.value(type=int) itself raises TypeError on such a value.)"""
-    raw = (settings or _settings()).value(key, default)
-    try:
-        return int(str(raw).strip())
-    except (TypeError, ValueError):
-        return default
+    return _STORE.int_value(key, default)
 
 
 def _legacy_comicvine_api_key() -> str:
@@ -218,12 +220,19 @@ def save_allow_unencrypted_fallback(enabled: bool) -> None:
     settings.sync()
 
 
+def remember_unencrypted_fallback() -> None:
+    """The `remember` hook for redactor_common's save_with_fallback_prompt():
+    store the user's yes (the shared flow switches the process-wide
+    opt-in on itself)."""
+    save_allow_unencrypted_fallback(True)
+
+
 def migrate_legacy_secrets() -> None:
     """Startup: apply the remembered fallback choice, then move the old
     ini values into the secret store. A value is cleared from the ini
     only after the store read it back; with no usable store it stays
     (and keeps working through get_secret's `legacy`)."""
-    secret_store.set_allow_unencrypted_fallback(load_allow_unencrypted_fallback())
+    secret_store.bind_fallback_preference(load_allow_unencrypted_fallback, save_allow_unencrypted_fallback)
     secret_store.migrate_legacy_secret(
         SECRET_APP, COMICVINE_SECRET, _legacy_comicvine_api_key, clear_legacy_comicvine_api_key
     )
@@ -274,40 +283,34 @@ _HISTORY_ENABLED_KEY = "history/enabled"
 def load_history_enabled() -> bool:
     """Tools > Preferences > History: keep the operations journal (core/history.py). OPT-IN: off
     unless the user turned it on; a missing or garbled value is off."""
-    value = _settings().value(_HISTORY_ENABLED_KEY, False)
-    if isinstance(value, bool):
-        return value
-    return str(value).strip().lower() in ("true", "1", "yes", "on")
+    return _STORE.opt_in(_HISTORY_ENABLED_KEY)
 
 
 def save_history_enabled(on: bool) -> None:
-    _settings().setValue(_HISTORY_ENABLED_KEY, bool(on))
+    _STORE.set_bool(_HISTORY_ENABLED_KEY, on)
 
 
 def load_include_subfolders() -> bool:
     """File > Include Subfolders: ON unless the user turned it off (the shared setting every Redactor app has)."""
-    return _settings().value("include_subfolders", True, type=bool)
+    return _STORE.include_subfolders()
 
 
 def save_include_subfolders(on: bool) -> None:
-    _settings().setValue("include_subfolders", bool(on))
+    _STORE.set_include_subfolders(on)
 
 
 def load_last_directory() -> str:
     """Returns "" if nothing's been remembered yet, or the remembered
     directory no longer exists (e.g. a removable drive that's since
     been unplugged) -- callers should treat "" as "let Qt use its own
-    default". Same shape as epubredactor's gui/app_settings.py."""
-    path = _settings().value(_LAST_DIR_KEY, "", type=str)
-    return path if path and os.path.isdir(path) else ""
+    default"."""
+    return _STORE.last_directory(_LAST_DIR_KEY)
 
 
 def save_last_directory(path: str) -> None:
     """Remember the directory containing `path` (a file or folder that
     was just loaded) as the starting point for the next file dialog."""
-    directory = path if os.path.isdir(path) else os.path.dirname(path)
-    if directory and os.path.isdir(directory):
-        _settings().setValue(_LAST_DIR_KEY, directory)
+    _STORE.remember_directory(path, _LAST_DIR_KEY)
 
 
 _CLEANUP_KEYS = {
@@ -502,34 +505,29 @@ _RESIZE_ON_CONVERT_KEY = "conversion/resize_on_convert"
 
 
 def load_resize_on_convert() -> str:
-    value = str(_settings().value(_RESIZE_ON_CONVERT_KEY, RESIZE_ON_CONVERT_ASK))
-    return value if value in _RESIZE_ON_CONVERT_CHOICES else RESIZE_ON_CONVERT_ASK
+    return _STORE.choice(_RESIZE_ON_CONVERT_KEY, _RESIZE_ON_CONVERT_CHOICES, RESIZE_ON_CONVERT_ASK)
 
 
 def save_resize_on_convert(choice: str) -> None:
-    if choice in _RESIZE_ON_CONVERT_CHOICES:
-        _settings().setValue(_RESIZE_ON_CONVERT_KEY, choice)
+    _STORE.set_choice(_RESIZE_ON_CONVERT_KEY, choice, _RESIZE_ON_CONVERT_CHOICES)
 
 
 # ------------------------------------------------------------------
 # Rename / Parse Filename pattern history -- shared between both
 # dialogs (see gui/main_window.py's open_rename_dialog()/
-# open_parse_filename_dialog()), same as epubredactor's own.
+# open_parse_filename_dialog()). The rules are redactor_common's
+# core/pattern_history.py; the storage its PatternHistoryStore.
 # ------------------------------------------------------------------
 
-def _dedupe_and_trim(history: list[str], new_pattern: str, max_history: int = _MAX_PATTERN_HISTORY) -> list[str]:
-    """Move new_pattern to the front of history, deduped, trimmed --
-    redactor_common.core.pattern_history's rule, shared by every app."""
-    return pattern_history.dedupe_and_trim(history, new_pattern, max_history)
+_PATTERNS = PatternHistoryStore(_STORE, _PATTERN_HISTORY_KEY, _MAX_PATTERN_HISTORY)
 
 
 def load_pattern_history() -> list[str]:
-    return pattern_history.decode_history(_settings().value(_PATTERN_HISTORY_KEY, "", type=str))
+    return _PATTERNS.load()
 
 
 def save_pattern_used(pattern: str) -> None:
-    history = _dedupe_and_trim(load_pattern_history(), pattern)
-    _settings().setValue(_PATTERN_HISTORY_KEY, pattern_history.encode_history(history))
+    _PATTERNS.record(pattern)
 
 
 _LIBRARY_ROOT_KEY = "rename/library_root"
@@ -538,71 +536,58 @@ _REDACT_RECIPE_KEY = "redact/recipe"
 
 def load_library_root() -> str:
     """The Rename / Export dialog's "Move into folders" library root, or ""."""
-    return str(_settings().value(_LIBRARY_ROOT_KEY, "", type=str))
+    return _STORE.text(_LIBRARY_ROOT_KEY)
 
 
 def save_library_root(path: str) -> None:
-    _settings().setValue(_LIBRARY_ROOT_KEY, path or "")
+    _STORE.set(_LIBRARY_ROOT_KEY, path or "")
 
 
 def load_redact_recipe() -> str:
     """The Redact recipe as JSON (core/redact_steps.py), or "" for the
     default. Holds step order, on/off and options -- never a secret."""
-    return str(_settings().value(_REDACT_RECIPE_KEY, "", type=str))
+    return _STORE.text(_REDACT_RECIPE_KEY)
 
 
 def save_redact_recipe(recipe_json: str) -> None:
-    _settings().setValue(_REDACT_RECIPE_KEY, recipe_json or "")
+    _STORE.set(_REDACT_RECIPE_KEY, recipe_json or "")
 
 
 # ------------------------------------------------------------------
 # Table columns -- field-key based (not index-based), so a persisted
 # preference survives a column being added/removed/reordered in code
 # without silently pointing at the wrong field. See
-# redactor_common.core.table_settings's own docstring for why.
+# redactor_common.core.table_settings's own docstring for why. Any int
+# width is kept, and one unreadable width drops the whole map (as before).
 # ------------------------------------------------------------------
 
+_COLUMNS = ColumnSettingsStore(
+    _STORE, _COLUMN_WIDTHS_KEY, _HIDDEN_COLUMNS_KEY, _COLUMN_ORDER_KEY, min_width=None, strict_widths=True,
+)
+
+
 def load_column_order() -> list[str]:
-    raw = _settings().value(_COLUMN_ORDER_KEY, "", type=str)
-    if not raw:
-        return []
-    try:
-        return [k for k in json.loads(raw) if isinstance(k, str)]
-    except (json.JSONDecodeError, TypeError, ValueError):
-        return []
+    return _COLUMNS.order()
 
 
 def save_column_order(order: list[str]) -> None:
-    _settings().setValue(_COLUMN_ORDER_KEY, json.dumps(order))
+    _COLUMNS.save_order(order)
 
 
 def load_column_widths() -> dict[str, int]:
-    raw = _settings().value(_COLUMN_WIDTHS_KEY, "", type=str)
-    if not raw:
-        return {}
-    try:
-        data = json.loads(raw)
-        return {k: int(v) for k, v in data.items()} if isinstance(data, dict) else {}
-    except (json.JSONDecodeError, TypeError, ValueError):
-        return {}
+    return _COLUMNS.widths()
 
 
 def save_column_widths(widths: dict[str, int]) -> None:
-    _settings().setValue(_COLUMN_WIDTHS_KEY, json.dumps(widths))
+    _COLUMNS.save_widths(widths)
 
 
 def load_hidden_columns() -> set[str]:
-    raw = _settings().value(_HIDDEN_COLUMNS_KEY, "", type=str)
-    if not raw:
-        return set()
-    try:
-        return {k for k in json.loads(raw) if isinstance(k, str)}
-    except (json.JSONDecodeError, TypeError, ValueError):
-        return set()
+    return _COLUMNS.hidden()
 
 
 def save_hidden_columns(hidden: set[str]) -> None:
-    _settings().setValue(_HIDDEN_COLUMNS_KEY, json.dumps(sorted(hidden)))
+    _COLUMNS.save_hidden(hidden)
 
 
 def has_hidden_columns_preference() -> bool:
@@ -613,105 +598,89 @@ def has_hidden_columns_preference() -> bool:
     "deliberately show everything" on its own; callers that need to
     apply a first-run default (see MainWindow.DEFAULT_HIDDEN_COLUMNS)
     check this first."""
-    return _settings().contains(_HIDDEN_COLUMNS_KEY)
+    return _COLUMNS.has_hidden_preference()
 
 
 # ------------------------------------------------------------------
-# Genres: built-in defaults (individually hideable/restorable) plus any
-# custom genres added via the Genre field's "+" menu or Settings >
-# Add/Remove Genres. Same shape as the languages section below. The
-# merge/hide/add/remove rules are redactor_common.core.managed_list
-# (shared with epub and mp3); only the storage keys live here.
+# Genres and languages: built-in defaults (individually hideable/
+# restorable) plus custom entries added via the field's "+" menu or
+# Settings > Add/Remove Genres / Languages. The rules are
+# redactor_common.core.managed_list, the storage its ManagedListStore;
+# only the keys live here. Hidden languages are stored as codes.
 # ------------------------------------------------------------------
 
-_merge_genres = managed_list.merge_names
-_exclude_hidden_genres = managed_list.exclude_hidden_names
-
-
-def _load_names(key: str) -> list[str]:
-    return managed_list.decode_names(_settings().value(key, "", type=str))
-
-
-def _save_names(key: str, names: list[str]) -> None:
-    _settings().setValue(key, managed_list.encode_names(names))
+_GENRES = ManagedListStore(_STORE, _CUSTOM_GENRES_KEY, _HIDDEN_DEFAULT_GENRES_KEY, COMMON_COMIC_GENRES)
+_LANGUAGES = ManagedListStore(
+    _STORE, _CUSTOM_LANGUAGES_KEY, _HIDDEN_DEFAULT_LANGUAGES_KEY, DEFAULT_LANGUAGES, pairs=True,
+)
 
 
 def load_hidden_default_genres() -> list[str]:
-    return _load_names(_HIDDEN_DEFAULT_GENRES_KEY)
+    return _GENRES.hidden()
 
 
 def hide_default_genre(genre: str) -> None:
-    _save_names(_HIDDEN_DEFAULT_GENRES_KEY, managed_list.add_name(load_hidden_default_genres(), genre))
+    _GENRES.hide(genre)
 
 
 def restore_default_genres() -> None:
-    _save_names(_HIDDEN_DEFAULT_GENRES_KEY, [])
+    _GENRES.restore_defaults()
 
 
 def load_visible_default_genres() -> list[str]:
-    return _exclude_hidden_genres(COMMON_COMIC_GENRES, load_hidden_default_genres())
+    return _GENRES.visible_defaults()
 
 
 def load_genres() -> list[str]:
     """Visible (non-hidden) default genres plus any custom ones added
     previously -- what the quick-pick "+" menu shows."""
-    return _merge_genres(load_visible_default_genres(), load_custom_genres())
+    return _GENRES.merged()
 
 
 def load_custom_genres() -> list[str]:
-    return _load_names(_CUSTOM_GENRES_KEY)
+    return _GENRES.custom()
 
 
 def add_custom_genre(genre: str) -> None:
-    _save_names(_CUSTOM_GENRES_KEY, managed_list.add_name(load_custom_genres(), genre))
+    _GENRES.add_custom(genre)
 
 
 def remove_custom_genre(genre: str) -> None:
-    _save_names(_CUSTOM_GENRES_KEY, managed_list.remove_name(load_custom_genres(), genre))
-
-
-# ------------------------------------------------------------------
-# Languages: same hideable-defaults-plus-custom shape as genres above.
-# ------------------------------------------------------------------
-
-_merge_languages = managed_list.merge_pairs
-_exclude_hidden_languages = managed_list.exclude_hidden_codes
+    _GENRES.remove_custom(genre)
 
 
 def load_hidden_default_language_codes() -> list[str]:
-    return _load_names(_HIDDEN_DEFAULT_LANGUAGES_KEY)
+    return _LANGUAGES.hidden()
 
 
 def hide_default_language(code: str) -> None:
-    _save_names(_HIDDEN_DEFAULT_LANGUAGES_KEY, managed_list.add_code(load_hidden_default_language_codes(), code))
+    _LANGUAGES.hide(code)
 
 
 def restore_default_languages() -> None:
-    _save_names(_HIDDEN_DEFAULT_LANGUAGES_KEY, [])
+    _LANGUAGES.restore_defaults()
 
 
 def load_visible_default_languages() -> list[tuple[str, str]]:
-    return _exclude_hidden_languages(DEFAULT_LANGUAGES, load_hidden_default_language_codes())
+    return _LANGUAGES.visible_defaults()
 
 
 def load_languages() -> list[tuple[str, str]]:
     """Visible (non-hidden) default languages plus any custom ones
     added previously -- what the quick-pick "+" menu shows."""
-    return _merge_languages(load_visible_default_languages(), load_custom_languages())
+    return _LANGUAGES.merged()
 
 
 def load_custom_languages() -> list[tuple[str, str]]:
-    return managed_list.decode_pairs(_settings().value(_CUSTOM_LANGUAGES_KEY, "", type=str))
+    return _LANGUAGES.custom()
 
 
 def add_custom_language(code: str, name: str) -> None:
-    pairs = managed_list.add_pair(load_custom_languages(), code, name)
-    _settings().setValue(_CUSTOM_LANGUAGES_KEY, managed_list.encode_pairs(pairs))
+    _LANGUAGES.add_custom(code, name)
 
 
 def remove_custom_language(code: str) -> None:
-    pairs = managed_list.remove_pair(load_custom_languages(), code)
-    _settings().setValue(_CUSTOM_LANGUAGES_KEY, managed_list.encode_pairs(pairs))
+    _LANGUAGES.remove_custom(code)
 
 
 _ASCII_FILENAMES_KEY = "rename/ascii_only"
@@ -720,11 +689,11 @@ _ASCII_FILENAMES_KEY = "rename/ascii_only"
 def load_ascii_filenames() -> bool:
     """Rename/Export by Pattern's "ASCII-safe filenames" checkbox,
     remembered between runs (redactor_common's RenamePatternDialog)."""
-    return bool(_settings().value(_ASCII_FILENAMES_KEY, False, type=bool))
+    return _STORE.ascii_filenames(_ASCII_FILENAMES_KEY)
 
 
 def save_ascii_filenames(enabled: bool) -> None:
-    _settings().setValue(_ASCII_FILENAMES_KEY, bool(enabled))
+    _STORE.set_ascii_filenames(enabled, _ASCII_FILENAMES_KEY)
 
 
 _ZERO_PAD_ENABLED_KEY = "rename/zero_pad_enabled"
@@ -735,17 +704,11 @@ _AUTO_NUMBER_PADDING_KEY = "auto_numbering/padding"
 def load_rename_zero_pad() -> tuple[bool, int]:
     """Rename/Export by Pattern's zero-pad checkbox and width,
     remembered between runs (redactor_common's RenamePatternDialog)."""
-    settings = _settings()
-    return (
-        bool(settings.value(_ZERO_PAD_ENABLED_KEY, False, type=bool)),
-        _int_value(_ZERO_PAD_WIDTH_KEY, 2, settings),
-    )
+    return _STORE.rename_zero_pad(_ZERO_PAD_ENABLED_KEY, _ZERO_PAD_WIDTH_KEY, 2)
 
 
 def save_rename_zero_pad(enabled: bool, width: int) -> None:
-    settings = _settings()
-    settings.setValue(_ZERO_PAD_ENABLED_KEY, bool(enabled))
-    settings.setValue(_ZERO_PAD_WIDTH_KEY, int(width))
+    _STORE.set_rename_zero_pad(enabled, width, _ZERO_PAD_ENABLED_KEY, _ZERO_PAD_WIDTH_KEY)
 
 
 def load_auto_number_padding() -> int:
@@ -754,7 +717,7 @@ def load_auto_number_padding() -> int:
 
 
 def save_auto_number_padding(width: int) -> None:
-    _settings().setValue(_AUTO_NUMBER_PADDING_KEY, int(width))
+    _STORE.set_int(_AUTO_NUMBER_PADDING_KEY, width)
 
 
 # ------------------------------------------------------------------
@@ -764,20 +727,20 @@ def save_auto_number_padding(width: int) -> None:
 # ------------------------------------------------------------------
 
 def save_pattern_history(history: list[str]) -> None:
-    _settings().setValue(_PATTERN_HISTORY_KEY, pattern_history.encode_history(history[:_MAX_PATTERN_HISTORY]))
+    _PATTERNS.save(history)
 
 
 def save_custom_genres(genres: list[str]) -> None:
-    _save_names(_CUSTOM_GENRES_KEY, genres)
+    _GENRES.save_custom(genres)
 
 
 def save_hidden_default_genres(genres: list[str]) -> None:
-    _save_names(_HIDDEN_DEFAULT_GENRES_KEY, genres)
+    _GENRES.save_hidden(genres)
 
 
 def save_custom_languages(pairs: list[tuple[str, str]]) -> None:
-    _settings().setValue(_CUSTOM_LANGUAGES_KEY, managed_list.encode_pairs(pairs))
+    _LANGUAGES.save_custom(pairs)
 
 
 def save_hidden_default_language_codes(codes: list[str]) -> None:
-    _save_names(_HIDDEN_DEFAULT_LANGUAGES_KEY, codes)
+    _LANGUAGES.save_hidden(codes)

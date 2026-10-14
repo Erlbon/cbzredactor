@@ -53,6 +53,7 @@ from core.comicinfo import ComicInfoError, parse_comicinfo_xml
 from core.comicinfo_locate import find_comicinfo_entry
 from core.cover_stamp import make_stamp, read_stamp, write_comment
 from core.zip_names import open_zip
+from redactor_common.core.temp_names import is_app_temp_name
 
 SCAN_FILE_NAME = "collection_scan.zip"
 CSV_NAME = "collection_scan.csv"
@@ -139,7 +140,7 @@ def _stamp(seconds: float) -> str:
 
 def list_comics(root: str, cancelled: Callable[[], bool] = lambda: False) -> Iterator[Listed]:
     """Every comic under `root`, depth first (unsorted). Unreadable
-    folders are skipped; stops early when `cancelled()` says so."""
+    folders and the Redactor apps' temp/backup files are skipped; stops early when `cancelled()` says so."""
     start = long_path(os.path.abspath(root))
     stack = [(start, "")]
     while stack:
@@ -159,8 +160,8 @@ def list_comics(root: str, cancelled: Callable[[], bool] = lambda: False) -> Ite
                     if name.lower() not in _SKIP_DIRS:
                         stack.append((entry.path, child_rel))
                     continue
-                if os.path.splitext(name)[1].lower() not in COMIC_EXTENSIONS:
-                    continue
+                if os.path.splitext(name)[1].lower() not in COMIC_EXTENSIONS or is_app_temp_name(name):
+                    continue  # not a comic, or the family's own temp/backup file
                 stat = entry.stat()
             except OSError:
                 continue

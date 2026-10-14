@@ -219,3 +219,18 @@ def test_build_from_comicrack_flow(tmp_path, monkeypatch):
     monkeypatch.setattr(dialog_module.QMessageBox, "information", lambda *a: shown.append(a[2]))
     assert dialog_module.build_from_comicrack(None) == str(dest)
     assert dest.exists() and "8 books read" in shown[0]
+
+
+def test_a_failed_build_is_reported_and_gives_no_path(tmp_path, monkeypatch):
+    from gui import comicrack_settings_dialog as dialog_module
+
+    source = tmp_path / "ComicDb.xml"
+    source.write_text("this is not a ComicRack library", encoding="utf-8")
+    dest = tmp_path / "out.db"
+    monkeypatch.setattr(dialog_module.QFileDialog, "getOpenFileName", lambda *a, **k: (str(source), ""))
+    monkeypatch.setattr(dialog_module.QFileDialog, "getSaveFileName", lambda *a, **k: (str(dest), ""))
+    warned = []
+    monkeypatch.setattr(dialog_module.QMessageBox, "warning", lambda *a: warned.append(a[1]))
+    monkeypatch.setattr(dialog_module.QMessageBox, "information", lambda *a: pytest.fail("no summary for a failed build"))
+    assert dialog_module.build_from_comicrack(None) is None
+    assert warned == ["Build ComicRack Library Database"]

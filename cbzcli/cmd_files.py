@@ -24,8 +24,7 @@ from gui import app_settings
 from redactor_common.cli import Output, add_common_options, commands
 from redactor_common.cli.commands import add_pattern_options, new_row, say
 from redactor_common.core.rename_pattern import zero_pad_numeric_value
-from redactor_common.cli.commands import trash_with_retries
-from redactor_common.core.trash import TrashError, move_to_trash
+from redactor_common.core.trash import TrashError, move_to_trash, trash_with_retries
 
 from cbzcli.files import add_path_arguments, collect, load_books
 
@@ -151,29 +150,11 @@ def add_rename_parser(sub) -> None:
     parser.set_defaults(handler=run_rename)
 
 
-class _FollowingMoves:
-    """Wraps the run's Output: every row the shared rename / move code records as "renamed" or "moved"
-    (the original is gone from its old path) also goes to the History, so its entries follow the file
-    (core/history.note_moves, the same hook the app's RenameLog has; nothing while history is off).
-    A copy, a dry run or a failure is not a move."""
-
-    _MOVED = frozenset({"renamed", "moved"})
-
-    def __init__(self, out: Output):
-        self._out = out
-
-    def record(self, row: dict) -> None:
-        self._out.record(row)
-        old, new = row.get("path", ""), row.get("new_path", "")
-        if row.get("status") not in self._MOVED or not old or not new:
-            return
-        # A cross-drive move whose original could not go to the Recycle Bin left it in place: no move.
-        # A change of letter case only is a move although the old spelling still "exists".
-        if not os.path.lexists(old) or os.path.normcase(old) == os.path.normcase(new):
-            history.note_moves([(old, new)])
-
-    def __getattr__(self, name):
-        return getattr(self._out, name)
+def _note_move(old: str, new: str) -> None:
+    """The shared rename / move code's on_moved hook: a file that really changed path (not a copy, a dry
+    run, a failure, or a cross-drive move whose original was kept) takes its History entries along
+    (core/history.note_moves, the same hook the app's RenameLog has; nothing while history is off)."""
+    history.note_moves([(old, new)])
 
 
 def run_rename(args: argparse.Namespace, out: Output) -> int:
@@ -182,7 +163,7 @@ def run_rename(args: argparse.Namespace, out: Output) -> int:
     books = load_books(collect(args.paths, out, recurse=not args.no_recurse), out)
     failed = commands.rename_items(
         books, pattern=pattern, values_for=lambda b: _values_for(b, zero_pad), path_of=lambda b: b.path,
-        skip_reason=_skip_reason, out=_FollowingMoves(out), dry_run=args.dry_run, ascii_only=_ascii(args),
+        skip_reason=_skip_reason, out=out, dry_run=args.dry_run, ascii_only=_ascii(args), on_moved=_note_move,
     )
     return commands.finish_run(out, failed, files=len(books), dry_run=args.dry_run, pattern=pattern)
 
@@ -210,7 +191,8 @@ def run_move(args: argparse.Namespace, out: Output) -> int:
     books = load_books(collect(args.paths, out, recurse=not args.no_recurse), out)
     failed = commands.move_items(
         books, root=root, pattern=args.pattern, values_for=lambda b: _values_for(b, zero_pad),
-        path_of=lambda b: b.path, skip_reason=_skip_reason, out=_FollowingMoves(out), dry_run=args.dry_run, copy=args.copy,
+        path_of=lambda b: b.path, skip_reason=_skip_reason, out=out, dry_run=args.dry_run, copy=args.copy,
+        on_moved=_note_move,
         ascii_only=_ascii(args),
     )
     return commands.finish_run(out, failed, files=len(books), dry_run=args.dry_run, root=root)

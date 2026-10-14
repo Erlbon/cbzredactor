@@ -11,7 +11,7 @@ from __future__ import annotations
 from PyQt6.QtWidgets import QDialog, QDialogButtonBox, QFormLayout, QLabel, QVBoxLayout
 
 from gui import app_settings
-from gui.secret_prompts import save_with_fallback_prompt
+from redactor_common.gui.secret_prompts import save_with_fallback_prompt
 from redactor_common.gui.secret_field import SecretField
 
 
@@ -45,6 +45,6 @@ class ComicVineKeyDialog(QDialog):
             app_settings.clear_legacy_comicvine_api_key()
 
     def accept(self) -> None:
-        if not save_with_fallback_prompt(self, self._save):
+        if not save_with_fallback_prompt(self, self._save, app_settings.remember_unencrypted_fallback, noun=app_settings.SECRET_NOUN):
             return  # declined: stay open, the typed value is kept
         super().accept()

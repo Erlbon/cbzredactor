@@ -222,3 +222,13 @@ def test_api_keys_dialog_remove_account(fake_keyring):
     dialog = ApiKeysDialog()
     dialog._remove_account()
     assert app_settings.load_gcd_account() == ("", "")
+
+
+def test_startup_applies_the_remembered_fallback_answer(tmp_ini):
+    secret_store.set_allow_unencrypted_fallback(False)
+    app_settings.save_allow_unencrypted_fallback(True)
+    app_settings.migrate_legacy_secrets()
+    assert secret_store.allow_unencrypted_fallback_enabled() is True
+    app_settings.save_allow_unencrypted_fallback(False)
+    app_settings.migrate_legacy_secrets()
+    assert secret_store.allow_unencrypted_fallback_enabled() is False

@@ -124,6 +124,21 @@ def test_set_accepts_field_spellings_and_fixes_enum_case(library, capsys):
     assert book.metadata.cover_artist == "Fiona" and book.metadata.manga == "Yes"
 
 
+def test_field_names_are_matched_leniently_and_read_only_ones_refused():
+    from cbzcli.fields import parse_assignment, resolve_field
+    from redactor_common.cli import CliError
+
+    for spelling in ("CoverArtist", "cover_artist", "cover-artist", "Cover Artist", "coverartist"):
+        assert resolve_field(spelling) == ("CoverArtist", "cover_artist")
+    assert parse_assignment("Series=A=B") == ("Series", "series", "A=B")
+    assert resolve_field("PageCount") == ("PageCount", "page_count")
+    with pytest.raises(CliError, match="unknown field 'PageCount'") as caught:
+        parse_assignment("PageCount=3")
+    assert "page_count" not in str(caught.value) and "series" in str(caught.value)
+    with pytest.raises(CliError, match="expected FIELD=VALUE"):
+        parse_assignment("Series")
+
+
 def test_set_on_a_foreign_file_is_skipped_like_rename_and_move(tmp_path, capsys):
     cbt = _cbt(tmp_path / "old.cbt")
     code, document = run_json(capsys, "set", cbt, "-s", "Series=X")

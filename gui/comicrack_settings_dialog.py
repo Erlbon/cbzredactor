@@ -17,11 +17,8 @@ from __future__ import annotations
 import os
 from typing import Optional
 
-from PyQt6.QtWidgets import QFileDialog, QMessageBox, QWidget
-from redactor_common.core.dump_import import DumpImportError
-from redactor_common.core.local_db import forget_cached
-from redactor_common.gui.dump_import_runner import run_dump_import
-from redactor_common.gui.local_db_settings_dialog import LocalDatabaseSettingsDialog
+from PyQt6.QtWidgets import QFileDialog, QMessageBox, QWidget  # noqa: F401 -- tests patch QMessageBox here
+from redactor_common.gui.local_db_settings_dialog import LocalDatabaseSettingsDialog, run_database_build
 
 from core.comicrack_import import build_comicrack_database
 from core.gcd_local import GcdLocalDatabase, GcdLocalError
@@ -76,19 +73,13 @@ def build_from_comicrack(parent: QWidget, current_path: str = "") -> Optional[st
     )
     if not dest:
         return None
-    forget_cached(dest)  # a lookup may still hold the old build open
-    try:
-        summary = run_dump_import(
-            parent, "Build ComicRack Library Database", "Converting the ComicRack library…",
-            lambda progress, cancelled: build_comicrack_database(source, dest, progress, cancelled),
-        )
-    except DumpImportError as exc:
-        QMessageBox.warning(parent, "Build ComicRack Library Database", str(exc))
-        return None
-    if summary is None:
-        return None
-    QMessageBox.information(parent, "Build ComicRack Library Database", summary.describe())
-    return dest
+    # The shared build tail: releases a cached open handle on the old build, converts on a worker thread
+    # behind a cancellable progress dialog, and shows the summary or the error.
+    return run_database_build(
+        parent, "Build ComicRack Library Database", "Converting the ComicRack library…",
+        lambda dest, progress, cancelled: build_comicrack_database(source, dest, progress, cancelled),
+        dest,
+    )
 
 
 class ComicRackSettingsDialog(LocalDatabaseSettingsDialog):

@@ -1,53 +1,88 @@
-"""Tests for the pure-logic helpers in gui/app_settings.py -- the
-merge/exclude/dedupe functions don't touch QSettings, so they're
-testable without a live Qt platform backend."""
+"""gui/app_settings.py: thin delegations over redactor_common's
+QSettingsStore at the app's own ini path, with the app's own keys."""
 
-from gui.app_settings import (
-    _dedupe_and_trim,
-    _exclude_hidden_genres,
-    _exclude_hidden_languages,
-    _merge_genres,
-    _merge_languages,
-)
+import pytest
+
+from gui import app_settings
 
 
-def test_dedupe_and_trim_moves_pattern_to_front():
-    history = ["%series% %number%", "%title%"]
-    assert _dedupe_and_trim(history, "%title%") == ["%title%", "%series% %number%"]
+@pytest.fixture
+def ini(monkeypatch, tmp_path):
+    path = tmp_path / "s.ini"
+    monkeypatch.setattr(app_settings, "_settings_ini_path", lambda: str(path))
+    return path
 
 
-def test_dedupe_and_trim_ignores_blank_pattern():
-    history = ["%title%"]
-    assert _dedupe_and_trim(history, "   ") == history
+def test_pattern_history_moves_a_used_pattern_to_the_front_and_caps_it(ini):
+    app_settings.save_pattern_used("%series% %number%")
+    app_settings.save_pattern_used("%title%")
+    app_settings.save_pattern_used("%series% %number%")
+    app_settings.save_pattern_used("   ")  # a blank pattern is not remembered
+    assert app_settings.load_pattern_history() == ["%series% %number%", "%title%"]
+    for i in range(20):
+        app_settings.save_pattern_used(f"pattern{i}")
+    history = app_settings.load_pattern_history()
+    assert len(history) == 15 and history[0] == "pattern19"
+    app_settings.save_pattern_history([f"p{i}" for i in range(30)])
+    assert len(app_settings.load_pattern_history()) == 15
 
 
-def test_dedupe_and_trim_caps_length():
-    history = [f"pattern{i}" for i in range(20)]
-    result = _dedupe_and_trim(history, "new", max_history=15)
-    assert len(result) == 15
-    assert result[0] == "new"
+def test_genres_merge_skips_duplicates_and_hiding_is_case_insensitive(ini, monkeypatch):
+    monkeypatch.setattr(app_settings._GENRES, "_defaults", ["Superhero", "Crime", "Horror"])
+    app_settings.add_custom_genre("superhero")
+    app_settings.add_custom_genre("Noir")
+    assert app_settings.load_genres() == ["Superhero", "Crime", "Horror", "Noir"]
+    app_settings.hide_default_genre("crime")
+    assert app_settings.load_visible_default_genres() == ["Superhero", "Horror"]
+    app_settings.remove_custom_genre("Noir")
+    app_settings.restore_default_genres()
+    assert app_settings.load_genres()[:3] == ["Superhero", "Crime", "Horror"]
+    assert "Noir" not in app_settings.load_custom_genres()
 
 
-def test_merge_genres_skips_duplicates_case_insensitively():
-    defaults = ["Superhero", "Crime"]
-    custom = ["superhero", "Noir"]
-    assert _merge_genres(defaults, custom) == ["Superhero", "Crime", "Noir"]
+def test_languages_defaults_win_on_a_code_conflict_and_hide_by_code(ini, monkeypatch):
+    monkeypatch.setattr(app_settings._LANGUAGES, "_defaults", [("en", "English"), ("de", "German")])
+    app_settings.add_custom_language("en", "Should Be Ignored")
+    app_settings.add_custom_language("pt", "Portuguese")
+    assert app_settings.load_languages() == [("en", "English"), ("de", "German"), ("pt", "Portuguese")]
+    app_settings.hide_default_language("de")
+    assert app_settings.load_hidden_default_language_codes() == ["de"]
+    assert app_settings.load_visible_default_languages() == [("en", "English")]
 
 
-def test_exclude_hidden_genres_case_insensitive():
-    defaults = ["Superhero", "Crime", "Horror"]
-    assert _exclude_hidden_genres(defaults, ["crime"]) == ["Superhero", "Horror"]
+def test_keys_and_fallbacks_are_the_ones_the_app_always_used(ini):
+    raw = app_settings._settings()
+    raw.setValue("include_subfolders", "false")
+    raw.setValue("table/column_widths", '{"series": 120, "title": "wide"}')
+    raw.setValue("history/enabled", "banana")
+    raw.setValue("conversion/resize_on_convert", "sometimes")
+    raw.sync()
+    assert app_settings.load_include_subfolders() is False
+    assert app_settings.load_column_widths() == {}  # one unreadable width drops the map, as before
+    assert app_settings.load_history_enabled() is False
+    assert app_settings.load_resize_on_convert() == app_settings.RESIZE_ON_CONVERT_ASK
+    assert app_settings.has_hidden_columns_preference() is False
+    app_settings.save_hidden_columns(set())
+    assert app_settings.has_hidden_columns_preference() is True and app_settings.load_hidden_columns() == set()
+    app_settings.save_column_widths({"series": 0, "title": 300})
+    assert app_settings.load_column_widths() == {"series": 0, "title": 300}
+    app_settings.save_column_order(["title", "series"])
+    assert app_settings.load_column_order() == ["title", "series"]
+    app_settings.save_history_enabled(True)
+    assert app_settings.load_history_enabled() is True
+    assert app_settings._settings().contains("table/column_order")
+    assert app_settings._settings().contains("history/enabled")
 
 
-def test_merge_languages_defaults_win_on_code_conflict():
-    defaults = [("en", "English")]
-    custom = [("en", "Should Be Ignored"), ("pt", "Portuguese")]
-    assert _merge_languages(defaults, custom) == [("en", "English"), ("pt", "Portuguese")]
-
-
-def test_exclude_hidden_languages():
-    defaults = [("en", "English"), ("de", "German")]
-    assert _exclude_hidden_languages(defaults, ["de"]) == [("en", "English")]
+def test_last_directory_is_forgotten_when_the_folder_is_gone(ini, tmp_path):
+    folder = tmp_path / "comics"
+    folder.mkdir()
+    app_settings.save_last_directory(str(folder / "a.cbz"))
+    assert app_settings.load_last_directory() == str(folder)
+    folder.rmdir()
+    assert app_settings.load_last_directory() == ""
+    app_settings.save_last_directory(str(tmp_path / "missing" / "a.cbz"))  # not stored
+    assert app_settings._settings().value("files/last_directory") == str(folder)
 
 
 def test_padding_choices_are_remembered(monkeypatch, tmp_path):

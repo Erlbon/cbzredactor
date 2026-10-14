@@ -45,7 +45,8 @@ command is also searchable in the **Command Palette** (Ctrl+K).
 
 - **File**: Open Files... (Ctrl+O), Open Folder... (Ctrl+Shift+O),
   **Include Subfolders** (a tick: Open Folder and Refresh List also look
-  in subfolders), Save As... (Ctrl+Shift+S), Save All (Ctrl+Shift+A),
+  in subfolders; both leave out the Redactor apps' own leftover temp and
+  backup files, such as a `.redact-orig.cbz` from an interrupted Redact), Save As... (Ctrl+Shift+S), Save All (Ctrl+Shift+A),
   Rename File... (F2), Undo
   Last Rename, Rename / Export / Move... (Ctrl+E), Rename / Export / Move
   Macros (slots 1-5 on **Ctrl+Shift+1** to **Ctrl+Shift+5**), Export /
@@ -649,7 +650,7 @@ Fields and values are checked before any file is touched; a bad one stops the co
 | `-n`, `--dry-run` | Show the old and new value of each field, save nothing. |
 
 Field names are case-insensitive and accept the ComicInfo spelling or the plain one (`CoverArtist`,
-`cover_artist`, `coverartist`). The settable fields are: Title, Series, Number, Count, Volume, AlternateSeries,
+`cover_artist`, `cover-artist`, `"cover artist"`, `coverartist`). The settable fields are: Title, Series, Number, Count, Volume, AlternateSeries,
 AlternateNumber, AlternateCount, Summary, Notes, Year, Month, Day, Writer, Penciller, Inker, Colorist, Letterer,
 CoverArtist, Editor, Translator, Publisher, Imprint, Genre, Tags, Web, LanguageISO, Format, BlackAndWhite, Manga,
 Characters, Teams, Locations, ScanInformation, StoryArc, StoryArcNumber, SeriesGroup, AgeRating, CommunityRating,

@@ -49,7 +49,7 @@ from dataclasses import dataclass, field
 from typing import Callable
 
 from redactor_common.core.lookup_client import (
-    FetchFn, build_request, fetch_bytes, fetch_json, make_default_fetch,
+    FetchFn, Throttle, build_request, fetch_bytes, fetch_json, make_default_fetch,
 )
 
 USER_AGENT = "cbzredactor (manga lookup; https://github.com/Erlbon/cbzredactor)"
@@ -405,20 +405,15 @@ class MangaClient:
         clock: Callable[[], float] = time.monotonic,
     ) -> None:
         self._fetch = fetch or make_default_fetch(USER_AGENT, timeout=20.0)
-        self._intervals = {SOURCE_ANILIST: anilist_interval, SOURCE_MANGAUPDATES: mangaupdates_interval}
-        self._last: dict[str, float] = {}
-        self._sleep, self._clock = sleep, clock
+        self._throttles = {
+            SOURCE_ANILIST: Throttle(anilist_interval, clock=clock, sleep=sleep),
+            SOURCE_MANGAUPDATES: Throttle(mangaupdates_interval, clock=clock, sleep=sleep),
+        }
         self._searches: dict[str, list[MangaMatch]] = {}
         self._covers: dict[str, bytes] = {}
 
-    def _wait(self, source: str) -> None:
-        gap = self._intervals[source] - (self._clock() - self._last.get(source, float("-inf")))
-        if gap > 0:
-            self._sleep(gap)
-        self._last[source] = self._clock()
-
     def _json(self, source: str, request, what: str) -> dict:
-        self._wait(source)
+        self._throttles[source].wait()
         data = fetch_json(
             request, self._fetch, MangaLookupError, source_name=source,
             status_messages={429: f"{source} says too many requests were made; try again in a minute."},

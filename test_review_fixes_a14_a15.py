@@ -80,19 +80,27 @@ def test_a_check_that_finds_the_same_result_again_does_not_dirty_the_file(tmp_pa
 
 
 def test_secret_prompt_survives_an_unwritable_fallback(monkeypatch):
-    import gui.secret_prompts as sp
+    import redactor_common.gui.secret_prompts as sp
+    from gui import app_settings
+    from gui.comicvine_key_dialog import ComicVineKeyDialog
     from redactor_common.core import secret_store
 
-    warnings = []
-    monkeypatch.setattr(sp.QMessageBox, "question", staticmethod(lambda *a, **k: sp.QMessageBox.StandardButton.Yes))
+    warnings, questions, remembered = [], [], []
+    monkeypatch.setattr(sp.QMessageBox, "question", staticmethod(
+        lambda *a, **k: questions.append(a[2]) or sp.QMessageBox.StandardButton.Yes))
     monkeypatch.setattr(sp.QMessageBox, "warning", staticmethod(lambda *a, **k: warnings.append(a)))
-    monkeypatch.setattr(sp.app_settings, "save_allow_unencrypted_fallback", lambda on: None)
+    monkeypatch.setattr(app_settings, "save_allow_unencrypted_fallback", remembered.append)
     monkeypatch.setattr(secret_store, "set_allow_unencrypted_fallback", lambda on: None)
 
-    def save(flag):
+    def save(self, flag):
         raise secret_store.SecretStoreUnavailable("fallback file is read-only")
 
-    assert sp.save_with_fallback_prompt(None, save) is False
+    monkeypatch.setattr(ComicVineKeyDialog, "_save", save)
+    dialog = ComicVineKeyDialog()
+    dialog.accept()
+    assert dialog.result() == 0  # stays open
+    assert remembered == [True]  # the yes was stored under the app's own key
+    assert questions and "key or password" in questions[0]
     assert warnings and "read-only" in str(warnings[0])
 
 

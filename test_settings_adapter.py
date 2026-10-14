@@ -156,6 +156,20 @@ def test_invalid_values_are_skipped():
     assert app_settings.load_column_order() == [] and app_settings.load_column_widths() == {}
 
 
+def test_imported_values_must_have_the_exact_json_type():
+    """A true is not 1, a width map with one bad entry is refused whole, a pair list needs pairs."""
+    adapter = CbzSettingsAdapter()
+    adapter.write_section("rename_defaults", {"zero_pad_width": True, "ascii_only": 1})
+    adapter.write_section("columns", {"widths": {"title": 200, "series": 10000}, "hidden": ["genre", 3]})
+    adapter.write_section("lists", {"custom_languages": [["pt", "Portuguese"], ["xx"]], "custom_genres": ["", "Noir"]})
+    adapter.write_section("recipe", {"recipe": {"steps": []}})
+    assert app_settings.load_rename_zero_pad()[1] == 2 and app_settings.load_ascii_filenames() is False
+    assert app_settings.load_column_widths() == {} and not app_settings.has_hidden_columns_preference()
+    assert app_settings.load_custom_languages() == []
+    assert app_settings.load_custom_genres()[-1] == "Noir"
+    assert json.loads(app_settings.load_redact_recipe()) == {"steps": []}
+
+
 def test_other_apps_file_is_rejected():
     text = json.dumps({"format": "redactor-settings", "version": 1, "app": "epubredactor", "sections": {}})
     with pytest.raises(sb.SettingsBundleError):

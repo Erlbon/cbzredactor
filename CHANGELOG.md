@@ -1,5 +1,19 @@
 # Changelog
 
+## 2026-10-14#06 -- Shared code from redactor_common replaces the app's own copies
+
+Behind the scenes: pieces every Redactor app had copied now come from redactor_common, and the app's copies are deleted. What you see stays the same, except for these small points:
+
+- **Open Folder, Refresh List and the Collection Report leave out the Redactor apps' own leftovers** (a `.redact-orig.cbz` backup from an interrupted Redact, a `.partial.cbz`), so they no longer show up as comics. A file you name yourself is still opened.
+- **Command line field names are a little more forgiving**: `"cover artist"` and `cover-artist` now find CoverArtist too, as `CoverArtist`, `cover_artist` and `coverartist` always did.
+- The "no secure credential store" question now also names macOS Keychain and the Linux Secret Service.
+- A file the Recycle Bin took although it reported an error is no longer tried a second time.
+- A hand-edited Include Subfolders, ASCII-safe filenames or zero-pad setting that is not a real yes/no now falls back to its default instead of counting as on.
+
+Removed from the app (now redactor_common): the GCD 429/401 fetch wrapper (GCD's refusals are now the shared `status_errors`), the manga lookup's own request spacing (shared `Throttle`), `gui/secret_prompts.py`, the command line's field-name lookup and its `main()` body (`FieldResolver`, `make_main`), the CLI's move-following output wrapper (the shared `on_moved` hook), `_shell_path` and the trash retry loop (`trash_with_retries`), the folder walk (`find_by_extension`), the QSettings plumbing in `gui/app_settings.py` (`QSettingsStore`, `ManagedListStore`, `PatternHistoryStore`, `ColumnSettingsStore`; same keys and fallbacks), the Export / Import Settings value checks (`settings_coerce`) and the ComicRack build's error/summary tail (`run_database_build`).
+
+- Requires redactor_common 2026-10-14-05.
+
 ## 2026-10-14#05 -- History follows renamed and moved files; Delete History to the Recycle Bin; History in Export / Import Settings
 
 - **History entries follow the file.** A file renamed or moved by File > Rename File, Rename / Export / Move, Search/Replace on filenames, Undo Last Rename, Redact's rename and move steps, or the command line's `rename`, `move` and `redact` takes its history with it, so Tools > History's Restore finds it at its new path (the entry still shows where the change was made). Converting a CBR/CB7/CBT to CBZ (in the window, in Redact, or with `convert`) carries any entries of the old name to the new .cbz. While history is off nothing is written.

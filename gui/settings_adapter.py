@@ -28,11 +28,13 @@ rather than storing it. Keys not named here are never touched.
 
 from __future__ import annotations
 
+import functools
 import json
 from typing import Any, Callable, Iterable
 
 from gui import app_settings
 from redactor_common.core import settings_bundle as sb
+from redactor_common.core import settings_coerce as sc
 
 _ON_LOAD_CHOICES = (
     app_settings.FOREIGN_LOAD_UNCONVERTED,
@@ -51,61 +53,26 @@ HISTORY_SECTION_LABEL = (
 )
 
 
-def _str_list(value: Any) -> list[str] | None:
-    if not isinstance(value, list) or not all(isinstance(v, str) for v in value):
-        return None
-    return list(value)
-
-
-def _pair_list(value: Any) -> list[tuple[str, str]] | None:
-    if not isinstance(value, list):
-        return None
-    pairs = []
-    for item in value:
-        if not (isinstance(item, (list, tuple)) and len(item) == 2 and all(isinstance(x, str) for x in item)):
-            return None
-        pairs.append((item[0], item[1]))
-    return pairs
-
-
-def _bool(value: Any) -> bool | None:
-    return value if isinstance(value, bool) else None
+# Every value read from an imported file is checked by redactor_common's
+# core/settings_coerce.py (None = unusable, the setting is left alone).
+_str_list = sc.coerce_str_list  # blank entries kept
+_pair_list = sc.coerce_pairs  # [(code, name), ...]; one malformed entry rejects the list
+_bool = sc.coerce_bool  # a real true/false only
+_path = sc.coerce_str
+# Column widths: 0 < width < 10000, one bad entry rejects the whole map.
+_width_map = functools.partial(sc.coerce_width_map, lo=1, hi=9999, strict=True)
+# The recipe travels as a JSON object (readable in the file), "" for the
+# default; stored back as the JSON text the app already keeps.
+_recipe = sc.recipe_from_json_value
 
 
 def _int(low: int, high: int) -> Callable[[Any], int | None]:
-    def coerce(value: Any) -> int | None:
-        if isinstance(value, bool) or not isinstance(value, int) or not low <= value <= high:
-            return None
-        return value
-    return coerce
+    return lambda value: sc.coerce_int(value, low, high)
 
 
 def _choice(choices: Iterable[str]) -> Callable[[Any], str | None]:
     allowed = tuple(choices)
-    return lambda value: value if isinstance(value, str) and value in allowed else None
-
-
-def _path(value: Any) -> str | None:
-    return value if isinstance(value, str) else None
-
-
-def _width_map(value: Any) -> dict[str, int] | None:
-    if not isinstance(value, dict):
-        return None
-    out = {}
-    for k, v in value.items():
-        if not isinstance(k, str) or isinstance(v, bool) or not isinstance(v, int) or not 0 < v < 10000:
-            return None
-        out[k] = v
-    return out
-
-
-def _recipe(value: Any) -> str | None:
-    """The recipe travels as a JSON object (readable in the file), "" for
-    the default; stored back as the JSON text the app already keeps."""
-    if value == "":
-        return ""
-    return json.dumps(value) if isinstance(value, (dict, list)) else None
+    return lambda value: sc.coerce_choice(value, allowed)
 
 
 class CbzSettingsAdapter(sb.SettingsAdapter):

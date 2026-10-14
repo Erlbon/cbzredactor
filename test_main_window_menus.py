@@ -346,3 +346,15 @@ def test_comic_files_in_folder_recursive_flag(tmp_path):
     names = lambda ps: [os.path.basename(p) for p in ps]  # noqa: E731
     assert names(comic_files_in_folder(str(tmp_path))) == ["a.cbz", "b.CBR"]  # default: the folder only
     assert names(comic_files_in_folder(str(tmp_path), recursive=True)) == ["a.cbz", "b.CBR", "c.cb7"]
+
+
+def test_comic_files_in_folder_leaves_out_the_family_temp_files(tmp_path):
+    import os
+
+    from gui.main_window import comic_files_in_folder
+
+    for name in ("a.cbz", "a.redact-orig.cbz", "b.redact-orig2.cbr", "c.partial.cbz", "My.Partial.Cut.cbz"):
+        (tmp_path / name).write_text("x")
+    (tmp_path / "folder.cbz").mkdir()  # a folder named like a comic is not a file
+    names = sorted(os.path.basename(p) for p in comic_files_in_folder(str(tmp_path)))
+    assert names == ["My.Partial.Cut.cbz", "a.cbz"]
