@@ -84,7 +84,7 @@ LOOK_UP = ["Comic Vine…", "Grand Comics Database…", "GCD Local Database…",
 def test_one_file_selected_offers_every_selection_command(window):
     layout = _layout(_items(window, [0]))
     assert layout == [
-        "---", "Rename File…", "---",
+        "---", "Preview…", "Rename File…", "---",
         ("Look Up", LOOK_UP),
         ("Organize", ["Rename / Export / Move…", "Parse Filename…", "Read Filename Tags",
                       "Number Issues…", "Credit Pages…"]),
@@ -154,7 +154,7 @@ def test_book_needing_conversion_gets_convert_and_no_editing_entries(tmp_path):
     assert win.books[0].needs_conversion
     layout = _layout(_items(win, [0]))
     assert layout == [
-        "---", "Rename File…", "---",
+        "---", "Preview…", "Rename File…", "---",
         ("Organize", ["Rename / Export / Move…"]),
         "---", "Redact", "Convert 1 File(s) to CBZ", "---", "Remove from List",
     ]

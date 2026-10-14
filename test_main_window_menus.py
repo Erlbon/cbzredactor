@@ -47,7 +47,7 @@ def test_top_level_menus_follow_the_skeleton():
 def test_file_menu_structure():
     menu = _menus(MainWindow())["File"]
     assert _texts(menu) == [
-        "Open Files…", "Open Folder…", "Include Subfolders", "---",
+        "Open Files…", "Open Folder…", "Include Subfolders", "Preview…", "---",
         "Save As…", "Save All", "---",
         "Rename File…", "Undo Last Rename", "Rename / Export / Move…", "Rename / Export / Move Macros", "---",
         "Export Settings…", "Import Settings…", "---",

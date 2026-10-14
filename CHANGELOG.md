@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-10-14#08 -- File > Preview...: a read-only page reader window
+
+- **File > Preview...** (Ctrl+Shift+P, also in the right-click menu of a single selected comic) opens a separate, non-modal window that pages through the selected comic, to check in place that the pages are in order, the last page is intact and the cover matches. It shows the page fitted to the window (re-fitted when you resize it; a Fit width box scales to the width and scrolls down the page), First / Previous / Next / Last buttons, a "Page 3 / 24" label and the page's file name, and takes Left / Right (also Page Up / Page Down), Home and End.
+- Only the page on screen, plus the next one, is read from the archive and decoded in the background: nothing is extracted or loaded wholesale, and the window never freezes on a big scan. A damaged page shows a message in the window and you can carry on; an archive with no images says so.
+- Strictly read-only: it never writes to the archive and remembers no settings. Select exactly one comic, otherwise the status bar says so.
+
 ## 2026-10-14#07 -- The convert-on-load question and the command line use redactor_common's own pieces
 
 - The "Convert to CBZ?" question when loading CBR/CB7/CBT files (Tools > Preferences > Conversion set to ask) is now redactor_common's convert offer: same wording with the inline file list, same Convert Now / Add Unconverted / Skip buttons (Add Unconverted is the default, Escape is Skip), same Recycle Bin and "Remember Convert Now / Add Unconverted" boxes. "Remember" still saves only whether CBR/CB7/CBT files are converted on load, never Skip and never the resize setting. New: Show Details lists the full paths.

@@ -554,6 +554,10 @@ class MainWindow(QMainWindow):
             # No explicit shortcut -- Alt+F4 already closes this (or any)
             # plain QMainWindow at the OS level, independent of anything bound here.
             exit_slot=self.close,
+            extra_open=[MenuAction(
+                "preview", "Pre&view…", self.open_page_reader, shortcut="Ctrl+Shift+P",
+                tooltip="Page through the selected comic in a separate window (read-only)",
+            )],
             export_settings=self.export_settings,
             import_settings=self.import_settings,
             extra_rename=[Submenu("Rename / Export / Move Macros", [
@@ -874,6 +878,8 @@ class MainWindow(QMainWindow):
         # what _target_books does), so the editing entries stay offered then.
         editable = bool(self._editable_selected_rows()) or not self._selected_rows
         items: list = [Separator()]
+        if one:
+            items.append(a["preview"])
         if one and not self.books[self._selected_rows[0]].load_error:
             items.extend([a["rename_file"], Separator()])
         # Every per-file lookup, so none of them needs a trip to the menu
@@ -1444,6 +1450,17 @@ class MainWindow(QMainWindow):
         editable = self._editable_selected_rows()
         self.actions_["credit_pages"].setEnabled(len(self._selected_rows) == 1 and len(editable) == 1)
         self.actions_["number_issues"].setEnabled(bool(editable))
+
+    def open_page_reader(self) -> None:
+        """File > Preview...: a separate, non-modal, read-only page reader for
+        the ONE selected comic (see gui/page_reader_dialog.py)."""
+        if len(self._selected_rows) != 1:
+            self.statusBar().showMessage("Preview works on one comic: select exactly one row.", 8000)
+            return
+        from gui.page_reader_dialog import PageReaderDialog
+
+        reader = PageReaderDialog(self.books[self._selected_rows[0]], self)
+        reader.show()
 
     def _credit_pages_for_selection(self) -> None:
         if len(self._selected_rows) == 1 and self._editable_selected_rows():
