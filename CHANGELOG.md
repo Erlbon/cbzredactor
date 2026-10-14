@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-10-14#04 -- Tools > History (opt-in): tag changes recorded, and undoable after closing the app
+
+- **Opt-in, off by default.** Nothing is recorded until you turn it on: Tools > Preferences > History > "Keep a history of tag changes", or Yes when Tools > History asks. The same page shows where the file is and has **Delete History...**; switch it off again at any time. While it is off nothing is written and no file is created; the command line obeys the same setting.
+- **New: Tools > History...** Once on, every change the app makes to a file's ComicInfo.xml tags (Save, Save All, Save As over an existing file, Redact, and the command line's `set` and `redact`) is recorded with the old and new value of each changed field. Pick an entry to see what changed and **Restore Old Values...** to write the old values back: pages are copied untouched and the file is read back to check. A restore is recorded too (so it can be restored in turn), and restored files that are in the list are reloaded.
+- The history is `cbzredactor_journal.jsonl` next to the settings file; it keeps the newest 50,000 changes, none older than 90 days. Page images are not kept (a Redact that removed or resized pages is marked as such; its original is in the Recycle Bin). The scan stamp and PageCount are not recorded, and a save that changes no field records nothing.
+- A problem writing the history never stops a save: it is shown once in the status bar.
+- Requires redactor_common 2026-10-14-03.
+
 ## 2026-10-14#03 -- Collection Report is report-only; one place for conversion settings; "Open" wording
 
 - **Collection Report no longer changes files.** The Fixes tab, the tickboxes on Moves and File names, and the Apply button are gone: the report never moves, renames, converts or rewrites anything. Each finding now has a **Fix with** column naming the app action that fixes it (e.g. Repair > Convert to CBZ, Repair > Validate and Fix, File > Rename / Export / Move), and the top of the report sums them up ("Use Repair > Convert to CBZ on 12 file(s)"). Open those files with File > Open Files or Open Folder and use that action. Save List... writes the Fix with column too.

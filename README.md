@@ -66,7 +66,7 @@ command is also searchable in the **Command Palette** (Ctrl+K).
   GCD Local Database..., ComicRack Library
   Database..., Collection (Scan Collection Folder..., Collection
   Report..., Compare Library with GCD...), Columns..., Genres...,
-  Languages....
+  Languages..., History....
 - **Help**: Changelog..., Credits..., About.
 
 There are no Ctrl+Alt shortcuts (they clash with AltGr on many keyboard
@@ -477,6 +477,35 @@ selection.
   `core/<source>_lookup.py` + `gui/<source>_lookup_dialog.py` shape as
   `comicvine_lookup.py`/`gcd_lookup.py`.
 
+## History of tag changes
+
+**Opt-in, off by default**: nothing is recorded until you turn it on in
+**Tools > Preferences > History** ("Keep a history of tag changes"), or
+answer Yes when Tools > History asks. The same page has **Delete
+History...**, and you can switch it off again at any time (the command
+line obeys the same setting).
+
+Once on, **Tools > History...** lists every change this program made to a file's
+ComicInfo.xml tags, newest first: Save, Save All, Save As over an
+existing file, Redact, the command line (`set`, `redact`), and Restore.
+Pick one to see the old and new value of each changed field;
+**Restore Old Values...** writes the old values back (pages untouched,
+read back to check) and is itself recorded, so it can be undone too.
+This works after the app was closed, unlike Undo.
+
+- The history is the file `cbzredactor_journal.jsonl` next to the
+  settings (`cbzredactor_settings.ini`, i.e. next to the exe). It keeps
+  the newest 50,000 changes, none older than 90 days.
+- Only tag text is kept. **Page images are not**: a Redact that removed
+  or resized pages is marked as such, and its original is in the
+  Recycle Bin. Resize Images, Clean Up Archive Contents, Remove Credit
+  Pages and Convert to CBZ are file operations covered by the Recycle
+  Bin, not by the history.
+- The scan stamp and PageCount are written by the app itself and are
+  not recorded; a save that changes no field records nothing.
+- A problem writing the history never stops a save; it is shown once in
+  the status bar.
+
 ## Foreign archive formats (CBR, CBT, CB7)
 
 CBZ (a plain ZIP) is the only format this tool ever writes to. CBR
@@ -557,6 +586,10 @@ The command line uses the same code as the window, so the results are the same. 
 (`cbzredactor_settings.ini` next to the exe: Tools > Preferences, the saved Redact recipe, the library root, the
 database paths) and the same secret store for the API keys. Not every window function is available from the
 command line; the commands above are what is.
+
+When history is turned on (it is off by default, see "History of tag changes" above), a tag change made from the
+command line (`set`, `redact`) is recorded in the same history as the window's; when it is off, the command line
+records nothing either.
 
 ### Options every command has
 

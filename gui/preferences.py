@@ -4,8 +4,8 @@ gui/preferences.py
 Tools > Preferences... (Ctrl+,): redactor_common's shared Preferences dialog
 over this app's existing storage.
 
-The pages are the shared Filenames section plus three of our own
-(Conversion, Resize defaults, Paths). Every value is read and written
+The pages are the shared Filenames section plus our own
+(Conversion, Resize defaults, Lookups, Paths, History). Every value is read and written
 through the same gui/app_settings.py load_*/save_* functions the rest of the
 app uses, so the ini keys do not change and Export/Import Settings
 (gui/settings_adapter.py) keeps working untouched.
@@ -18,6 +18,8 @@ Library Database...) stay as they are.
 """
 
 from __future__ import annotations
+
+import os
 
 from redactor_common.core.preferences import (
     KEY_ASCII_FILENAMES,
@@ -48,6 +50,7 @@ KEY_GCD_LOCAL_DB = "gcd_local_database"
 KEY_COMICRACK_DB = "comicrack_database"
 KEY_LIBRARY_ROOT = "library_root"
 KEY_SAVE_AFTER_LOOKUP = "save_after_lookup"
+KEY_HISTORY_ENABLED = "history_enabled"
 
 # Same ceiling the Export/Import adapter accepts for the padding settings.
 MAX_PAD_WIDTH = 10
@@ -182,7 +185,28 @@ def preference_sections() -> list[PrefSection]:
         description="Habits for the names the app builds when it renames, exports or moves files. "
                     "The Rename / Export and Auto-Numbering dialogs start from these.",
     )
-    return [filenames, conversion, resize, lookups, paths]
+    history_section = PrefSection(
+        "history", "History",
+        (
+            PrefSpec(
+                KEY_HISTORY_ENABLED, "Keep a history of tag changes (lets you undo a Save or Redact later)", "bool",
+                False,
+                help=_history_help(),
+            ),
+        ),
+        "Off unless you turn it on. Tools > History... shows what was recorded.",
+    )
+    return [filenames, conversion, resize, lookups, paths, history_section]
+
+
+def _history_help() -> str:
+    from core.history import journal_file_path
+
+    return (
+        "Stores the old and new text of every ComicInfo field a Save, Redact or the command line changes, "
+        "never page images. Keeps the last 90 days, at most 50,000 changes, in "
+        f"{journal_file_path()}. You can switch it off again at any time; Delete History removes the file."
+    )
 
 
 # --- storage: key -> (read, write) over app_settings ---------------------------
@@ -216,6 +240,7 @@ _READERS = {
     KEY_GCD_LOCAL_DB: app_settings.load_gcd_local_database,
     KEY_COMICRACK_DB: app_settings.load_comicrack_database,
     KEY_LIBRARY_ROOT: app_settings.load_library_root,
+    KEY_HISTORY_ENABLED: app_settings.load_history_enabled,
 }
 
 _WRITERS = {
@@ -238,6 +263,7 @@ _WRITERS = {
     KEY_GCD_LOCAL_DB: app_settings.save_gcd_local_database,
     KEY_COMICRACK_DB: app_settings.save_comicrack_database,
     KEY_LIBRARY_ROOT: app_settings.save_library_root,
+    KEY_HISTORY_ENABLED: app_settings.save_history_enabled,
 }
 
 
@@ -261,4 +287,42 @@ def make_dialog(parent=None):
     """The Preferences dialog, ready to exec()."""
     from redactor_common.gui.preferences_dialog import PreferencesDialog
 
-    return PreferencesDialog(preference_sections(), make_backend(), parent)
+    dialog = PreferencesDialog(preference_sections(), make_backend(), parent)
+    _add_delete_history_button(dialog)
+    return dialog
+
+
+def _add_delete_history_button(dialog) -> None:
+    """The History page's "Delete History..." button, under its checkbox. It acts at once (after a
+    confirmation), not on OK/Apply: it is an action, not a setting."""
+    from PyQt6.QtWidgets import QMessageBox, QPushButton
+
+    from core import history
+
+    checkbox = dialog.control(KEY_HISTORY_ENABLED)
+    container = checkbox.parentWidget()
+    button = QPushButton("Delete History…")
+    button.setToolTip("Removes the history file (the recorded tag changes). The setting is not changed.")
+
+    def refresh() -> None:
+        button.setEnabled(os.path.exists(history.journal_file_path()))
+
+    def delete() -> None:
+        answer = QMessageBox.question(
+            dialog, "Delete History",
+            f"Delete every recorded tag change?\n{history.journal_file_path()}\n\nOld values can then no longer "
+            "be restored from Tools > History. The files themselves are not touched.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        try:
+            history.delete_history()
+        except OSError as exc:
+            QMessageBox.warning(dialog, "Delete History", f"The history could not be deleted: {exc}")
+        refresh()
+
+    button.clicked.connect(delete)
+    container.layout().addWidget(button)
+    dialog.delete_history_button = button
+    refresh()

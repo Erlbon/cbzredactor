@@ -27,3 +27,6 @@ cbzredactor_rename_log.json
 
 collection_scan.zip
 collection_scan.zip.tmp
+# Tools > History (opt-in operations journal), next to the settings.
+cbzredactor_journal.jsonl
+cbzredactor_journal.jsonl.tmp

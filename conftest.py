@@ -16,6 +16,19 @@ def _isolated_rename_log(monkeypatch, tmp_path):
 
 
 @pytest.fixture(autouse=True)
+def journal(tmp_path):
+    """The operations journal (core/history.py) lives next to the settings; every test gets its own
+    in tmp_path, so no test writes the real one. Tests that check it take this fixture."""
+    from core import history
+    from redactor_common.core.journal import Journal
+
+    j = Journal(str(tmp_path / "journal.jsonl"))
+    history.use_journal(j)
+    yield j
+    history.use_journal(None)
+
+
+@pytest.fixture(autouse=True)
 def _isolated_collection_scan(monkeypatch, tmp_path):
     """Collection > Scan Collection Folder... saves next to the settings;
     tests save into a temporary folder instead."""

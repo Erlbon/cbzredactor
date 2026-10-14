@@ -110,6 +110,7 @@ from gui.conversion_progress import ConversionRun
 from core.archive_sniff import extension_label
 from core.page_cache import LruCache
 from core.cbz_file import CbzBook, CbzError, ResizeCancelled, path_needs_conversion
+from core import history
 from core.comicinfo_check import SCAN_ISSUES, check_book, scan_status
 from core.foreign_archive_convert import relabel_mislabeled_cbz
 from redactor_common.core.trash import TrashError, move_to_trash
@@ -127,6 +128,7 @@ from core.redact_steps import (
     recipe_for_run,
     recipe_from_setting,
     recipe_to_setting,
+    reload_book,
     run_catalogue,
     save_stage,
 )
@@ -651,6 +653,7 @@ class MainWindow(QMainWindow):
             columns=self.open_column_settings_dialog,
             genres=self.open_genre_settings_dialog,
             languages=self.open_language_settings_dialog,
+            history=self.open_history_dialog,
         )
         help_items = standard_help_items(
             APP_NAME, self.open_changelog_dialog, self.open_credits_dialog, self.open_about_dialog
@@ -3467,6 +3470,53 @@ class MainWindow(QMainWindow):
         if gone:
             self.statusBar().showMessage(f"Moved {len(gone)} duplicate(s) to the Recycle Bin.", 10000)
 
+    def open_history_dialog(self) -> None:
+        """Tools > History...: every tag change this program made (core/history.py), with
+        Restore Old Values. The restore itself runs on the dialog's worker thread, so the
+        wrapper only notes the path; loaded books that were restored are reloaded from disk
+        here, on the GUI thread, once the dialog is closed."""
+        from redactor_common.gui.history_dialog import HistoryDialog
+
+        self._commit_current_edits()
+        # Opt-in (owner decision 2026-10-14): off by default, nothing recorded until the user asks.
+        title = "History"
+        if not history.history_enabled():
+            if not os.path.exists(history.journal_file_path()):
+                answer = QMessageBox.question(
+                    self, "History",
+                    "History is off. Turn it on? From then on, tag changes this program saves are recorded "
+                    "here. Nothing has been recorded so far.",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                )
+                if answer != QMessageBox.StandardButton.Yes:
+                    return
+                history.set_history_enabled(True)
+            else:
+                title = "History (recording is off)"
+        restored: list[str] = []
+
+        def apply_restore(path: str, values: dict) -> str:
+            problem = history.apply_restore(path, values)
+            if not problem:
+                restored.append(os.path.normcase(os.path.abspath(path)))
+            return problem
+
+        HistoryDialog(history.get_journal(), apply_restore, self, title).exec()
+        self._reload_restored(restored)
+
+    def _reload_restored(self, paths: list[str]) -> None:
+        """Re-reads the loaded books at `paths` from disk and refreshes their rows."""
+        wanted = set(paths)
+        books = [b for b in self.books if os.path.normcase(os.path.abspath(b.path)) in wanted]
+        if not books:
+            self._update_status()
+            return
+        selected = [self.books[row] for row in self._selected_rows if row < len(self.books)]
+        for book in books:
+            reload_book(book, book.path)
+        self._after_redact(books, selected)  # same refresh: stale undo states dropped, rows rebuilt
+        self.statusBar().showMessage(f"Restored and reloaded {len(books)} file(s) from the history.", 8000)
+
     def open_known_credit_pages_dialog(self) -> None:
         from gui.credit_pages_dialogs import KnownCreditPagesDialog
 
@@ -3862,6 +3912,9 @@ class MainWindow(QMainWindow):
         unconverted = sum(1 for book in self.books if book.needs_conversion)
         if unconverted:
             message += f", {unconverted} need converting to CBZ"
+        problem = history.take_warning()  # a journal problem never fails a save: shown here, once
+        if problem:
+            message += f". {problem}"
         self.statusBar().showMessage(message)
 
     def closeEvent(self, event) -> None:  # noqa: N802 - Qt override signature

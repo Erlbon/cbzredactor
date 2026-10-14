@@ -106,7 +106,8 @@ def test_tools_menu_structure_with_the_collection_submenu():
         "Known Credit Pages…", "---",
         "GCD Local Database…", "ComicRack Library Database…", "---",
         "Collection", "---",
-        "Columns…", "Genres…", "Languages…",
+        "Columns…", "Genres…", "Languages…", "---",
+        "History…",
     ]
     collection = next(a for a in menu.actions() if _plain(a.text()) == "Collection").menu()
     assert _texts(collection) == ["Scan Collection Folder…", "Collection Report…", "Compare Library with GCD…"]

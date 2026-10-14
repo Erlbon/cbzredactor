@@ -16,3 +16,11 @@ when you ask (right-click > Convert to CBZ, or Repair > Convert to
 CBZ...); Tools > Preferences > Conversion can make loading convert them
 automatically or ask each time -- see README.md's "Foreign archive
 formats" section.
+
+History of tag changes is opt-in, off by default. Turned on (Tools >
+Preferences > History), every tag change the app makes (Save, Redact, and
+the command line, which obeys the same setting) is recorded with the old
+and new values in `cbzredactor_journal.jsonl` next to the settings file:
+Tools > History... shows it and can restore the old values, even after the
+app was closed. Page images are not kept there (replaced files go to the
+Recycle Bin). While it is off nothing is recorded and no file is created.

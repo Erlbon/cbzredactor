@@ -67,6 +67,7 @@ from core.archive_contents import CleanupOptions
 from core.cbz_file import CbzBook, CbzError
 from core.comicinfo import TAG_TO_ATTR, serialize_comicinfo_xml
 from core.comicinfo_check import check_metadata, scan_status
+from core import history
 from core.comicvine_lookup import (
     ComicVineLookupError,
     fetch_issue_details,
@@ -254,6 +255,8 @@ class CbzCtx:
         self.target_path = self.original  # where the saved file goes (a converted CBR: its .cbz name)
         self.work: CbzBook | None = None
         self.baseline = b""
+        self.field_baseline: dict[str, str] = {}  # the tag fields as read, for the journal (core/history.py)
+        self.pages_changed = False  # pages removed or re-encoded (journaled as a cover/page change, not stored)
         self.skip_reason = ""
         self.scratch = ""
         self.converted = False
@@ -277,6 +280,7 @@ class CbzCtx:
                 self.work = None
             else:
                 self.baseline = _xml_ignoring_stamp(self.work.metadata)
+                self.field_baseline = history.fields_text(self.work.metadata)
 
     # -- state ----------------------------------------------------------------
 
@@ -406,6 +410,7 @@ class ConvertStep(Step):
         ctx.original = ctx.current_path = ctx.target_path = os.path.realpath(target)
         ctx.work, ctx.path_changed, ctx.adopted_existing = work, True, True
         ctx.baseline = _xml_ignoring_stamp(work.metadata)
+        ctx.field_baseline = history.fields_text(work.metadata)
         return StepResult.applied(f"{name} already existed, so it is used instead of converting {foreign} again")
 
     def run(self, ctx: CbzCtx) -> StepResult:
@@ -426,6 +431,7 @@ class ConvertStep(Step):
             return StepResult.failed(f"the converted file could not be read ({work.load_error})")
         ctx.work, ctx.scratch, ctx.target_path, ctx.converted = work, scratch, target, True
         ctx.baseline = _xml_ignoring_stamp(work.metadata)
+        ctx.field_baseline = history.fields_text(work.metadata)
         ext = os.path.splitext(ctx.original)[1].lower().lstrip(".") or "archive"
         resized = ", pages resized in the same pass" if ctx.env.convert_resize is not None else ""
         return StepResult.applied(f"converted {ext.upper()} to CBZ{resized}, {work.actual_page_count} page(s)")
@@ -515,6 +521,7 @@ class RemoveCreditPagesStep(Step):
         ctx.ensure_scratch()
         removed = ctx.work.remove_pages(list(result.value.names))
         ctx.structure_changed = True
+        ctx.pages_changed = True
         return f"removed {removed} credit page(s): {', '.join(result.value.names[:4])}"
 
 
@@ -549,6 +556,7 @@ class ResizeImagesStep(Step):
             opts["max_width"], opts["jpeg_quality"], None, max_height=opts["max_height"] or None,
         )
         ctx.structure_changed = True
+        ctx.pages_changed = True
         mb = 1024 * 1024
         return StepResult.applied(
             f"resized {summary.pages_resized} page(s) to {opts['max_width']}px wide, "
@@ -1037,7 +1045,7 @@ def _write_and_commit(ctx: CbzCtx, done: list[str], notes: list[str]) -> str:
     if ctx.scan_status and ctx.structure_changed:
         work.record_scan(ctx.scan_status)  # pages changed after the scan: re-take the fingerprint
     try:
-        work.save(output_path=temp)
+        work.save(output_path=temp, journal_kind=None)  # journaled once per file by save_stage
     except CbzError as exc:
         return f"NOT SAVED, the original is untouched: {exc}"
     trash = env.trash or move_to_trash
@@ -1085,9 +1093,16 @@ def save_stage(ctx: CbzCtx, entry) -> StepResult | None:
     notes: list[str] = []
     error = ""
     env = ctx.env
+    entry_id = None
+    saved = False
     try:
         if ctx.changed:
+            entry_id = _journal_begin(ctx)
             error = _write_and_commit(ctx, done, notes)
+            saved = not error
+            if error:
+                history.finish(entry_id, False, error)
+                entry_id = None
         if not error and ctx.rename_to:
             try:
                 rename_no_clobber(ctx.current_path, ctx.rename_to)
@@ -1101,6 +1116,11 @@ def save_stage(ctx: CbzCtx, entry) -> StepResult | None:
         if not error and ctx.move is not None:
             error = _execute_move(ctx, done, notes)
     finally:
+        if entry_id is not None:
+            # The entry was recorded under the planned final name; a rename or move that failed after the
+            # save leaves the file where the save put it, which the entry says.
+            where = "" if not error else f"saved, but {error}; the file is at {ctx.current_path}"
+            history.finish(entry_id, saved, where if saved else (error or "the save was interrupted"))
         if done or ctx.adopted_existing:
             # Whatever did happen is on disk: show it in the row even if a later part failed.
             reload_book(ctx.book, ctx.current_path if ctx.path_changed else ctx.book.path)
@@ -1110,6 +1130,19 @@ def save_stage(ctx: CbzCtx, entry) -> StepResult | None:
     result = StepResult.applied(*done) if done else StepResult.nothing()
     result.note = "; ".join(notes)
     return result
+
+
+def _journal_begin(ctx: CbzCtx) -> str | None:
+    """One journal entry (kind "redact") per saved file, announced before the write: the changed tag
+    fields with their old and new text, plus a page flag when pages were removed or re-encoded (the
+    pages themselves are not kept; the original goes to the Recycle Bin). Recorded under the path the
+    file ends up at (after the planned rename / move). Nothing worth recording: None."""
+    if ctx.work is None:
+        return None
+    changes = history.diff_fields(ctx.field_baseline, history.fields_text(ctx.work.metadata))
+    final = ctx.move.new_path if ctx.move is not None else ctx.final_path()
+    note = "pages removed or resized; the old file is in the Recycle Bin" if ctx.pages_changed else ""
+    return history.begin(final, history.KIND_REDACT, changes, cover_changed=ctx.pages_changed, note=note)
 
 
 def _execute_move(ctx: CbzCtx, done: list[str], notes: list[str]) -> str:

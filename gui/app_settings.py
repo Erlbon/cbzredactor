@@ -268,6 +268,22 @@ def default_comicrack_database_path() -> str:
     return os.path.join(base_dir(), "comicrack_library.db")
 
 
+_HISTORY_ENABLED_KEY = "history/enabled"
+
+
+def load_history_enabled() -> bool:
+    """Tools > Preferences > History: keep the operations journal (core/history.py). OPT-IN: off
+    unless the user turned it on; a missing or garbled value is off."""
+    value = _settings().value(_HISTORY_ENABLED_KEY, False)
+    if isinstance(value, bool):
+        return value
+    return str(value).strip().lower() in ("true", "1", "yes", "on")
+
+
+def save_history_enabled(on: bool) -> None:
+    _settings().setValue(_HISTORY_ENABLED_KEY, bool(on))
+
+
 def load_include_subfolders() -> bool:
     """File > Include Subfolders: ON unless the user turned it off (the shared setting every Redactor app has)."""
     return _settings().value("include_subfolders", True, type=bool)

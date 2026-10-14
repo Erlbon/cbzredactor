@@ -41,6 +41,8 @@ from core.archive_sniff import CONTAINER_UNKNOWN, CONTAINER_ZIP, detect_containe
 from core.comicinfo import ComicInfoError, ComicInfoMetadata, parse_comicinfo_xml, serialize_comicinfo_xml
 from core.image_resize import OUTPUT_FORMAT_EXTENSIONS, ResizeOptions, resize_page
 from core.comicinfo_locate import locate_comicinfo
+from core import history
+from core.history import KIND_SAVE, diff_fields, fields_text
 from core.zip_names import open_zip
 from core.zip_rewrite import (
     ZIP_ERRORS,
@@ -338,6 +340,9 @@ class CbzBook:
     # so Remove Pages / Clean Up aren't refused over it. Any other
     # assignment to `dirty` clears it (see __setattr__).
     stamp_only_dirty: bool = field(default=False, repr=False, compare=False)
+    # The ComicInfo fields as plain text (core/history.fields_text) as they are ON DISK: taken when the
+    # file is loaded and after every successful save. A save journals the difference against it.
+    baseline: dict = field(default_factory=dict, repr=False, compare=False)
 
     def __setattr__(self, name, value):
         if name == "dirty":
@@ -394,6 +399,7 @@ class CbzBook:
             # error so the GUI can flag it rather than silently editing
             # blank metadata over top of whatever was actually there.
             self.load_error = str(exc)
+        self.baseline = fields_text(self.metadata)
         # A stamp read from disk is the last-known scan: it never marks
         # the book dirty, it is only checked against the pages.
         self._refresh_stamp_staleness()
@@ -521,7 +527,7 @@ class CbzBook:
     # Saving
     # ------------------------------------------------------------------
 
-    def save(self, output_path: Optional[str] = None) -> None:
+    def save(self, output_path: Optional[str] = None, *, journal_kind: Optional[str] = KIND_SAVE) -> None:
         """Writes updated metadata back into a CBZ file. PageCount is
         always recomputed from the actual archive contents right
         before writing -- this field is never taken from the GUI form,
@@ -531,6 +537,13 @@ class CbzBook:
         temp file + rename, so a crash mid-write can't corrupt the
         original). Otherwise writes a new file at output_path, leaving
         the source untouched.
+
+        Every changed tag field of a file that is overwritten (this book's
+        own file, or an existing file Save As writes over) is recorded in
+        the operations journal (core/history.py) as `journal_kind`, before
+        the write, with the outcome after it. None records nothing (Redact
+        journals its own entry; a Restore is journaled by the History
+        dialog). A journal problem never fails the save.
         """
         if self.load_error:
             raise CbzError(f"Cannot save, file failed to load: {self.load_error}")
@@ -557,23 +570,45 @@ class CbzBook:
             decide=lambda entry, read: Action(drop=True) if entry.name == old_name else None,
             after=[NewEntry(write_name, new_xml_bytes)],
         )
+        own_file = output_path is None or output_path == self.path
+        new_fields = fields_text(self.metadata)
+        entry_id = None
+        if journal_kind and history.history_enabled():  # opt-in: off records nothing
+            before = self.baseline if own_file else self._fields_on_disk(target)
+            if before is not None:
+                entry_id = history.begin(target, journal_kind, diff_fields(before, new_fields))
         try:
             rewrite_archive(self.path, target, plan, temp_suffix=".tmp_write", error_prefix="Could not save CBZ file")
         except RewriteError as exc:
             self.save_error = exc.detail
+            history.finish(entry_id, False, exc.detail)
             raise
+        except BaseException as exc:
+            history.finish(entry_id, False, str(exc) or type(exc).__name__)
+            raise
+        history.finish(entry_id, True)
 
         self.save_error = ""
         # Only treat this as "saved" (clear dirty, adopt new path) when
         # this book's own file was actually overwritten -- saving to a
         # *different* path is a copy, and the original book is still
         # exactly as dirty as before, still at its original path.
-        if output_path is None or output_path == self.path:
+        if own_file:
+            self.baseline = new_fields
             self.path = target
             self.comicinfo_name = write_name
             self.load_warning = ""  # a promoted nested ComicInfo.xml is the only one now
             self.dirty = False
             self._refresh_stamp_staleness()
+
+    @staticmethod
+    def _fields_on_disk(path: str) -> Optional[dict]:
+        """The tag fields of an existing CBZ that Save As is about to write
+        over (None: no such file, or not readable: nothing to journal)."""
+        if not os.path.isfile(path):
+            return None
+        other = CbzBook(path)
+        return None if other.load_error or other.needs_conversion else other.baseline
 
     # ------------------------------------------------------------------
     # Removing pages (scanner credit pages -- see core/credit_pages.py)
