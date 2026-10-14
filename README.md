@@ -482,8 +482,12 @@ selection.
 **Opt-in, off by default**: nothing is recorded until you turn it on in
 **Tools > Preferences > History** ("Keep a history of tag changes"), or
 answer Yes when Tools > History asks. The same page has **Delete
-History...**, and you can switch it off again at any time (the command
-line obeys the same setting).
+History...** (the file goes to the Recycle Bin, after asking), and you
+can switch it off again at any time (the command line obeys the same
+setting). The on/off setting travels with File > Export / Import
+Settings (section "History on/off"; importing it as on turns recording
+on, only when you tick that section; a settings file without it leaves
+yours alone). The history file itself is never exported.
 
 Once on, **Tools > History...** lists every change this program made to a file's
 ComicInfo.xml tags, newest first: Save, Save All, Save As over an
@@ -503,6 +507,15 @@ This works after the app was closed, unlike Undo.
   Bin, not by the history.
 - The scan stamp and PageCount are written by the app itself and are
   not recorded; a save that changes no field records nothing.
+- **Entries follow the file.** When a file is renamed or moved (File >
+  Rename File, Rename / Export / Move, Search/Replace on filenames,
+  Undo Last Rename, Redact's rename and move steps, and the command
+  line's `rename`, `move` and `redact`), its history goes with it, so
+  Restore finds the file where it is now; the entry still shows where
+  the change was made. A Redact records its change where the file was
+  saved, and the rename or move after it carries the entry along only
+  once it really happened. Converting a CBR/CB7/CBT to CBZ carries any
+  entries of the old name to the new .cbz.
 - A problem writing the history never stops a save; it is shown once in
   the status bar.
 

@@ -182,10 +182,16 @@ _FIELD_LABELS.update(
 
 
 
+def _make_rename_log(path: str) -> RenameLog:
+    """Every RenameLog this app makes: its on_move hook lets the History's entries follow a renamed
+    or moved file (core/history.note_moves; nothing while history is off)."""
+    return RenameLog(path, on_move=history.note_moves)
+
+
 def _rename_log() -> RenameLog:
     """The persistent log behind File > Undo Last Rename (redactor_common's
     core/rename_log.py), next to this app's settings."""
-    return RenameLog(os.path.join(str(base_dir()), "cbzredactor_rename_log.json"))
+    return _make_rename_log(os.path.join(str(base_dir()), "cbzredactor_rename_log.json"))
 
 def _collection_scan_path() -> str:
     """Collection > Scan Collection Folder...'s zipped CSV, next to the
@@ -1111,6 +1117,7 @@ class MainWindow(QMainWindow):
             errors.append(f"{name}: {exc}")
             self._restore_relabeled(source, path, name, errors)
             return None
+        history.note_conversion(path, new_path)  # History entries of the old name follow the new .cbz
         if delete_original:
             try:
                 _trash_retrying(source)

@@ -24,3 +24,6 @@ and new values in `cbzredactor_journal.jsonl` next to the settings file:
 Tools > History... shows it and can restore the old values, even after the
 app was closed. Page images are not kept there (replaced files go to the
 Recycle Bin). While it is off nothing is recorded and no file is created.
+The history follows a file that is renamed, moved or converted to CBZ,
+Delete History sends the file to the Recycle Bin, and the on/off setting
+travels with Export / Import Settings.

@@ -110,11 +110,15 @@ def test_preferences_help_says_what_how_much_and_where():
 
 
 def test_delete_history_asks_and_removes_the_file(tmp_path, journal, monkeypatch):
+    import redactor_common.core.trash as trash
+
+    monkeypatch.setattr(trash, "move_to_trash", lambda p: os.replace(p, str(tmp_path / "binned")))  # fake Recycle Bin
     history.set_history_enabled(True)
     _edit_and_save(_cbz(tmp_path / "a.cbz"), "Other")
     assert os.path.exists(journal.path)
     dlg = preferences.make_dialog()
     button = dlg.delete_history_button
+    assert button in dlg.action_buttons  # the History page's PrefAction
     assert button.isEnabled()
 
     monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.StandardButton.Cancel))

@@ -17,6 +17,7 @@ from __future__ import annotations
 import argparse
 import os
 
+from core import history
 from core.credit_pages import KnownCreditPages
 from core.redact_steps import (
     FINALIZE_LABEL, CbzCtx, RedactEnv, build_catalogue, recipe_for_run, recipe_from_setting, run_catalogue, save_stage,
@@ -48,6 +49,7 @@ def build_env(args: argparse.Namespace) -> RedactEnv:
     resize = app_settings.load_resize_options() if app_settings.load_resize_on_convert() == app_settings.RESIZE_ON_CONVERT_YES else None
     return RedactEnv(
         rename_log=None,
+        on_move=history.note_moves,  # no Undo Last Rename here, but the History's entries follow a renamed / moved file
         trash=trash_to(args.trash_dir) if args.trash_dir else trash_with_retries(),
         pattern_history=app_settings.load_pattern_history(),
         ascii_filenames=app_settings.load_ascii_filenames(),

@@ -44,8 +44,8 @@ from core.comicinfo import TAG_TO_ATTR
 
 __all__ = [
     "KIND_REDACT", "KIND_RESTORE", "KIND_SAVE", "JOURNALED_FIELDS", "apply_restore", "begin", "delete_history",
-    "diff_fields", "fields_text", "finish", "get_journal", "history_enabled", "journal_path", "set_history_enabled",
-    "take_warning", "use_journal",
+    "diff_fields", "fields_text", "finish", "get_journal", "history_enabled", "journal_path", "note_conversion",
+    "note_moves", "set_history_enabled", "take_warning", "use_journal",
 ]
 
 # Technical, written by the app itself rather than edited: never journaled, never restored.
@@ -82,16 +82,21 @@ def set_history_enabled(on: bool) -> None:
     app_settings.save_history_enabled(on)
 
 
-def delete_history() -> bool:
-    """Removes the journal file (Tools > Preferences > History > Delete History...). Returns whether a
-    file was removed. Raises OSError when it can't be."""
+def delete_history(trash=None) -> bool:
+    """Sends the journal file to the Recycle Bin (Tools > Preferences > History > Delete History...),
+    never deletes it for good; a stale prune temp file beside it is just removed. Returns whether a
+    journal file was there. Raises TrashError (or OSError) when it can't be moved. `trash`: the
+    Recycle Bin function (tests pass their own)."""
+    if trash is None:
+        from redactor_common.core.trash import move_to_trash as trash
     path = get_journal().path
     with _lock:
         removed = False
-        for candidate in (path, path + ".tmp"):
-            if os.path.exists(candidate):
-                os.remove(candidate)
-                removed = removed or candidate == path
+        if os.path.exists(path):
+            trash(path)
+            removed = True
+        if os.path.exists(path + ".tmp"):
+            os.remove(path + ".tmp")
         return removed
 
 
@@ -175,6 +180,40 @@ def finish(entry_id: str | None, ok: bool = True, error: str = "") -> None:
         return
     try:
         get_journal().finish(entry_id, ok, error)
+    except Exception as exc:  # noqa: BLE001
+        _report(exc)
+
+
+# -- renamed / moved / converted files --------------------------------------------------------------
+
+
+def note_moves(pairs) -> None:
+    """The rename / move hook: the journal entries of each (old, new) file follow it to its new path
+    (Journal.record_moves). Given to every RenameLog this app makes (on_move=), so File > Rename File,
+    Rename / Export / Move, Search/Replace on filenames, Undo Last Rename and Redact's rename / move
+    steps are all covered; the command line calls it itself. Does nothing while history is off, or
+    while there is no journal file yet (nothing to follow). Never raises."""
+    pairs = [(os.path.abspath(old), os.path.abspath(new)) for old, new in pairs]
+    if not pairs or not history_enabled():
+        return
+    try:
+        journal = get_journal()
+        if os.path.exists(journal.path):
+            journal.record_moves(pairs)
+    except Exception as exc:  # noqa: BLE001 -- bookkeeping never fails the rename that already happened
+        _report(exc)
+
+
+def note_conversion(old: str, new: str) -> None:
+    """A CBR/CB7/CBT converted to a .cbz (a new extension): when the journal has entries for the old
+    path, they follow the file to the new one. Never raises; nothing while history is off."""
+    old, new = os.path.abspath(old), os.path.abspath(new)
+    if old == new or not history_enabled():
+        return
+    try:
+        journal = get_journal()
+        if os.path.exists(journal.path) and journal.entries(path=old, limit=1):
+            journal.record_move(old, new)
     except Exception as exc:  # noqa: BLE001
         _report(exc)
 

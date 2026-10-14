@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-10-14#05 -- History follows renamed and moved files; Delete History to the Recycle Bin; History in Export / Import Settings
+
+- **History entries follow the file.** A file renamed or moved by File > Rename File, Rename / Export / Move, Search/Replace on filenames, Undo Last Rename, Redact's rename and move steps, or the command line's `rename`, `move` and `redact` takes its history with it, so Tools > History's Restore finds it at its new path (the entry still shows where the change was made). Converting a CBR/CB7/CBT to CBZ (in the window, in Redact, or with `convert`) carries any entries of the old name to the new .cbz. While history is off nothing is written.
+- **Redact records where the save happened.** It used to record its entry under the name the file would get after the planned rename or move; now the rename or move carries the entry along only once it has really happened, so a failed rename never leaves an entry at a name that never existed.
+- **Delete History...** (Tools > Preferences > History) now sends the history file to the Recycle Bin instead of deleting it for good; the button is the shared preferences-page action.
+- **Export / Import Settings** now include the History on/off setting (section "History on/off"). Importing it as on turns recording on only when you tick that section, which its label says; a settings file without it leaves your setting alone. The history file itself is never exported.
+- Requires redactor_common 2026-10-14-04.
+
 ## 2026-10-14#04 -- Tools > History (opt-in): tag changes recorded, and undoable after closing the app
 
 - **Opt-in, off by default.** Nothing is recorded until you turn it on: Tools > Preferences > History > "Keep a history of tag changes", or Yes when Tools > History asks. The same page shows where the file is and has **Delete History...**; switch it off again at any time. While it is off nothing is written and no file is created; the command line obeys the same setting.

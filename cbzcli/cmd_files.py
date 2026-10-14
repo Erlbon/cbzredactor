@@ -6,7 +6,8 @@ cbzcli/cmd_files.py
   move    PATH...   move (or copy) into folders under a library root by a pattern ("%publisher%/%series%/...")
 
 Rename and move are the shared implementations in redactor_common.cli.commands; this file only says how a
-comic's fields and path are read. There is no undo for the command line (it is not recorded in the app's rename log).
+comic's fields and path are read. There is no undo for the command line (it is not recorded in the app's rename log),
+but with history on, the History's entries of a renamed, moved or converted file follow it (core/history.py).
 """
 
 from __future__ import annotations
@@ -14,6 +15,7 @@ from __future__ import annotations
 import argparse
 import os
 
+from core import history
 from core.archive_sniff import CONTAINER_UNKNOWN, detect_container
 from core.cbz_file import CbzBook, path_needs_conversion
 from core.foreign_archive_convert import ForeignArchiveConversionError, convert_to_cbz, relabel_mislabeled_cbz
@@ -116,6 +118,7 @@ def _convert_one(path: str, args, resize, row: dict, out: Output, taken: set[str
         row["status"], row["message"] = "failed", str(exc) + _restore_name(source, path)
         return
     row["status"], row["new_path"] = "converted", new_path
+    history.note_conversion(path, new_path)  # History entries of the old name follow the new .cbz
     if args.trash_original:
         try:
             trash_with_retries(move_to_trash)(source)
@@ -148,13 +151,38 @@ def add_rename_parser(sub) -> None:
     parser.set_defaults(handler=run_rename)
 
 
+class _FollowingMoves:
+    """Wraps the run's Output: every row the shared rename / move code records as "renamed" or "moved"
+    (the original is gone from its old path) also goes to the History, so its entries follow the file
+    (core/history.note_moves, the same hook the app's RenameLog has; nothing while history is off).
+    A copy, a dry run or a failure is not a move."""
+
+    _MOVED = frozenset({"renamed", "moved"})
+
+    def __init__(self, out: Output):
+        self._out = out
+
+    def record(self, row: dict) -> None:
+        self._out.record(row)
+        old, new = row.get("path", ""), row.get("new_path", "")
+        if row.get("status") not in self._MOVED or not old or not new:
+            return
+        # A cross-drive move whose original could not go to the Recycle Bin left it in place: no move.
+        # A change of letter case only is a move although the old spelling still "exists".
+        if not os.path.lexists(old) or os.path.normcase(old) == os.path.normcase(new):
+            history.note_moves([(old, new)])
+
+    def __getattr__(self, name):
+        return getattr(self._out, name)
+
+
 def run_rename(args: argparse.Namespace, out: Output) -> int:
     pattern = args.pattern or DEFAULT_RENAME_PATTERN
     zero_pad = _zero_pad(args)
     books = load_books(collect(args.paths, out, recurse=not args.no_recurse), out)
     failed = commands.rename_items(
         books, pattern=pattern, values_for=lambda b: _values_for(b, zero_pad), path_of=lambda b: b.path,
-        skip_reason=_skip_reason, out=out, dry_run=args.dry_run, ascii_only=_ascii(args),
+        skip_reason=_skip_reason, out=_FollowingMoves(out), dry_run=args.dry_run, ascii_only=_ascii(args),
     )
     return commands.finish_run(out, failed, files=len(books), dry_run=args.dry_run, pattern=pattern)
 
@@ -182,7 +210,7 @@ def run_move(args: argparse.Namespace, out: Output) -> int:
     books = load_books(collect(args.paths, out, recurse=not args.no_recurse), out)
     failed = commands.move_items(
         books, root=root, pattern=args.pattern, values_for=lambda b: _values_for(b, zero_pad),
-        path_of=lambda b: b.path, skip_reason=_skip_reason, out=out, dry_run=args.dry_run, copy=args.copy,
+        path_of=lambda b: b.path, skip_reason=_skip_reason, out=_FollowingMoves(out), dry_run=args.dry_run, copy=args.copy,
         ascii_only=_ascii(args),
     )
     return commands.finish_run(out, failed, files=len(books), dry_run=args.dry_run, root=root)

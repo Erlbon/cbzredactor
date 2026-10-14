@@ -7,7 +7,8 @@ File > Export Settings... / Import Settings...: the SettingsAdapter
 What travels (portable sections, ticked by default): Redact recipe,
 rename/parse pattern history, rename defaults (ASCII, zero-pad),
 column layout, genre/language lists, conversion settings, resize
-defaults. Machine-specific (unticked, "this computer only"): the GCD and
+defaults, the History on/off setting (history/enabled; only the setting,
+never the history file itself). Machine-specific (unticked, "this computer only"): the GCD and
 ComicRack database paths, the library root and the last-used folder.
 
 Deliberately NOT exported, ever:
@@ -44,6 +45,10 @@ _RESIZE_ON_CONVERT_CHOICES = (
     app_settings.RESIZE_ON_CONVERT_NO,
 )
 _OUTPUT_FORMATS = ("", "JPEG", "WEBP")
+# Shown in Export and in Import's preview (the import confirmation): importing "on" is the user's choice.
+HISTORY_SECTION_LABEL = (
+    "History on/off (Tools > Preferences > History; importing it as on turns the recording of tag changes on here)"
+)
 
 
 def _str_list(value: Any) -> list[str] | None:
@@ -189,6 +194,11 @@ class CbzSettingsAdapter(sb.SettingsAdapter):
                     app_settings.load_resize_oversized_only, app_settings.save_resize_oversized_only, _bool,
                 ),
             },
+            "history": {
+                # Opt-in: a bundle without this key leaves it alone; importing "on" turns recording on only
+                # because the user ticked this section in the preview (its label says so).
+                "enabled": (app_settings.load_history_enabled, app_settings.save_history_enabled, _bool),
+            },
             "paths": {
                 "gcd_local_database": (
                     app_settings.load_gcd_local_database, app_settings.save_gcd_local_database, _path,
@@ -213,6 +223,7 @@ class CbzSettingsAdapter(sb.SettingsAdapter):
             sb.SectionSpec("lists", "Genre and Language lists"),
             sb.SectionSpec("conversion", "Converting to CBZ"),
             sb.SectionSpec("resize", "Resize Images defaults"),
+            sb.SectionSpec("history", HISTORY_SECTION_LABEL),
             sb.SectionSpec("paths", "Database paths and last-used folders (this computer only)", portable=False),
         ]
 

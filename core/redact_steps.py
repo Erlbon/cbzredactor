@@ -118,7 +118,10 @@ class RedactEnv:
     for it (so this module stays Qt-free), the rename log, the trash
     function (injectable for tests) and the lookup hooks."""
 
-    rename_log: object | None = None  # anything with .record(label, [(old, new)], ...)
+    rename_log: object | None = None  # anything with .record(label, [(old, new)], ...); its on_move hook tells the History
+    # Without a rename log (the command line): called with the (old, new) pairs of each rename / move, so the
+    # History's entries follow the file (core/history.note_moves).
+    on_move: Callable[[list[tuple[str, str]]], None] | None = None
     trash: Callable[[str], None] | None = None  # None: the Recycle Bin (move_to_trash)
     pattern_history: list[str] = field(default_factory=list)  # newest first (Rename / Parse Filename)
     ascii_filenames: bool = False
@@ -1069,6 +1072,7 @@ def _write_and_commit(ctx: CbzCtx, done: list[str], notes: list[str]) -> str:
     except OSError as exc:
         return f"NOT SAVED, the original is untouched: couldn't create {os.path.basename(ctx.target_path)} ({exc})"
     ctx.current_path, ctx.path_changed = ctx.target_path, True
+    history.note_conversion(ctx.original, ctx.target_path)  # entries of the old name follow the new .cbz
     try:
         trash(ctx.original)
     except Exception as exc:  # noqa: BLE001 -- any trash failure keeps the original
@@ -1111,14 +1115,16 @@ def save_stage(ctx: CbzCtx, entry) -> StepResult | None:
             else:
                 if env.rename_log is not None:
                     env.rename_log.record("Redact: rename by pattern", [(ctx.current_path, ctx.rename_to)])
+                elif env.on_move is not None:
+                    env.on_move([(ctx.current_path, ctx.rename_to)])
                 ctx.current_path, ctx.path_changed = ctx.rename_to, True
                 done.append(f"renamed to {os.path.basename(ctx.rename_to)!r}")
         if not error and ctx.move is not None:
             error = _execute_move(ctx, done, notes)
     finally:
         if entry_id is not None:
-            # The entry was recorded under the planned final name; a rename or move that failed after the
-            # save leaves the file where the save put it, which the entry says.
+            # The entry was recorded where the save happened; a rename or move after it moved the entry along
+            # (the rename log's on_move hook), and one that failed leaves both where the save put them.
             where = "" if not error else f"saved, but {error}; the file is at {ctx.current_path}"
             history.finish(entry_id, saved, where if saved else (error or "the save was interrupted"))
         if done or ctx.adopted_existing:
@@ -1136,13 +1142,14 @@ def _journal_begin(ctx: CbzCtx) -> str | None:
     """One journal entry (kind "redact") per saved file, announced before the write: the changed tag
     fields with their old and new text, plus a page flag when pages were removed or re-encoded (the
     pages themselves are not kept; the original goes to the Recycle Bin). Recorded under the path the
-    file ends up at (after the planned rename / move). Nothing worth recording: None."""
+    save writes (a converted CBR: its .cbz name), NOT the planned name after a rename / move: those
+    move the entry along only once they really happened (RenameLog's on_move / env.on_move), so a
+    failed rename never leaves an entry at a name that never existed. Nothing worth recording: None."""
     if ctx.work is None:
         return None
     changes = history.diff_fields(ctx.field_baseline, history.fields_text(ctx.work.metadata))
-    final = ctx.move.new_path if ctx.move is not None else ctx.final_path()
     note = "pages removed or resized; the old file is in the Recycle Bin" if ctx.pages_changed else ""
-    return history.begin(final, history.KIND_REDACT, changes, cover_changed=ctx.pages_changed, note=note)
+    return history.begin(ctx.target_path, history.KIND_REDACT, changes, cover_changed=ctx.pages_changed, note=note)
 
 
 def _execute_move(ctx: CbzCtx, done: list[str], notes: list[str]) -> str:
@@ -1161,6 +1168,8 @@ def _execute_move(ctx: CbzCtx, done: list[str], notes: list[str]) -> str:
             "Redact: move into folders", [(ctx.current_path, result.new_path)],
             created_dirs=result.created_dirs, trashed=trashed, root=move.root,
         )
+    elif env.on_move is not None:
+        env.on_move([(ctx.current_path, result.new_path)])
     ctx.current_path, ctx.path_changed = result.new_path, True
     done.append(f"moved to {move.relative_path()}")
     return ""

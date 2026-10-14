@@ -27,6 +27,7 @@ from redactor_common.core.preferences import (
     KEY_ZERO_PAD_NUMBERS,
     KEY_ZERO_PAD_WIDTH,
     CallbackBackend,
+    PrefAction,
     PrefSection,
     PrefSpec,
     filenames_section,
@@ -51,6 +52,7 @@ KEY_COMICRACK_DB = "comicrack_database"
 KEY_LIBRARY_ROOT = "library_root"
 KEY_SAVE_AFTER_LOOKUP = "save_after_lookup"
 KEY_HISTORY_ENABLED = "history_enabled"
+DELETE_HISTORY_LABEL = "Delete History…"
 
 # Same ceiling the Export/Import adapter accepts for the padding settings.
 MAX_PAD_WIDTH = 10
@@ -195,6 +197,13 @@ def preference_sections() -> list[PrefSection]:
             ),
         ),
         "Off unless you turn it on. Tools > History... shows what was recorded.",
+        actions=(
+            PrefAction(
+                DELETE_HISTORY_LABEL, _delete_history,
+                help="Sends the history file (the recorded tag changes) to the Recycle Bin at once, after asking. "
+                     "The setting is not changed.",
+            ),
+        ),
     )
     return [filenames, conversion, resize, lookups, paths, history_section]
 
@@ -205,7 +214,7 @@ def _history_help() -> str:
     return (
         "Stores the old and new text of every ComicInfo field a Save, Redact or the command line changes, "
         "never page images. Keeps the last 90 days, at most 50,000 changes, in "
-        f"{journal_file_path()}. You can switch it off again at any time; Delete History removes the file."
+        f"{journal_file_path()}. You can switch it off again at any time; Delete History sends the file to the Recycle Bin."
     )
 
 
@@ -288,41 +297,43 @@ def make_dialog(parent=None):
     from redactor_common.gui.preferences_dialog import PreferencesDialog
 
     dialog = PreferencesDialog(preference_sections(), make_backend(), parent)
-    _add_delete_history_button(dialog)
+    # The History page's Delete History... (a PrefAction): only usable while there is a file to delete.
+    dialog.delete_history_button = delete_history_button(dialog)
+    _refresh_delete_history(dialog)
     return dialog
 
 
-def _add_delete_history_button(dialog) -> None:
-    """The History page's "Delete History..." button, under its checkbox. It acts at once (after a
-    confirmation), not on OK/Apply: it is an action, not a setting."""
-    from PyQt6.QtWidgets import QMessageBox, QPushButton
+def delete_history_button(dialog):
+    """The dialog's Delete History... push button (one of its action_buttons), or None."""
+    return next((b for b in getattr(dialog, "action_buttons", []) if b.text() == DELETE_HISTORY_LABEL), None)
 
+
+def _refresh_delete_history(dialog) -> None:
     from core import history
 
-    checkbox = dialog.control(KEY_HISTORY_ENABLED)
-    container = checkbox.parentWidget()
-    button = QPushButton("Delete History…")
-    button.setToolTip("Removes the history file (the recorded tag changes). The setting is not changed.")
-
-    def refresh() -> None:
+    button = getattr(dialog, "delete_history_button", None)
+    if button is not None:
         button.setEnabled(os.path.exists(history.journal_file_path()))
 
-    def delete() -> None:
-        answer = QMessageBox.question(
-            dialog, "Delete History",
-            f"Delete every recorded tag change?\n{history.journal_file_path()}\n\nOld values can then no longer "
-            "be restored from Tools > History. The files themselves are not touched.",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
-        )
-        if answer != QMessageBox.StandardButton.Yes:
-            return
-        try:
-            history.delete_history()
-        except OSError as exc:
-            QMessageBox.warning(dialog, "Delete History", f"The history could not be deleted: {exc}")
-        refresh()
 
-    button.clicked.connect(delete)
-    container.layout().addWidget(button)
-    dialog.delete_history_button = button
-    refresh()
+def _delete_history(dialog) -> None:
+    """Delete History...: acts at once (after a confirmation), not on OK/Apply. The file goes to the
+    Recycle Bin, never deleted for good; the setting is not changed."""
+    from PyQt6.QtWidgets import QMessageBox
+
+    from core import history
+    from redactor_common.core.trash import TrashError
+
+    answer = QMessageBox.question(
+        dialog, "Delete History",
+        f"Send every recorded tag change to the Recycle Bin?\n{history.journal_file_path()}\n\nOld values can then "
+        "no longer be restored from Tools > History. The files themselves are not touched.",
+        QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+    )
+    if answer != QMessageBox.StandardButton.Yes:
+        return
+    try:
+        history.delete_history()
+    except (OSError, TrashError) as exc:
+        QMessageBox.warning(dialog, "Delete History", f"The history could not be moved to the Recycle Bin: {exc}")
+    _refresh_delete_history(dialog)
