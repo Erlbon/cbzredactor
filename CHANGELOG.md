@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-10-14#07 -- The convert-on-load question and the command line use redactor_common's own pieces
+
+- The "Convert to CBZ?" question when loading CBR/CB7/CBT files (Tools > Preferences > Conversion set to ask) is now redactor_common's convert offer: same wording with the inline file list, same Convert Now / Add Unconverted / Skip buttons (Add Unconverted is the default, Escape is Skip), same Recycle Bin and "Remember Convert Now / Add Unconverted" boxes. "Remember" still saves only whether CBR/CB7/CBT files are converted on load, never Skip and never the resize setting. New: Show Details lists the full paths.
+- Command line: the app's own leftover temp files found through a folder or wildcard are skipped; a file named in full is still processed.
+- Requires redactor_common 2026-10-14-06.
+
 ## 2026-10-14#06 -- Shared code from redactor_common replaces the app's own copies
 
 Behind the scenes: pieces every Redactor app had copied now come from redactor_common, and the app's copies are deleted. What you see stays the same, except for these small points:

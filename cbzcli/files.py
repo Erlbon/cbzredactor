@@ -11,6 +11,7 @@ from __future__ import annotations
 from core.cbz_file import CbzBook
 from core.foreign_archive_convert import FOREIGN_ARCHIVE_EXTENSIONS
 from redactor_common.cli import CliError, Output, expand_paths
+from redactor_common.core.temp_names import is_app_temp_name
 
 EXTENSIONS = (".cbz",) + FOREIGN_ARCHIVE_EXTENSIONS
 
@@ -23,9 +24,10 @@ def add_path_arguments(parser) -> None:
 
 
 def collect(paths: list[str], out: Output, recurse: bool = True) -> list[str]:
-    """The comic files the arguments name. An argument that matches nothing is an error; if that leaves no
-    files at all the command ends with a usage error."""
-    files, missing = expand_paths(paths, EXTENSIONS, recursive=recurse)
+    """The comic files the arguments name (the app's own leftover temp files found through a folder or
+    wildcard are left out; a file named in full is kept). An argument that matches nothing is an error; if
+    that leaves no files at all the command ends with a usage error."""
+    files, missing = expand_paths(paths, EXTENSIONS, recursive=recurse, skip=is_app_temp_name)
     for argument in missing:
         out.error(f"nothing found for {argument}")
     if not files:

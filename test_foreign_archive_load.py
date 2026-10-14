@@ -319,6 +319,55 @@ def test_real_prompt_buttons_map_to_choices(window, tmp_path, monkeypatch, butto
     assert delete is False
 
 
+def test_prompt_is_the_shared_convert_offer_with_the_apps_wording(window, tmp_path, monkeypatch):
+    import gui.main_window as mw
+
+    cbt_path = tmp_path / "book.cbt"
+    _make_cbt(cbt_path, {"page001.jpg": b"data"})
+    calls = []
+    real = mw.offer_conversion
+    monkeypatch.setattr(mw, "offer_conversion", lambda *a, **k: calls.append(k) or real(*a, **k))
+    seen = {}
+
+    def _look(box):
+        seen["title"] = box.windowTitle()
+        seen["text"] = box.text()
+        seen["details"] = box.detailedText()
+        seen["default"] = box.defaultButton().text()
+        seen["escape"] = box.escapeButton().text()
+        seen["buttons"] = [b.text() for b in box.buttons() if b.text() in ("Convert Now", "Add Unconverted", "Skip")]
+        seen["checks"] = [c.text() for c in box.findChildren(QCheckBox)]
+        box.escapeButton().click()
+
+    monkeypatch.setattr(QMessageBox, "exec", _look)
+    assert window._prompt_convert_foreign_archives([str(cbt_path)]) == (FOREIGN_SKIP, False)
+    assert len(calls) == 1
+    assert seen["title"] == "Convert to CBZ?"
+    assert seen["text"].startswith("1 file(s) aren't real CBZ files -- this app only edits CBZ (ZIP) archives:")
+    assert "  book.cbt" in seen["text"] and "right-click > Convert to CBZ" in seen["text"]
+    assert str(cbt_path) in seen["details"]  # the full path under Show Details
+    assert seen["default"] == "Add Unconverted" and seen["escape"] == "Skip"
+    assert sorted(seen["buttons"]) == ["Add Unconverted", "Convert Now", "Skip"]
+    assert len(seen["checks"]) == 2 and seen["checks"][0].startswith("Move the originals to the Recycle Bin")
+    assert seen["checks"][1].startswith("Remember Convert Now / Add Unconverted")
+
+
+def test_remember_add_unconverted_saves_only_the_convert_or_not_answer(window, settings, tmp_path, monkeypatch):
+    cbt_path = tmp_path / "book.cbt"
+    _make_cbt(cbt_path, {"page001.jpg": b"data"})
+
+    def _click(box):
+        for check in box.findChildren(QCheckBox):
+            check.setChecked(True)
+        next(b for b in box.buttons() if b.text() == "Add Unconverted").click()
+
+    monkeypatch.setattr(QMessageBox, "exec", _click)
+    resize_before = app_settings.load_resize_on_convert()
+    assert window._prompt_convert_foreign_archives([str(cbt_path)]) == (FOREIGN_UNCONVERTED, False)
+    assert settings == {"behavior": app_settings.FOREIGN_LOAD_UNCONVERTED, "recycle": False}
+    assert app_settings.load_resize_on_convert() == resize_before
+
+
 def test_zip_mislabeled_as_cbr_shows_both_names(window, tmp_path, monkeypatch):
     fake_cbr = tmp_path / "actually_zip.cbr"
     _make_real_cbz(fake_cbr, title="Hidden")

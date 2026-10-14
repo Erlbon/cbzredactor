@@ -60,6 +60,22 @@ def test_info_all_lists_every_field_with_a_value(library, capsys):
     assert set(document["results"][0]["fields"]) == {"series", "number", "title", "year", "publisher"}
 
 
+def test_the_apps_own_temp_files_are_skipped_unless_named(library, capsys):
+    import shutil
+
+    tmp, saga, _plain = library
+    leftover = tmp / ".saga1.redact-abcd1234.cbz"
+    part = tmp / "saga1.redact-part.cbz"
+    shutil.copyfile(saga, leftover)
+    shutil.copyfile(saga, part)
+    _code, document = run_json(capsys, "info", str(tmp))
+    assert sorted(os.path.basename(r["path"]) for r in document["results"]) == ["plain.cbz", "saga1.cbz"]
+    _code, document = run_json(capsys, "info", str(tmp / "*.cbz"))
+    assert document["files"] == 2
+    code, document = run_json(capsys, "info", str(leftover))  # named in full: the user meant it
+    assert code == 0 and document["files"] == 1
+
+
 def test_info_on_a_missing_path_is_a_usage_error(tmp_path, capsys):
     from redactor_common.cli import CliError
 

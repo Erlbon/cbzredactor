@@ -66,6 +66,8 @@ from redactor_common.gui.column_menu import show_column_header_context_menu
 from redactor_common.gui.column_settings_dialog import ColumnSettingsDialog
 from redactor_common.gui.command_palette import add_command_palette
 from redactor_common.gui.context_menu import show_table_context_menu
+from redactor_common.gui.convert_offer import YES as CONVERT_OFFER_YES
+from redactor_common.gui.convert_offer import offer_conversion
 from redactor_common.gui.manage_list_dialog import ManageListDialog
 from redactor_common.core import labels
 from redactor_common.gui.menu_builder import MenuAction, Separator, Submenu
@@ -983,22 +985,11 @@ class MainWindow(QMainWindow):
         if len(foreign) > 10:
             shown += f"\n  ...and {len(foreign) - 10} more"
 
-        box = QMessageBox(self)
-        box.setWindowTitle("Convert to CBZ?")
-        box.setIcon(QMessageBox.Icon.Question)
-        box.setText(
-            f"{len(foreign)} file(s) aren't real CBZ files -- this app only "
-            f"edits CBZ (ZIP) archives:\n\n{shown}\n\n"
-            "Convert them now, or add them to the list unconverted and "
-            "convert later from the table (right-click > Convert to CBZ)?"
-        )
-        # Two options, so not QMessageBox.setCheckBox() (which takes one):
-        # the checkboxes go into the box's own grid, under the text.
-        options = QWidget()
-        options_layout = QVBoxLayout(options)
-        options_layout.setContentsMargins(0, 0, 0, 0)
         delete_checkbox = QCheckBox("Move the originals to the Recycle Bin after a successful conversion")
         delete_checkbox.setChecked(app_settings.load_recycle_originals())
+        # The app's own "remember" box, not offer_conversion's remember_key/remember: that one is a per-folder
+        # "Don't ask again" recorded on Convert or Skip, while this one is the global Preferences > Conversion
+        # setting, recorded on Convert Now or Add Unconverted and never on Skip.
         remember_checkbox = QCheckBox(
             "Remember Convert Now / Add Unconverted for later loads (Tools > Preferences > Conversion)"
         )
@@ -1006,19 +997,24 @@ class MainWindow(QMainWindow):
             "Remembers ONLY whether CBR/CB7/CBT files are converted on load. Skip is never remembered; "
             "the Recycle Bin box above applies to this load only, and resizing is never switched on here."
         )
-        options_layout.addWidget(delete_checkbox)
-        options_layout.addWidget(remember_checkbox)
-        box.layout().addWidget(options, box.layout().rowCount(), 0, 1, box.layout().columnCount())
-
-        convert_btn = box.addButton("Convert Now", QMessageBox.ButtonRole.AcceptRole)
-        unconverted_btn = box.addButton("Add Unconverted", QMessageBox.ButtonRole.ActionRole)
-        box.addButton("Skip", QMessageBox.ButtonRole.RejectRole)
-        box.setDefaultButton(unconverted_btn)
-        box.exec()
-        clicked = box.clickedButton()
-        if clicked is convert_btn:
+        answer = offer_conversion(
+            self, foreign, loaded_count=0, kind_label="CBZ", target_label="CBZ",
+            text=(
+                f"{len(foreign)} file(s) aren't real CBZ files -- this app only "
+                f"edits CBZ (ZIP) archives:\n\n{shown}\n\n"
+                "Convert them now, or add them to the list unconverted and "
+                "convert later from the table (right-click > Convert to CBZ)?"
+            ),
+            title="Convert to CBZ?",
+            yes_text="Convert Now",
+            no_text="Skip",
+            extra_buttons=[("Add Unconverted", FOREIGN_UNCONVERTED)],
+            default=FOREIGN_UNCONVERTED,
+            options=[delete_checkbox, remember_checkbox],
+        )
+        if answer == CONVERT_OFFER_YES:
             choice = FOREIGN_CONVERT
-        elif clicked is unconverted_btn:
+        elif answer == FOREIGN_UNCONVERTED:
             choice = FOREIGN_UNCONVERTED
         else:
             return FOREIGN_SKIP, False
