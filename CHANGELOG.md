@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-10-14#09 -- A smaller download
+
+- The Windows exe is about 8 MB smaller than the 2026-10-14#08 download (roughly 46 MB instead of 53.5 MB). The 2026-10-14#08 build had numpy bundled in by accident (it was installed on the build machine for another tool; this app never uses it). The build now leaves numpy out and is made in a clean environment. No change to what the app does.
+
 ## 2026-10-14#08 -- File > Preview...: a read-only page reader window
 
 - **File > Preview...** (Ctrl+Shift+P, also in the right-click menu of a single selected comic) opens a separate, non-modal window that pages through the selected comic, to check in place that the pages are in order, the last page is intact and the cover matches. It shows the page fitted to the window (re-fitted when you resize it; a Fit width box scales to the width and scrolls down the page), First / Previous / Next / Last buttons, a "Page 3 / 24" label and the page's file name, and takes Left / Right (also Page Up / Page Down), Home and End.
