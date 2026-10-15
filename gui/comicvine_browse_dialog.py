@@ -53,6 +53,7 @@ from PyQt6.QtWidgets import (
 from redactor_common.core.error_summary import wrapped_errors
 from redactor_common.gui.image_label import AspectRatioImageLabel
 from redactor_common.gui.progress import run_busy
+from redactor_common.gui.table_columns import make_columns_resizable
 from redactor_common.gui.sortable_table import NumericTableWidgetItem, suspend_sorting
 
 from core.cbz_file import CbzBook
@@ -245,10 +246,7 @@ class ComicVineBrowseDialog(QDialog):
         # every repopulate goes back to it (see _reset_sort).
         table.setSortingEnabled(True)
         table.horizontalHeader().setSortIndicator(-1, Qt.SortOrder.AscendingOrder)
-        table.horizontalHeader().setStretchLastSection(False)
-        table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        for column in range(1, len(headers)):
-            table.horizontalHeader().setSectionResizeMode(column, QHeaderView.ResizeMode.ResizeToContents)
+        make_columns_resizable(table, wide_column=1 if len(headers) == 4 else 0)
         return table
 
     @staticmethod
@@ -424,6 +422,7 @@ class ComicVineBrowseDialog(QDialog):
                 self.volume_table.setItem(row, 4, cell)
                 if score > best_similarity:
                     best_row, best_similarity = row, score
+        make_columns_resizable(self.volume_table, wide_column=0)
         # Preselect only: the look-alike cover if there is one, else the best-fitting name.
         self.volume_table.selectRow(best_row if best_similarity >= MATCH_THRESHOLD else 0)
         self.volume_table.setFocus()
@@ -529,6 +528,7 @@ class ComicVineBrowseDialog(QDialog):
                 if issue is match:
                     match_row = row
 
+        make_columns_resizable(self.issue_table, wide_column=1)
         self.issue_table.clearSelection()
         if match_row >= 0:
             self.issue_table.selectRow(match_row)

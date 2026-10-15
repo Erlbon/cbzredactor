@@ -26,6 +26,8 @@ from PyQt6.QtWidgets import (
     QVBoxLayout,
 )
 
+from redactor_common.gui.table_columns import make_columns_resizable
+
 from core.archive_contents import CleanupOptions, plan_cleanup
 
 EXPLANATION = (
@@ -88,10 +90,7 @@ class ArchiveCleanupDialog(QDialog):
         self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.table.verticalHeader().setVisible(False)
-        header = self.table.horizontalHeader()
-        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Interactive)
-        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
-        self.table.setColumnWidth(0, 330)
+        self._columns_sized = False  # starting widths once; later refills keep what the user dragged
         layout.addWidget(self.table)
 
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Cancel)
@@ -132,6 +131,9 @@ class ArchiveCleanupDialog(QDialog):
             self.table.setItem(row, 1, changes)
             self._rows.append(book)
         self.table.blockSignals(False)
+        if self._rows and not self._columns_sized:
+            make_columns_resizable(self.table, wide_column=1)
+            self._columns_sized = True
         self._update_button()
 
     def _item_changed(self, item) -> None:

@@ -46,6 +46,7 @@ from redactor_common.core.table_settings import is_column_visible, merge_column_
 from core.app_paths import asset_path
 from redactor_common.gui.async_icon_cache import AsyncIconCache, IdentityWeakDict
 from redactor_common.gui.async_preview import AsyncPreviewLoader
+from redactor_common.gui.table_columns import make_columns_resizable
 from redactor_common.gui.background_call import call_in_background
 from redactor_common.gui.visible_rows import VisibleRowsWatcher
 from redactor_common.core.rename_pattern import unique_path
@@ -766,15 +767,18 @@ class MainWindow(QMainWindow):
         # A persisted width for a field no longer present (e.g. removed
         # in a later version) is silently skipped -- same "preference,
         # not a hard requirement" tolerance as merge_column_order().
+        # House rule: every column is draggable (no Stretch/ResizeToContents).
+        # The helper sets the starting widths (Filename gets the room that is
+        # left); persisted widths are applied after it, so they always win.
+        make_columns_resizable(self.table, wide_column=self._col_index["filename"])
         widths = app_settings.load_column_widths()
         for key, width in widths.items():
             if key in self._col_index:
                 header.resizeSection(self._col_index[key], width)
         if not widths:
-            # First ever run: no saved widths yet -- give Filename the
-            # stretch behavior it always had, rather than every column
-            # starting at some arbitrary default width.
-            header.setSectionResizeMode(self._col_index["filename"], QHeaderView.ResizeMode.Stretch)
+            # First ever run: the table is still empty, so give Filename a
+            # sensible starting width rather than the bare header width.
+            header.resizeSection(self._col_index["filename"], 320)
 
     def _on_columns_reordered(self, *_args) -> None:
         """`*_args` absorbs QHeaderView.sectionMoved's (logical,

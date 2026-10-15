@@ -24,6 +24,8 @@ from PyQt6.QtWidgets import (
     QVBoxLayout,
 )
 
+from redactor_common.gui.table_columns import make_columns_resizable
+
 FILE_COL, FIELD_COL, PROBLEM_COL, CURRENT_COL, FIX_COL = range(5)
 
 
@@ -55,10 +57,6 @@ class ValidateFixDialog(QDialog):
         self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.table.verticalHeader().setVisible(False)
-        header = self.table.horizontalHeader()
-        header.setSectionResizeMode(PROBLEM_COL, QHeaderView.ResizeMode.Stretch)
-        for column, width in ((FILE_COL, 250), (FIELD_COL, 110), (CURRENT_COL, 170), (FIX_COL, 150)):
-            self.table.setColumnWidth(column, width)
         for row, (book, finding) in enumerate(found):
             file_item = QTableWidgetItem(os.path.basename(book.path))
             file_item.setToolTip(book.path)
@@ -75,6 +73,7 @@ class ValidateFixDialog(QDialog):
                 if column:
                     item.setToolTip(item.text())
                 self.table.setItem(row, column, item)
+        make_columns_resizable(self.table, wide_column=PROBLEM_COL)
         layout.addWidget(self.table)
 
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
