@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026-10-15#01 -- Include Subfolders checkbox on the toolbar
+
+- An Include Subfolders checkbox on the toolbar next to Open Folder (the File menu item stays, both stay in step).
+- Help > Changelog: text with angle brackets no longer garbles the entries below it (redactor_common 2026-10-15-02).
+
 ## 2026-10-14#10 -- A progress box could stay on screen for good
 
 - Fixed: a "Scanning..." (or similar) progress box could stay on screen permanently after its work had finished, when the work took about a third of a second or more. The box is now closed together with its work (redactor_common 2026-10-14-08). Nothing else changes.

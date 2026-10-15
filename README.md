@@ -85,7 +85,8 @@ selection.
   a table. Multi-select (ctrl/shift-click, same as Explorer) works for
   saving, looking up, or bulk-editing several files at once.
 - A toolbar sits above the table for one-click access to the most
-  common actions -- Open Files, Open Folder, Save, Apply (bulk edit,
+  common actions -- Open Files, Open Folder, an **Include Subfolders**
+  checkbox (mirrors the File menu tick; one saved setting), Save, Apply (bulk edit,
   see below), Undo, then a Panel-minimize toggle and a table-font
   zoom control pushed to the far right -- matching epubredactor's own
   toolbar shape exactly, sharing the same `QAction`s as the menus so

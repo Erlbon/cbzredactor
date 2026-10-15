@@ -74,7 +74,9 @@ from redactor_common.gui.menu_builder import MenuAction, Separator, Submenu
 from redactor_common.gui.overwrite_review_dialog import resolve_overwrite_conflicts
 from redactor_common.gui.parse_filename_dialog import ParseFilenameDialog
 from redactor_common.gui.move_runner import run_planned_moves
-from redactor_common.gui.folder_options import attach_include_subfolders, include_subfolders_slot
+from redactor_common.gui.folder_options import (
+    add_include_subfolders_checkbox, attach_include_subfolders, include_subfolders_slot,
+)
 from redactor_common.gui.progress import ProgressReporter, run_busy, run_with_progress
 from redactor_common.gui.redact_dialog import (
     RecipeEditorDialog,
@@ -690,6 +692,8 @@ class MainWindow(QMainWindow):
 
         toolbar.addAction(self.actions_["open_files"])
         toolbar.addAction(self.actions_["open_folder"])
+        # Mirrors File > Include Subfolders both ways (one saved setting).
+        self.include_subfolders_box = add_include_subfolders_checkbox(toolbar, self.actions_["include_subfolders"])
         toolbar.addSeparator()
         toolbar.addAction(self.actions_["save_all"])
         toolbar.addSeparator()
