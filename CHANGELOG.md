@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-10-16#01 -- Progress boxes appear in time and block the window; Cancel keeps the box up
+
+From the 2026-10-16 independent code review (shared progress dialogs and threading); the fixes are in redactor_common 2026-10-16#07.
+- Fixed: **the progress box now appears after about a third of a second** (it used to take about 4 seconds), and **the window cannot be clicked, typed in or used from a menu while a slow lookup, scan or save is running**, not even before the box shows (before, a second click could start a second, nested run). The window greys out only when the box actually appears, so quick actions do not flash. After the run the window, its keyboard focus and the cursor come back as they were, also after an error.
+- Fixed: **Cancel on a counted progress box no longer hides it while the work is still running**: it stays up, reading "Cancelling...", until the work has really stopped.
+- Fixed: small leaks: every progress box and column-filter menu was left behind (hidden) on the window until it was closed.
+- Tests: test_busy_blocking.py (a second Open Folder during a scan is blocked; the window is enabled again).
+
 ## 2026-10-15#02 -- Every table column can be resized by dragging
 
 - Every table column can be resized by dragging, in all dialogs (Validate / Fix, Clean Up Archive Contents, Comic Vine browser) and the main list. Columns used to be locked (one stretched, others auto-sized). Saved column widths still win over the starting widths.
