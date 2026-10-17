@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-10-17#03 -- Tools > Columns can move columns
+
+Shared part: redactor_common 2026-10-17#06 (the Columns dialog, gui/column_order.py); all four Redactor apps get the same dialog.
+- New: **Tools > Columns now reorders the table's columns**, not only shows/hides them. The list is in the table's current left-to-right order (hidden columns included, a header drag is reflected), top = leftmost. Move a row with the arrow buttons (earlier / later) or by dragging it; the checkbox still shows or hides the column. The new order is applied to the table at once (widths and hidden columns kept) and saved by column name like a header drag.
+- The order is part of Export/Import Settings (it already was); tests for the dialog in the real window.
+
 ## 2026-10-17#02 -- New Path column (shared with the other Redactor apps)
 
 Shared part: redactor_common 2026-10-17#05 (core/path_column.py, gui/path_column.py); all four Redactor apps now use the same Path column.

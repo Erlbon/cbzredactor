@@ -43,6 +43,7 @@ from PyQt6.QtWidgets import (
 )
 
 from redactor_common.core.table_settings import is_column_visible, merge_column_order, sanitize_hidden_fields
+from redactor_common.gui.column_order import apply_column_order, visual_column_keys
 from redactor_common.core.path_column import PATH_KEY, PATH_LABEL, folder_of, migrate_saved_columns, natural_sort_key
 from redactor_common.gui.path_column import PathTableWidgetItem, install_cell_copy
 from core.app_paths import asset_path
@@ -874,14 +875,26 @@ class MainWindow(QMainWindow):
         self._sync_panel_visible_fields()
 
     def open_column_settings_dialog(self) -> None:
-        all_columns = [(key, _COLUMN_LABELS[key]) for key in self._column_keys]
+        """Tools > Columns...: visibility AND order. The dialog lists the
+        columns in the table's current visual order (a header drag included);
+        after it closes the hidden set and the new order are applied to the
+        table and persisted."""
+        header = self.table.horizontalHeader()
+        shown_order = visual_column_keys(header, self._column_keys)
+        all_columns = [(key, _COLUMN_LABELS[key]) for key in shown_order]
         hidden = {k for k in self._column_keys if self.table.isColumnHidden(self._col_index[k])}
         dialog = ColumnSettingsDialog(all_columns, hidden, PROTECTED_COLUMNS, self)
         dialog.exec()
         new_hidden = dialog.hidden_fields()
-        for key in self._column_keys:
-            self.table.setColumnHidden(self._col_index[key], key in new_hidden)
+        self.table.setUpdatesEnabled(False)  # one repaint at the end, no flicker
+        try:
+            for key in self._column_keys:
+                self.table.setColumnHidden(self._col_index[key], key in new_hidden)
+            apply_column_order(header, dialog.column_order(), self._col_index)
+        finally:
+            self.table.setUpdatesEnabled(True)
         app_settings.save_hidden_columns(new_hidden)
+        self._on_columns_reordered()
         self._sync_panel_visible_fields()
 
     def _context_menu_items(self, _books: list[CbzBook]) -> list:

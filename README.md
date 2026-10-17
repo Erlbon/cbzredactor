@@ -107,7 +107,8 @@ selection.
   removed file has unsaved edits); Refresh re-scans the
   folders your loaded files live in for new ones and re-reads
   everything still present, discarding unsaved edits (confirmed first).
-- **Columns are drag-to-reorder** (grab a header) **and hideable** (right-
+- **Columns are drag-to-reorder** (grab a header, or move them in
+  Tools > Columns...) **and hideable** (right-
   click a header, or Tools > Columns...) -- both the
   order and which columns are visible persist across restarts, keyed
   by column name so a future column added in code can't silently
