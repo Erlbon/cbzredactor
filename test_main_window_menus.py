@@ -332,7 +332,7 @@ def test_save_all_with_nothing_changed_is_a_status_message_not_a_dialog(tmp_path
     window._load_paths(_two_cbz(tmp_path))
     monkeypatch.setattr(QMessageBox, "information", lambda *a, **k: (_ for _ in ()).throw(AssertionError("dialog")))
     window.actions_["save_all"].trigger()
-    assert "No files have unsaved changes" in window.statusBar().currentMessage()
+    assert "Nothing to save: no file has unsaved changes" in window.statusBar().currentMessage()
 
 
 def test_comic_files_in_folder_recursive_flag(tmp_path):

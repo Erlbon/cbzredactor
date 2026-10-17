@@ -43,6 +43,8 @@ from PyQt6.QtWidgets import (
 )
 
 from redactor_common.core.table_settings import is_column_visible, merge_column_order, sanitize_hidden_fields
+from redactor_common.core.save_report import SaveReport, append_save_log, files_still_dirty, nothing_to_save_reason
+from redactor_common.gui import crash_dialog
 from redactor_common.gui.column_order import apply_column_order, visual_column_keys
 from redactor_common.core.path_column import PATH_KEY, PATH_LABEL, folder_of, migrate_saved_columns, natural_sort_key
 from redactor_common.gui.path_column import PathTableWidgetItem, install_cell_copy
@@ -120,7 +122,7 @@ from gui.conversion_progress import ConversionRun
 from core.archive_sniff import extension_label
 from core.page_cache import LruCache
 from core.cbz_file import CbzBook, CbzError, ResizeCancelled, path_needs_conversion
-from core import history
+from core import crash_log, history
 from core.comicinfo_check import SCAN_ISSUES, check_book, scan_status
 from core.foreign_archive_convert import relabel_mislabeled_cbz
 from redactor_common.core.trash import TrashError, move_to_trash, trash_with_retries
@@ -2106,48 +2108,92 @@ class MainWindow(QMainWindow):
 
     def save_all_changed(self) -> None:
         """File > Save All (Ctrl+Shift+A): writes every changed
-        file. The table's right-click Save Selected (N) writes only the selected ones; Save As... handles one."""
-        self._commit_current_edits()
-        changed_rows = [i for i, book in enumerate(self.books) if book.dirty]
-        if not changed_rows:
-            # A status message, not a dialog: pressing the shortcut with
-            # nothing changed is harmless.
-            self.statusBar().showMessage("No files have unsaved changes.", 5000)
-            return
+        file. The table's right-click Save Selected (N) writes only the selected ones; Save As... handles one.
+        After EVERY Save All the status bar says what happened (counts, or why nothing was saved), a box lists
+        each problem file with its reason, and an unexpected error is shown in the "Something went wrong" box."""
+        try:
+            self._commit_current_edits()
+            changed = [i for i, book in enumerate(self.books) if book.dirty]
+            saveable = [i for i in changed if not self.books[i].load_error]
+            skipped = [os.path.basename(self.books[i].path) for i in changed if self.books[i].load_error]
+            if not saveable:
+                self._say_nothing_saved(len(changed), skipped)
+                return
+            self._save_rows(saveable, skipped)
+        except Exception as exc:  # noqa: BLE001 - never a silent Save All
+            self._save_all_crashed(exc)
 
-        self._save_rows(changed_rows)
+    def _say_nothing_saved(self, changed_count: int, load_error_names: list[str]) -> None:
+        """The status line for a Save All with nothing to write, naming the reason."""
+        report = SaveReport(nothing=nothing_to_save_reason(changed_count, load_error_names))
+        self.statusBar().showMessage(report.status_line(), 8000)
+        append_save_log(os.path.dirname(crash_log.log_path()), history.history_enabled(), report)
 
-    def _save_rows(self, rows: list[int]) -> None:
-        """Writes the given rows (with progress), reports failures, refreshes the status."""
-        errors: list[str] = []
+    def _save_all_crashed(self, exc: Exception) -> None:
+        crash_dialog.report_exception(exc, "Save All stopped because of an unexpected error")
+        self.statusBar().showMessage(f"Save All stopped because of an unexpected error: {exc}")
+        try:
+            self._rebuild_table()
+        except Exception:  # noqa: BLE001 - the report above matters more than a repaint
+            pass
+
+    def _save_rows(self, rows: list[int], skipped_load_errors: list[str] | None = None) -> None:
+        """Writes the given rows (with progress), then reports the result: status line with the counts, a box
+        listing each failed/skipped file with its reason, and a check that nothing is left marked unsaved
+        without an error."""
+        report = SaveReport(skipped_load_errors=list(skipped_load_errors or []))
+        books = [self.books[row] for row in rows]
+
+        def _fail(book, reason: str) -> None:
+            report.failed.append((os.path.basename(book.path), reason))
 
         def _step(row: int, _index: int) -> None:
             book = self.books[row]
             try:
                 book.save()
             except CbzError as exc:
-                errors.append(f"{os.path.basename(book.path)}: {exc}")
+                _fail(book, str(exc))
+            else:
+                report.saved += 1
+            self._refresh_table_row(row, book)
+
+        def _on_error(row: int, exc: Exception) -> None:
+            book = self.books[row]
+            _fail(book, f"unexpected error: {exc}")
+            crash_dialog.report_exception(exc, "Save All hit an unexpected error")
             self._refresh_table_row(row, book)
 
         if len(rows) == 1:
             # One file: the busy dialog (shown only if the rewrite takes a moment),
             # the save itself off the GUI thread. Saving rewrites the whole archive.
-            book = self.books[rows[0]]
+            book = books[0]
             try:
                 run_busy(self, f"Saving: {os.path.basename(book.path)}", book.save)
             except CbzError as exc:
-                errors.append(f"{os.path.basename(book.path)}: {exc}")
+                _fail(book, str(exc))
+            except Exception as exc:  # noqa: BLE001
+                _on_error(rows[0], exc)
+            else:
+                report.saved += 1
             self._refresh_table_row(rows[0], book)
         else:
             run_with_progress(
                 self, rows, _step, "Saving files...", threshold=2, cancellable=True,  # 2+: always a dialog
                 label_for=lambda row: f"Saving: {os.path.basename(self.books[row].path)}",
+                on_error=_on_error,
             )
 
-        if errors:
-            from redactor_common.core.error_summary import wrapped_errors
-            QMessageBox.warning(self, "Some Files Failed to Save", wrapped_errors(errors))
+        report.not_attempted = len(rows) - report.saved - len(report.failed)
+        failed_names = {name for name, _reason in report.failed}
+        report.still_dirty = files_still_dirty(
+            books, lambda b: b.dirty, lambda b: os.path.basename(b.path) in failed_names,
+            lambda b: os.path.basename(b.path))
         self._update_status()
+        self.statusBar().showMessage(report.status_line())
+        if report.has_problems:
+            from redactor_common.core.error_summary import wrapped_errors
+            QMessageBox.warning(self, "Some Files Failed to Save", wrapped_errors(report.problem_lines()))
+        append_save_log(os.path.dirname(crash_log.log_path()), history.history_enabled(), report)
 
     # ------------------------------------------------------------------
     # Rename / Export by pattern, and the reverse: Parse Filename
