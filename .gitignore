@@ -30,3 +30,6 @@ collection_scan.zip.tmp
 # Tools > History (opt-in operations journal), next to the settings.
 cbzredactor_journal.jsonl
 cbzredactor_journal.jsonl.tmp
+
+# Written next to the crash log when History is on (one line per Save All)
+save_log.txt
