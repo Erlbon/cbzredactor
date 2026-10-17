@@ -975,12 +975,24 @@ class MainWindow(QMainWindow):
     def _show_table_context_menu(self, pos) -> None:
         # Selection-fix, and the generic Open Containing Folder/Copy
         # Path actions, are handled by the shared helper.
+        self._commit_current_edits()  # a pending panel edit counts as an unsaved change in "Save Selected (N)"
         show_table_context_menu(
             self, self.table, pos,
             get_selected_items=self._context_menu_books,
             get_path=lambda book: book.path,
             extra_items=self._context_menu_items,
+            save_selected=self.save_selected_books,
+            is_dirty=lambda book: book.dirty and not book.load_error,
         )
+
+    def save_selected_books(self, books: list[CbzBook]) -> None:
+        """Right-click > Save Selected (N): the same save path as File > Save All (progress, failure box,
+        status), for just these changed files."""
+        self._commit_current_edits()
+        wanted = {id(book) for book in books}
+        rows = [i for i, book in enumerate(self.books) if id(book) in wanted and book.dirty]
+        if rows:
+            self._save_rows(rows)
 
     # ------------------------------------------------------------------
     # Loading files
@@ -2092,7 +2104,7 @@ class MainWindow(QMainWindow):
 
     def save_all_changed(self) -> None:
         """File > Save All (Ctrl+Shift+A): writes every changed
-        file. There is no save-selected-only command; Save As... handles one."""
+        file. The table's right-click Save Selected (N) writes only the selected ones; Save As... handles one."""
         self._commit_current_edits()
         changed_rows = [i for i, book in enumerate(self.books) if book.dirty]
         if not changed_rows:

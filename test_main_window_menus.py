@@ -256,7 +256,7 @@ def test_credit_pages_and_number_issues_follow_the_selection(tmp_path):
 def _context_items(window, monkeypatch):
     seen = {}
 
-    def fake_show(win, table, pos, get_selected_items, get_path, extra_items=None):
+    def fake_show(win, table, pos, get_selected_items, get_path, extra_items=None, **_kw):
         seen["items"] = extra_items([])
 
     monkeypatch.setattr(mw, "show_table_context_menu", fake_show)

@@ -10,5 +10,5 @@ bump_version.py immediately before each build, not by hand.
 from __future__ import annotations
 
 APP_NAME = "The ƆBZ Redactor"  # "Ɔ" = Ɔ, LATIN CAPITAL LETTER OPEN O ("reversed C") -- same reversed-letter mark epubredactor uses ("Ǝ" = Ǝ)
-APP_VERSION = "2026-10-17#03"
+APP_VERSION = "2026-10-17#04"
 APP_REPO_URL = "https://github.com/Erlbon/cbzredactor"
