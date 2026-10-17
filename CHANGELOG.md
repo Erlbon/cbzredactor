@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-10-17#01 -- Your comics.org login is never sent to another host
+
+From the 2026-10-16 independent code review (batch 4); the fix is in redactor_common 2026-10-17#01.
+- Fixed: **the Grand Comics Database login could follow a redirect to another host**: the lookup sends your comics.org user name and password (HTTP Basic) in a header, and a redirect copied that header to whatever host the answer pointed at (reproduced with two local servers). Every lookup now drops a key, token or login when a redirect leaves the host, follows only http and https redirects (never ftp or file), and follows at most five. A cover download, which carries no login, still follows a CDN redirect. Also in the shared fixes: a hostile answer nested a hundred thousand levels deep is reported as an unreadable answer instead of crashing.
+- Tests: test_gcd_login_redirect.py (two real local servers: the login reaches the first host only); it failed before the fix.
+
 ## 2026-10-16#01 -- Progress boxes appear in time and block the window; Cancel keeps the box up
 
 From the 2026-10-16 independent code review (shared progress dialogs and threading); the fixes are in redactor_common 2026-10-16#07.
