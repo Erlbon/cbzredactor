@@ -54,6 +54,7 @@ from PyQt6.QtWidgets import (
 )
 
 from redactor_common.gui.collapsible_splitter import CollapseToggleButton
+from redactor_common.gui.field_order import FieldOrderController, FieldRow, reorder_form_rows
 from redactor_common.gui.image_pane import ImagePanelSplitter, ImagePreviewBox
 
 from core.comic_genres import add_genre
@@ -125,8 +126,15 @@ class ComicInfoPanel(QWidget):
     pageRequested = pyqtSignal(int)  # the user turned to this 0-based page of the preview
     collapseToggleRequested = pyqtSignal()
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, field_order_store=None):
+        """`field_order_store` = (load, save) callables for the user's side-panel field order (a list of
+        ComicInfo attribute names); None keeps it in memory only."""
         super().__init__(parent)
+        self._order_memory: list[str] = []
+        self._field_order_load, self._field_order_save = field_order_store or (
+            lambda: list(self._order_memory), lambda order: setattr(self, "_order_memory", list(order)))
+        self._field_orders: list[FieldOrderController] = []
+        self._group_orders: dict[int, list[str]] = {}
         self._loading = False  # True while load_metadata() populates widgets, to suppress fieldsChanged
         self.bulk_mode = False  # True when editing N>1 selected files at once -- see module docstring
         # True when nothing is selected and the panel edits EVERY loaded file
@@ -181,6 +189,8 @@ class ComicInfoPanel(QWidget):
         # instead of showing an empty "Identity / Sequence" box.
         self._group_boxes: list[tuple[QGroupBox, list[str]]] = []
         scroll = self._build_fields_scroll_area()
+        for controller in self._field_orders:
+            controller.apply_saved()
         cover_box = self._build_cover_box()
 
         # Fields on top, cover below, with a draggable divider between --
@@ -259,6 +269,7 @@ class ComicInfoPanel(QWidget):
             layout.addRow(label, row_widget)
             self._row_widgets[attr] = row_widget
         self._group_boxes.append((box, [attr for _label, attr in fields]))
+        self._add_field_order(box, layout, [attr for _label, attr in fields])
         return box
 
     def _wrap_with_quick_pick(self, attr: str, edit: QLineEdit) -> QWidget:
@@ -391,7 +402,48 @@ class ComicInfoPanel(QWidget):
         self._row_widgets["community_rating"] = self.community_rating_spin
 
         self._group_boxes.append((box, ["age_rating", "manga", "black_and_white", "community_rating"]))
+        self._add_field_order(box, layout, ["age_rating", "manga", "black_and_white", "community_rating"])
         return box
+
+    # ------------------------------------------------------------------
+    # Drag-to-reorder of the fields (redactor_common's field_order): each group box keeps its own rows
+    # (a field moves within its group); the saved order is one list of attribute names for the whole panel.
+    # ------------------------------------------------------------------
+
+    def _add_field_order(self, box: QGroupBox, layout: QFormLayout, attrs: list[str]) -> None:
+        group = len(self._field_orders)
+
+        def rows() -> dict[str, tuple[QWidget, QWidget]]:
+            return {a: (layout.labelForField(self._row_widgets[a]), self._row_widgets[a]) for a in attrs}
+
+        def load() -> list[str]:
+            return [a for a in self._field_order_load() if a in attrs]
+
+        def save(order: list[str]) -> None:
+            self._group_orders[group] = list(order)
+            self._field_order_save([a for g in sorted(self._group_orders) for a in self._group_orders[g]])
+
+        self._group_orders[group] = load()
+        self._field_orders.append(FieldOrderController(
+            box,
+            get_rows=lambda: [FieldRow(a, [lbl, w]) for a, (lbl, w) in rows().items()],
+            apply_order=lambda order: reorder_form_rows(layout, rows(), order),
+            default_order=lambda: list(attrs),
+            load_order=load, save_order=save,
+            reset_all=self.reset_field_order,
+        ))
+
+    def reset_field_order(self) -> None:
+        """Right-click on a grip or the panel > Reset Field Order: every group back to its default order."""
+        for controller in self._field_orders:
+            controller.reset_this()
+        self._field_order_save([])
+
+    def reload_field_order(self) -> None:
+        """Re-lays the fields out from the saved order (after Import Settings)."""
+        for group, controller in enumerate(self._field_orders):
+            controller.apply_saved()
+            self._group_orders[group] = controller._load_order()
 
     def _on_field_changed(self, *_args) -> None:
         if not self._loading:

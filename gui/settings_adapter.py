@@ -111,6 +111,7 @@ class CbzSettingsAdapter(sb.SettingsAdapter):
                 "order": (app_settings.load_column_order, app_settings.save_column_order, _str_list),
                 "hidden": (self._read_hidden, self._write_hidden, _str_list),
                 "widths": (app_settings.load_column_widths, app_settings.save_column_widths, _width_map),
+                "panel_order": (app_settings.load_panel_field_order, app_settings.save_panel_field_order, _str_list),
             },
             "lists": {
                 "custom_genres": (app_settings.load_custom_genres, app_settings.save_custom_genres, _str_list),
@@ -186,7 +187,7 @@ class CbzSettingsAdapter(sb.SettingsAdapter):
             sb.SectionSpec("recipe", "Redact recipe"),
             sb.SectionSpec("patterns", "Rename / Parse Filename pattern history"),
             sb.SectionSpec("rename_defaults", "Rename and numbering defaults"),
-            sb.SectionSpec("columns", "Column layout (order, visibility, widths)"),
+            sb.SectionSpec("columns", "Column layout (order, visibility, widths) and side-panel field order"),
             sb.SectionSpec("lists", "Genre and Language lists"),
             sb.SectionSpec("conversion", "Converting to CBZ"),
             sb.SectionSpec("resize", "Resize Images defaults"),

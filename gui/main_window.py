@@ -509,7 +509,8 @@ class MainWindow(QMainWindow):
         self.table.horizontalHeader().setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.table.horizontalHeader().customContextMenuRequested.connect(self._show_header_context_menu)
 
-        self.panel = ComicInfoPanel()
+        self.panel = ComicInfoPanel(
+            field_order_store=(app_settings.load_panel_field_order, app_settings.save_panel_field_order))
         self.panel.set_enabled(False)
         self.panel.fieldsChanged.connect(self._on_fields_changed)
         self.panel.pageRequested.connect(self._on_page_requested)
@@ -873,6 +874,7 @@ class MainWindow(QMainWindow):
             if key in self._col_index:
                 header.resizeSection(self._col_index[key], width)
         self._sync_panel_visible_fields()
+        self.panel.reload_field_order()
 
     def open_column_settings_dialog(self) -> None:
         """Tools > Columns...: visibility AND order. The dialog lists the

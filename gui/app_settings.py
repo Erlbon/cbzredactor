@@ -578,6 +578,18 @@ def set_path_column_seeded() -> None:
     _STORE.set_bool(_PATH_COLUMN_SEEDED_KEY, True)
 
 
+_PANEL_FIELD_ORDER_KEY = "panel/field_order"
+
+
+def load_panel_field_order() -> list[str]:
+    """The user's order of the side-panel fields (ComicInfo attribute names; [] = the default order)."""
+    return _STORE.str_list(_PANEL_FIELD_ORDER_KEY)
+
+
+def save_panel_field_order(order: list[str]) -> None:
+    _STORE.set_str_list(_PANEL_FIELD_ORDER_KEY, order)
+
+
 def load_column_order() -> list[str]:
     return _COLUMNS.order()
 
