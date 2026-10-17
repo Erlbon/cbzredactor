@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-10-17#02 -- New Path column (shared with the other Redactor apps)
+
+Shared part: redactor_common 2026-10-17#05 (core/path_column.py, gui/path_column.py); all four Redactor apps now use the same Path column.
+- New: **a Path column**, directly after Filename and visible by default. It shows the folder the file is in; the tooltip has the full file path. Sorting it is case-insensitive natural text order (click again to reverse). It is in the Columns chooser (Tools > Columns, right-click a header) like every other column.
+- New: **Ctrl+C on the table copies the current column of the selected rows, the Path column as full file paths** (one per line).
+- One-time migration (setting `table/path_column_seeded`): if you had a saved column order, Path is placed just after Filename (a saved order would otherwise put a new column at the very end) and un-hidden once, so you see it. After that your own order and hiding win.
+- The Path cell updates after Rename File, Rename / Export by Pattern, Undo Last Rename and Move into Folders (tests for rename and move).
+
 ## 2026-10-17#01 -- Your comics.org login is never sent to another host
 
 From the 2026-10-16 independent code review (batch 4); the fix is in redactor_common 2026-10-17#01.

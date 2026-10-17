@@ -566,6 +566,18 @@ _COLUMNS = ColumnSettingsStore(
 )
 
 
+_PATH_COLUMN_SEEDED_KEY = "table/path_column_seeded"
+
+
+def path_column_seeded() -> bool:
+    """True once the one-time move of the shared Path column (redactor_common.core.path_column) has run."""
+    return _STORE.bool_value(_PATH_COLUMN_SEEDED_KEY, False)
+
+
+def set_path_column_seeded() -> None:
+    _STORE.set_bool(_PATH_COLUMN_SEEDED_KEY, True)
+
+
 def load_column_order() -> list[str]:
     return _COLUMNS.order()
 

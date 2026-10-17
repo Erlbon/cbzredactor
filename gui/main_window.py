@@ -43,6 +43,8 @@ from PyQt6.QtWidgets import (
 )
 
 from redactor_common.core.table_settings import is_column_visible, merge_column_order, sanitize_hidden_fields
+from redactor_common.core.path_column import PATH_KEY, PATH_LABEL, folder_of, migrate_saved_columns, natural_sort_key
+from redactor_common.gui.path_column import PathTableWidgetItem, install_cell_copy
 from core.app_paths import asset_path
 from redactor_common.gui.async_icon_cache import AsyncIconCache, IdentityWeakDict
 from redactor_common.gui.async_preview import AsyncPreviewLoader
@@ -229,7 +231,7 @@ _AUTO_NUMBER_NUMERIC_FIELDS: frozenset[str] = frozenset(
 # ComicInfo field); everything else is every field _FIELD_LABELS knows
 # about, i.e. every field the side panel can edit.
 COLUMN_SPECS: list[tuple[str, str]] = (
-    [("filename", "Filename"), ("ext", "Ext")]
+    [("filename", "Filename"), (PATH_KEY, PATH_LABEL), ("ext", "Ext")]  # the shared Path column right after Filename
     + list(_FIELD_LABELS.items())
     + [("pages", "Pages"), ("size", "Size"), ("credit", "Credit Pages"), ("filesize", "File Size"), ("status", "Status")]
 )
@@ -273,7 +275,7 @@ PROTECTED_COLUMNS = frozenset({"filename"})  # the one column you always need to
 # has touched column visibility at all (via the header menu or Settings
 # > Add/Remove Columns...), their own saved choice always wins, even if
 # that choice is "show everything".
-_DEFAULT_VISIBLE_COLUMNS = frozenset({"filename", "ext", "title", "series", "number", "pages", "size", "credit", "status"})
+_DEFAULT_VISIBLE_COLUMNS = frozenset({"filename", PATH_KEY, "ext", "title", "series", "number", "pages", "size", "credit", "status"})
 DEFAULT_HIDDEN_COLUMNS: frozenset[str] = frozenset(_ALL_COLUMN_KEYS) - _DEFAULT_VISIBLE_COLUMNS
 
 # Metadata fields offered as %placeholder% tokens in Rename/Export and
@@ -481,6 +483,7 @@ class MainWindow(QMainWindow):
         self._sort_key: str | None = None
         self._sort_ascending: bool = True
 
+        self._migrate_path_column()
         self._column_keys = merge_column_order(app_settings.load_column_order(), _ALL_COLUMN_KEYS)
         self._col_index = {key: i for i, key in enumerate(self._column_keys)}
 
@@ -497,6 +500,7 @@ class MainWindow(QMainWindow):
         self.table.itemSelectionChanged.connect(self._on_selection_changed)
         self.table.cellDoubleClicked.connect(self._on_cell_double_clicked)
         self.table.setStyleSheet(TABLE_SELECTION_STYLESHEET)  # current-cell focus outline
+        install_cell_copy(self.table)  # Ctrl+C: the current column of the selected rows (full path for Path)
         self._setup_column_persistence()
 
         self.table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
@@ -725,6 +729,21 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
     # Columns: order/visibility/widths, persisted by field key
     # ------------------------------------------------------------------
+
+    def _migrate_path_column(self) -> None:
+        """Once: the Path column is new here, so a saved column order would put it at the very end (and a saved hidden
+        set could hide it): move it to just after Filename and un-hide it, so that it is seen. After that the user's
+        own order and hiding win (redactor_common.core.path_column)."""
+        if app_settings.path_column_seeded():
+            return
+        saved_order = app_settings.load_column_order()
+        hidden = app_settings.load_hidden_columns()
+        order, new_hidden = migrate_saved_columns(saved_order, hidden)
+        if saved_order:
+            app_settings.save_column_order(order)
+        if app_settings.has_hidden_columns_preference() and new_hidden != hidden:
+            app_settings.save_hidden_columns(new_hidden)
+        app_settings.set_path_column_seeded()
 
     def _setup_column_persistence(self) -> None:
         header = self.table.horizontalHeader()
@@ -1272,6 +1291,7 @@ class MainWindow(QMainWindow):
         cached = self._cover_icons.get_cached_icon(book, self._cover_source.get(book))
         name_item.setIcon(cached if cached is not None else QIcon())
         self.table.setItem(row, self._col_index["filename"], name_item)
+        self.table.setItem(row, self._col_index[PATH_KEY], PathTableWidgetItem(book.path))  # folder; full path tooltip
         ext_item = QTableWidgetItem(extension_label(book.path, book.container))
         if book.needs_conversion:
             ext_item.setToolTip(
@@ -1735,6 +1755,8 @@ class MainWindow(QMainWindow):
         ordinary alphabetical (case-insensitive) sorting."""
         if key == "filename":
             raw = os.path.basename(book.path)
+        elif key == PATH_KEY:
+            return natural_sort_key(folder_of(book.path))  # the same order the Path cell sorts in elsewhere
         elif key == "pages":
             raw = str(book.actual_page_count)
         elif key == "size":

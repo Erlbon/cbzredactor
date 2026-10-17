@@ -114,7 +114,7 @@ selection.
   scramble a saved preference. Right-clicking a row offers "Open
   Containing Folder"/"Copy Path" for the selection. Every ComicInfo
   field is available as a column, not just the handful shown by
-  default (Filename/Title/Series/Number/Pages/Status) -- matching
+  default (Filename/Path/Title/Series/Number/Pages/Status) -- matching
   ComicRack's own "everything is an optional column" convention, just
   with a much smaller starting set so a fresh install isn't
   overwhelming. **Hiding a column also hides that field's edit row in
