@@ -282,12 +282,10 @@ def test_right_click_menu_is_the_short_core_plus_submenus(monkeypatch):
     items = _context_items(window, monkeypatch)
     actions = [i for i in items if isinstance(i, QAction)]
     assert window.actions_["redact"] in actions
-    assert window.actions_["remove_from_list"] in actions
+    assert window.actions_["remove_from_list"] not in actions  # File menu (Delete key) only
     organize = next(i for i in items if isinstance(i, mw.Submenu) and "Organize" in i.text)
     assert window.actions_["rename_export_move"] in organize.items
-    # Redact comes before Remove from List, which is last.
-    assert actions[-1] is window.actions_["remove_from_list"]
-    assert actions.index(window.actions_["redact"]) < actions.index(window.actions_["remove_from_list"])
+    assert actions[-1] is window.actions_["redact"]  # Redact is the last plain entry
 
 
 def _two_cbz(tmp_path):

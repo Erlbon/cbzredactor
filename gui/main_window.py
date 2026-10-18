@@ -964,8 +964,7 @@ class MainWindow(QMainWindow):
                 "convert_selected", f"Convert {len(selected_unconverted)} File(s) to CBZ",
                 lambda: self.convert_books_to_cbz(selected_unconverted),
             ))
-        items.extend([Separator(), a["remove_from_list"]])
-        return items
+        return items  # Remove from List: File menu (Delete key) only
 
     def _context_menu_books(self) -> list[CbzBook]:
         """What the right-click menu is about: the selected files -- including

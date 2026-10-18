@@ -90,7 +90,7 @@ def test_one_file_selected_offers_every_selection_command(window):
                       "Number Issues…", "Credit Pages…"]),
         ("Bulk Edit", BULK),
         ("Repair", REPAIR),
-        "---", "Redact", "---", "Remove from List",
+        "---", "Redact",
     ]
 
 
@@ -101,7 +101,7 @@ def test_several_files_selected_drops_the_single_file_entries(window):
     assert "Credit Pages…" not in organize[1]
     assert "Number Issues…" in organize[1]
     assert ("Repair", REPAIR) in layout and ("Bulk Edit", BULK) in layout
-    assert layout[-1] == "Remove from List"
+    assert "Remove from List" not in layout and layout[-1] == "Redact"
 
 
 def test_nothing_selected_still_offers_the_all_files_commands(window):
@@ -123,7 +123,7 @@ def test_menu_entries_are_the_real_menu_bar_actions(window):
         elif isinstance(item, QAction):
             entries.append(item)
     keys = {key: window.actions_[key] for key in (
-        "rename_file", "redact", "remove_from_list", "rename_export_move", "parse_filename",
+        "rename_file", "redact", "rename_export_move", "parse_filename",
         "read_filename_tags", "number_issues", "credit_pages", "search_replace", "change_case",
         "auto_number", "validate", "resize_images", "tag_low_res", "remove_credit_pages",
         "clean_contents", "comicvine_lookup", "bedetheque_lookup",
@@ -156,7 +156,7 @@ def test_book_needing_conversion_gets_convert_and_no_editing_entries(tmp_path):
     assert layout == [
         "---", "Preview…", "Rename File…", "---",
         ("Organize", ["Rename / Export / Move…"]),
-        "---", "Redact", "Convert 1 File(s) to CBZ", "---", "Remove from List",
+        "---", "Redact", "Convert 1 File(s) to CBZ",
     ]
 
 

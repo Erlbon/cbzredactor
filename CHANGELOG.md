@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-10-18#02 -- No Remove from List in the right-click menu
+
+- Right-click > Remove from List is gone (it sat next to commands that look destructive). File > Remove from List, the Delete key and Clear List stay. Nothing else in the menu changed.
+
 ## 2026-10-18#01 -- Comic Vine browse ranks by publisher
 
 - The Comic Vine series browser has a new **Publisher** box beside Year, filled from the file's own Publisher tag. A series whose publisher matches ("DC" matches "DC Comics" either way round) ranks higher, so a same-named series from another publisher no longer comes first. Leave it empty to rank as before. The Year box was already there and still sharpens the ranking.
