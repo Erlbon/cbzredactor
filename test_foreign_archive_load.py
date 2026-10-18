@@ -13,10 +13,11 @@ import sys
 import tarfile
 
 import pytest
-from PyQt6.QtWidgets import QApplication, QCheckBox, QMessageBox
+from PyQt6.QtWidgets import QApplication, QCheckBox, QComboBox, QMessageBox
 
 from core.foreign_archive_convert import ForeignArchiveConversionError
 from gui import app_settings
+from redactor_common.core.conversion_policy import ORIGINALS_KEEP, ORIGINALS_RECYCLE
 from gui.main_window import FOREIGN_CONVERT, FOREIGN_SKIP, FOREIGN_UNCONVERTED, MainWindow
 
 _app = QApplication.instance() or QApplication(sys.argv)
@@ -209,7 +210,7 @@ def test_convert_from_the_table_replaces_the_row_in_place(window, tmp_path, monk
     monkeypatch.setattr(window, "_prompt_convert_foreign_archives", lambda paths: (FOREIGN_UNCONVERTED, False))
     window._load_paths([str(tmp_path / "first.cbz"), str(cbt_path)])
 
-    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.Yes)
+    monkeypatch.setattr(window, "_confirm_convert", lambda *a, **k: "convert")
     window.convert_books_to_cbz([window.books[1]])
 
     book = window.books[1]
@@ -229,7 +230,7 @@ def test_convert_from_the_table_can_recycle_the_original(window, settings, tmp_p
 
     trashed = []
     monkeypatch.setattr("gui.main_window.move_to_trash", trashed.append)
-    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.Yes)
+    monkeypatch.setattr(window, "_confirm_convert", lambda *a, **k: "convert")
     window.convert_books_to_cbz(list(window.books))
 
     assert trashed == [str(cbt_path)]
@@ -272,14 +273,16 @@ def test_remember_my_choice_saves_the_setting(window, settings, tmp_path, monkey
 
     def _click(box):
         for check in box.findChildren(QCheckBox):
-            check.setChecked(True)  # recycle + remember
+            check.setChecked(True)  # remember
+        combo = box.findChild(QComboBox)
+        combo.setCurrentIndex(combo.findData(ORIGINALS_RECYCLE))  # this load only
         next(b for b in box.buttons() if b.text() == "Convert Now").click()
 
     monkeypatch.setattr(QMessageBox, "exec", _click)
     resize_before = app_settings.load_resize_on_convert()
     choice, delete = window._prompt_convert_foreign_archives([str(cbt_path)])
 
-    assert (choice, delete) == (FOREIGN_CONVERT, True)
+    assert (choice, delete) == (FOREIGN_CONVERT, ORIGINALS_RECYCLE)
     # T6: only the convert-or-not answer is remembered -- not the Recycle Bin
     # box (this load only) and never the resize-on-convert setting.
     assert settings == {"behavior": app_settings.FOREIGN_LOAD_CONVERT, "recycle": False}
@@ -316,7 +319,7 @@ def test_real_prompt_buttons_map_to_choices(window, tmp_path, monkeypatch, butto
     monkeypatch.setattr(QMessageBox, "exec", _click)
     choice, delete = window._prompt_convert_foreign_archives([str(cbt_path)])
     assert choice == expected
-    assert delete is False
+    assert delete == ORIGINALS_KEEP  # the box starts on the saved policy (never saved: the old "keep")
 
 
 def test_prompt_is_the_shared_convert_offer_with_the_apps_wording(window, tmp_path, monkeypatch):
@@ -337,10 +340,12 @@ def test_prompt_is_the_shared_convert_offer_with_the_apps_wording(window, tmp_pa
         seen["escape"] = box.escapeButton().text()
         seen["buttons"] = [b.text() for b in box.buttons() if b.text() in ("Convert Now", "Add Unconverted", "Skip")]
         seen["checks"] = [c.text() for c in box.findChildren(QCheckBox)]
+        combo = box.findChild(QComboBox)
+        seen["combo"] = [combo.itemText(i) for i in range(combo.count())]
         box.escapeButton().click()
 
     monkeypatch.setattr(QMessageBox, "exec", _look)
-    assert window._prompt_convert_foreign_archives([str(cbt_path)]) == (FOREIGN_SKIP, False)
+    assert window._prompt_convert_foreign_archives([str(cbt_path)]) == (FOREIGN_SKIP, ORIGINALS_KEEP)
     assert len(calls) == 1
     assert seen["title"] == "Convert to CBZ?"
     assert seen["text"].startswith("1 file(s) aren't real CBZ files -- this app only edits CBZ (ZIP) archives:")
@@ -348,8 +353,8 @@ def test_prompt_is_the_shared_convert_offer_with_the_apps_wording(window, tmp_pa
     assert str(cbt_path) in seen["details"]  # the full path under Show Details
     assert seen["default"] == "Add Unconverted" and seen["escape"] == "Skip"
     assert sorted(seen["buttons"]) == ["Add Unconverted", "Convert Now", "Skip"]
-    assert len(seen["checks"]) == 2 and seen["checks"][0].startswith("Move the originals to the Recycle Bin")
-    assert seen["checks"][1].startswith("Remember Convert Now / Add Unconverted")
+    assert len(seen["checks"]) == 1 and seen["checks"][0].startswith("Remember Convert Now / Add Unconverted")
+    assert seen["combo"][0].startswith("Original afterwards: move it to a quarantine folder")
 
 
 def test_remember_add_unconverted_saves_only_the_convert_or_not_answer(window, settings, tmp_path, monkeypatch):
@@ -363,7 +368,7 @@ def test_remember_add_unconverted_saves_only_the_convert_or_not_answer(window, s
 
     monkeypatch.setattr(QMessageBox, "exec", _click)
     resize_before = app_settings.load_resize_on_convert()
-    assert window._prompt_convert_foreign_archives([str(cbt_path)]) == (FOREIGN_UNCONVERTED, False)
+    assert window._prompt_convert_foreign_archives([str(cbt_path)]) == (FOREIGN_UNCONVERTED, ORIGINALS_KEEP)
     assert settings == {"behavior": app_settings.FOREIGN_LOAD_UNCONVERTED, "recycle": False}
     assert app_settings.load_resize_on_convert() == resize_before
 

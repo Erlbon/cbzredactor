@@ -385,6 +385,36 @@ def save_recycle_originals(enabled: bool) -> None:
     _settings().setValue(_DELETE_ORIGINALS_KEY, bool(enabled))
 
 
+def _policy_get(section: str, key: str, default: str) -> str:
+    return str(_settings().value(f"{section}/{key}", default))
+
+
+def _policy_put(section: str, key: str, value: str) -> None:
+    _settings().setValue(f"{section}/{key}", value)
+
+
+def load_conversion_policy():
+    """The shared conversion policy (Tools > Preferences > Conversion). Until the page has been saved once it is
+    what the two old settings above say (core/conversion_originals.legacy_policy), so nothing changes silently;
+    afterwards the saved policy wins."""
+    from core.conversion_originals import legacy_policy
+    from redactor_common.core import conversion_policy
+
+    return conversion_policy.load_policy(
+        _policy_get, legacy_policy(load_foreign_load_behavior(), load_recycle_originals()))
+
+
+def save_conversion_policy(policy) -> None:
+    """Saves the policy and mirrors it into the two old settings, so Export Settings, an older build and anything
+    still reading them agree with it."""
+    from core.conversion_originals import LEGACY_LOAD_BEHAVIOR
+    from redactor_common.core import conversion_policy
+
+    conversion_policy.save_policy(policy, _policy_put)
+    save_foreign_load_behavior(LEGACY_LOAD_BEHAVIOR.get(policy.on_open, FOREIGN_LOAD_UNCONVERTED))
+    save_recycle_originals(policy.originals == conversion_policy.ORIGINALS_RECYCLE)
+
+
 def load_resize_max_height() -> int:
     return _int_value(_RESIZE_MAX_HEIGHT_KEY, 0)
 

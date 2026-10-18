@@ -553,9 +553,20 @@ need converting is set in **Tools > Preferences > Conversion**:
   Now / Add Unconverted as the setting (never the Recycle Bin or resize
   choices).
 
-The same page has **Move originals to the Recycle Bin after a
-conversion** (off by default), used by every conversion, and **Resize
-pages while converting** (Ask once per batch / Always resize / Never
+The top of the page is the conversion policy every Redactor app shares
+(the three choices above are its "When a file needs converting" box:
+Ask me / Convert automatically / Never convert). Its second box says
+what happens to the **original** after a verified conversion, for every
+conversion: **move it to a quarantine folder** (a dated "converted
+originals <date>" folder in the folder you set, else beside the file,
+with a TSV undo log), **send it to the Recycle Bin**, or **keep it**
+(the default until you save the page: what the old "Move originals to
+the Recycle Bin" box, off by default, did). It also has "leave files
+modified in the last N minutes" (load-time conversion only) and **Dry run
+first**: the Convert to CBZ confirmation then lists what would happen and
+changes nothing; untick the box in that confirmation to really convert.
+Until you save the page, it equals your old settings, so nothing changes.
+Below it, **Resize pages while converting** (Ask once per batch / Always resize / Never
 resize). The per-batch question's "Don't ask again" box says which
 button sets which: Resize While Converting sets Always (lossy), Convert
 Without Resizing sets Never.

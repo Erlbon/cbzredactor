@@ -26,6 +26,7 @@ from PyQt6.QtGui import QColor, QIcon, QImage
 from PyQt6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
+    QComboBox,
     QDialog,
     QFileDialog,
     QHeaderView,
@@ -119,6 +120,10 @@ from core.foreign_archive_convert import (
     convert_to_cbz,
 )
 from gui.conversion_progress import ConversionRun
+from core import conversion_originals
+from redactor_common.core.conversion_policy import (
+    ON_OPEN_ASK, ON_OPEN_AUTO, ON_OPEN_NEVER, ORIGINALS_KEEP, ORIGINALS_QUARANTINE, ORIGINALS_RECYCLE,
+)
 from core.archive_sniff import extension_label
 from core.page_cache import LruCache
 from core.cbz_file import CbzBook, CbzError, ResizeCancelled, path_needs_conversion
@@ -266,6 +271,9 @@ NEEDS_CONVERSION_STATUS = "Needs conversion"
 FOREIGN_CONVERT = "convert"
 FOREIGN_UNCONVERTED = "unconverted"
 FOREIGN_SKIP = "skip"
+# The answers of MainWindow._confirm_convert().
+CONVERT_NOW = "convert"
+CONVERT_DRY_RUN = "dry-run"
 _COLUMN_LABELS: dict[str, str] = dict(COLUMN_SPECS)
 _ALL_COLUMN_KEYS: list[str] = [key for key, _ in COLUMN_SPECS]
 PROTECTED_COLUMNS = frozenset({"filename"})  # the one column you always need to tell rows apart
@@ -1028,26 +1036,32 @@ class MainWindow(QMainWindow):
             return
         self._load_paths(paths)
 
-    def _prompt_convert_foreign_archives(self, paths: list[str]) -> tuple[str, bool]:
+    def _prompt_convert_foreign_archives(self, paths: list[str]) -> tuple[str, str]:
         """If `paths` contains any file needing conversion (a CBR/CBT/
         CB7, or a mislabeled archive -- see CbzBook.needs_conversion),
         asks once for the whole batch what to do with them: convert now,
         add them to the list unconverted (read-only rows, converted
         later from the table), or skip them. Returns (choice, delete),
         choice one of FOREIGN_CONVERT / FOREIGN_UNCONVERTED /
-        FOREIGN_SKIP, delete = move originals to the Recycle Bin after a
-        verified conversion. (FOREIGN_CONVERT, False) when nothing in
+        FOREIGN_SKIP, originals = what happens to the originals after a
+        verified conversion (a policy `originals` value: quarantine,
+        recycle or keep; its box starts on the saved policy and applies
+        to this load only). (FOREIGN_CONVERT, keep) when nothing in
         the batch needs converting, since there's nothing to ask."""
         foreign = [p for p in paths if path_needs_conversion(p)]
         if not foreign:
-            return FOREIGN_CONVERT, False
+            return FOREIGN_CONVERT, ORIGINALS_KEEP
 
         shown = "\n".join(f"  {os.path.basename(p)}" for p in foreign[:10])
         if len(foreign) > 10:
             shown += f"\n  ...and {len(foreign) - 10} more"
 
-        delete_checkbox = QCheckBox("Move the originals to the Recycle Bin after a successful conversion")
-        delete_checkbox.setChecked(app_settings.load_recycle_originals())
+        policy = app_settings.load_conversion_policy()
+        originals_box = QComboBox()
+        originals_box.addItem("Original afterwards: move it to a quarantine folder (undo log)", ORIGINALS_QUARANTINE)
+        originals_box.addItem("Original afterwards: send it to the Recycle Bin", ORIGINALS_RECYCLE)
+        originals_box.addItem("Original afterwards: keep it where it is", ORIGINALS_KEEP)
+        originals_box.setCurrentIndex(max(0, originals_box.findData(policy.originals)))
         # The app's own "remember" box, not offer_conversion's remember_key/remember: that one is a per-folder
         # "Don't ask again" recorded on Convert or Skip, while this one is the global Preferences > Conversion
         # setting, recorded on Convert Now or Add Unconverted and never on Skip.
@@ -1055,8 +1069,9 @@ class MainWindow(QMainWindow):
             "Remember Convert Now / Add Unconverted for later loads (Tools > Preferences > Conversion)"
         )
         remember_checkbox.setToolTip(
-            "Remembers ONLY whether CBR/CB7/CBT files are converted on load. Skip is never remembered; "
-            "the Recycle Bin box above applies to this load only, and resizing is never switched on here."
+            "Remembers ONLY whether CBR/CB7/CBT files are converted on load (the conversion policy's Open choice). "
+            "Skip is never remembered; the original choice above applies to this load only, and resizing is "
+            "never switched on here."
         )
         answer = offer_conversion(
             self, foreign, loaded_count=0, kind_label="CBZ", target_label="CBZ",
@@ -1071,32 +1086,33 @@ class MainWindow(QMainWindow):
             no_text="Skip",
             extra_buttons=[("Add Unconverted", FOREIGN_UNCONVERTED)],
             default=FOREIGN_UNCONVERTED,
-            options=[delete_checkbox, remember_checkbox],
+            options=[originals_box, remember_checkbox],
         )
         if answer == CONVERT_OFFER_YES:
             choice = FOREIGN_CONVERT
         elif answer == FOREIGN_UNCONVERTED:
             choice = FOREIGN_UNCONVERTED
         else:
-            return FOREIGN_SKIP, False
+            return FOREIGN_SKIP, ORIGINALS_KEEP
 
         if remember_checkbox.isChecked():
-            # Only the convert-or-not answer: never the Recycle Bin or resize settings.
-            app_settings.save_foreign_load_behavior(
-                app_settings.FOREIGN_LOAD_CONVERT if choice == FOREIGN_CONVERT else app_settings.FOREIGN_LOAD_UNCONVERTED
-            )
-        return choice, choice == FOREIGN_CONVERT and delete_checkbox.isChecked()
+            # Only the convert-or-not answer (the policy's Open choice): never the originals or resize settings.
+            policy.on_open = ON_OPEN_AUTO if choice == FOREIGN_CONVERT else ON_OPEN_NEVER
+            app_settings.save_conversion_policy(policy)
+        return choice, (originals_box.currentData() if choice == FOREIGN_CONVERT else ORIGINALS_KEEP)
 
-    def _resolve_foreign_choice(self, paths: list[str]) -> tuple[str, bool]:
+    def _resolve_foreign_choice(self, paths: list[str]) -> tuple[str, str]:
         """What _load_paths() does with files needing conversion, per
-        Tools > Preferences > Conversion: list them unconverted (the
-        default), convert them without asking, or ask."""
-        behavior = app_settings.load_foreign_load_behavior()
-        if behavior == app_settings.FOREIGN_LOAD_ASK:
+        Tools > Preferences > Conversion (the conversion policy's Open choice): list them
+        unconverted (Never, the default for an existing install), convert them without
+        asking (Automatically), or ask. Returns (choice, what to do with the originals:
+        a policy `originals` value)."""
+        policy = app_settings.load_conversion_policy()
+        if policy.on_open == ON_OPEN_ASK:
             return self._prompt_convert_foreign_archives(paths)
-        if behavior == app_settings.FOREIGN_LOAD_CONVERT:
-            return FOREIGN_CONVERT, app_settings.load_recycle_originals()
-        return FOREIGN_UNCONVERTED, False
+        if policy.on_open == ON_OPEN_AUTO:
+            return FOREIGN_CONVERT, policy.originals
+        return FOREIGN_UNCONVERTED, ORIGINALS_KEEP
 
     def _resize_for_convert(self, file_count: int) -> ResizeOptions | None:
         """Whether this batch of conversions also resizes the pages, and how: asked ONCE
@@ -1131,9 +1147,10 @@ class MainWindow(QMainWindow):
         -- the method follows the file's real content, and the result is
         verified before this returns). A ".cbz" that's really a RAR/7z/tar
         is first renamed to its true extension, so the converted file can
-        take the .cbz name. With `delete_original`, the source goes to the
-        Recycle Bin afterwards -- never permanently deleted, and never if
-        anything failed. Returns the new path, or None (with the reason
+        take the .cbz name. `delete_original` is what happens to the source
+        afterwards: a policy `originals` value (quarantine / recycle / keep;
+        the old True / False mean Recycle Bin / keep) -- never permanently
+        deleted, and never if anything failed. Returns the new path, or None (with the reason
         appended to `errors`). With `resize`, the pages are resized in the same pass
         (see convert_to_cbz)."""
         name = os.path.basename(path)
@@ -1152,11 +1169,12 @@ class MainWindow(QMainWindow):
             self._restore_relabeled(source, path, name, errors)
             return None
         history.note_conversion(path, new_path)  # History entries of the old name follow the new .cbz
-        if delete_original:
-            try:
-                _trash_retrying(source)
-            except TrashError as exc:
-                errors.append(f"{name}: converted to CBZ successfully, but {exc}")
+        # Only now, after convert_to_cbz verified the result (it opens, same page count), is the original touched.
+        try:
+            conversion_originals.dispose_original(
+                source, new_path, delete_original, app_settings.load_conversion_policy(), _trash_retrying)
+        except (TrashError, OSError) as exc:
+            errors.append(f"{name}: converted to CBZ successfully, but the original was kept: {exc}")
         return new_path
 
     @staticmethod
@@ -1212,6 +1230,8 @@ class MainWindow(QMainWindow):
         resize = self._resize_for_convert(foreign_count) if choice == FOREIGN_CONVERT and foreign_count else None
 
         already_converted: list[str] = []
+        recent_skipped: list[str] = []
+        recent_minutes = app_settings.load_conversion_policy().recent_minutes
         listed = {os.path.normcase(os.path.abspath(p)) for p in paths} | {
             os.path.normcase(os.path.abspath(b.path)) for b in self.books
         }
@@ -1221,7 +1241,11 @@ class MainWindow(QMainWindow):
             if path_needs_conversion(path):
                 if choice == FOREIGN_SKIP:
                     return  # declined for this whole batch -- skip, don't load
-                if choice == FOREIGN_CONVERT:
+                if choice == FOREIGN_CONVERT and conversion_originals.is_recent(path, recent_minutes):
+                    # Modified a moment ago (the policy's "leave recent files" rule): maybe still being written.
+                    # Listed unconverted instead; Convert to CBZ from the table converts it later.
+                    recent_skipped.append(os.path.basename(path))
+                elif choice == FOREIGN_CONVERT:
                     existing = _existing_conversion(path)
                     if existing is not None:
                         # A .cbz of that name is already there (converted earlier): use it instead of
@@ -1270,7 +1294,12 @@ class MainWindow(QMainWindow):
 
         self._show_idle_panel()
         self._update_status()
-        if already_converted:
+        if recent_skipped:
+            self.statusBar().showMessage(
+                f"{len(recent_skipped)} file(s) were modified in the last {recent_minutes} minute(s), so they were "
+                "listed unconverted (right-click > Convert to CBZ converts them).", 12000,
+            )
+        elif already_converted:
             self.statusBar().showMessage(
                 f"{len(already_converted)} file(s) already had a .cbz of the same name: that one was used "
                 "instead of converting again, and the originals are untouched.", 12000,
@@ -3647,9 +3676,9 @@ class MainWindow(QMainWindow):
             QMessageBox.information(self, "Nothing to Convert", "Those files are already real CBZ files.")
             return
         # Picking files here already says "convert these" -- no prompt;
-        # the Recycle Bin choice comes from Settings like every other
-        # conversion.
-        should_delete = app_settings.load_recycle_originals()
+        # what happens to the originals comes from the conversion policy
+        # like every other conversion.
+        should_delete = app_settings.load_conversion_policy().originals
         resize = self._resize_for_convert(len(paths))
 
         errors: list[str] = []
@@ -3679,23 +3708,50 @@ class MainWindow(QMainWindow):
         if not books:
             self.statusBar().showMessage("Convert to CBZ: those files are already real CBZ files.", 8000)
             return
-        recycle = app_settings.load_recycle_originals()
-        originals = (
-            "The originals will be moved to the Recycle Bin afterwards."
-            if recycle else "The originals will be kept next to the new .cbz files."
-        )
-        reply = QMessageBox.question(
-            self, "Convert to CBZ",
+        policy = app_settings.load_conversion_policy()
+        originals = {
+            ORIGINALS_RECYCLE: "The originals will be moved to the Recycle Bin afterwards.",
+            ORIGINALS_KEEP: "The originals will be kept next to the new .cbz files.",
+            ORIGINALS_QUARANTINE: "The originals will be moved to a 'converted originals' quarantine folder "
+                                  "afterwards, with an undo log.",
+        }[policy.originals]
+        answer = self._confirm_convert(
             f"Convert {len(books)} file(s) to CBZ?\n\n"
             "Each converted file is checked (it opens, and has as many pages "
             f"as the original) before anything else happens. {originals}\n\n"
             "(Change this in Tools > Preferences > Conversion.)",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.Yes,
+            policy.dry_run_first,
         )
-        if reply != QMessageBox.StandardButton.Yes:
+        if answer is None:
             return
-        self._convert_books(books, recycle, self._resize_for_convert(len(books)))
+        if answer == CONVERT_DRY_RUN:
+            self._show_conversion_dry_run([book.path for book in books], policy)
+            return
+        self._convert_books(books, policy.originals, self._resize_for_convert(len(books)))
+
+    def _confirm_convert(self, text: str, dry_run_default: bool) -> str | None:
+        """The convert confirmation: CONVERT_NOW, CONVERT_DRY_RUN (its "Dry run first" box ticked: list what
+        would happen, change nothing) or None (No). The box starts as the conversion policy says."""
+        box = QMessageBox(QMessageBox.Icon.Question, "Convert to CBZ", text,
+                          QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, self)
+        box.setDefaultButton(QMessageBox.StandardButton.Yes)
+        dry_run = QCheckBox("Dry run first: list what would happen and change nothing")
+        dry_run.setChecked(dry_run_default)
+        box.setCheckBox(dry_run)
+        if box.exec() != QMessageBox.StandardButton.Yes:
+            return None
+        return CONVERT_DRY_RUN if dry_run.isChecked() else CONVERT_NOW
+
+    def _show_conversion_dry_run(self, paths: list[str], policy) -> None:
+        lines = [conversion_originals.plan_line(path, policy) for path in paths]
+        box = QMessageBox(
+            QMessageBox.Icon.Information, "Dry run: nothing was changed",
+            f"{len(lines)} file(s) would be converted to CBZ. Nothing was converted, moved or deleted.\n\n"
+            "Run Convert to CBZ again and untick 'Dry run first' to do it.",
+            QMessageBox.StandardButton.Ok, self,
+        )
+        box.setDetailedText("\n".join(lines))
+        box.exec()
 
     def open_preferences_dialog(self) -> None:
         """Tools > Preferences... (Ctrl+,): see gui/preferences.py."""
@@ -3763,7 +3819,7 @@ class MainWindow(QMainWindow):
         )
 
     def _convert_books(
-        self, books: list[CbzBook], delete_originals: bool, resize: ResizeOptions | None = None
+        self, books: list[CbzBook], delete_originals: bool | str, resize: ResizeOptions | None = None
     ) -> None:
         errors: list[str] = []
         converted = 0

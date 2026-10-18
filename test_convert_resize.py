@@ -556,7 +556,7 @@ def test_table_convert_asks_once_for_the_selection(window, question, tmp_path, m
     monkeypatch.setattr(app_settings, "load_foreign_load_behavior", lambda: app_settings.FOREIGN_LOAD_UNCONVERTED)
     window._load_paths(_cbt_paths(tmp_path, 2))
     assert all(b.needs_conversion for b in window.books) and question.shown == 0
-    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.Yes)
+    monkeypatch.setattr(window, "_confirm_convert", lambda *a, **k: "convert")
     window.convert_books_to_cbz(list(window.books))
     assert question.shown == 1 and question.count == 2
     assert all(_size_in(b.path, "000.jpg")[0] == 900 for b in window.books)

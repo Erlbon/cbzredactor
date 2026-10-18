@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-10-18#03 -- The shared conversion policy on Tools > Preferences > Conversion
+
+Shared part: redactor_common 2026-10-18#06 (core/conversion_policy.py, gui/conversion_policy_widget.py); the same page is coming to every Redactor app.
+- New: the Conversion page starts with the shared policy. **When a file needs converting**: Ask me / Convert automatically / Never convert (the files are listed as read-only rows, as before). **What happens to the original** after a verified conversion: move it to a quarantine folder ("converted originals <date>", with a TSV undo log), send it to the Recycle Bin, or keep it. Plus "leave files modified in the last N minutes" (load-time conversion) and **Dry run first**: the Convert to CBZ confirmation lists what would happen and changes nothing until you untick the box.
+- Nothing changes until you save the page: until then the policy is your old settings (load behaviour, and "Move originals to the Recycle Bin" = Recycle Bin, off = keep). Once saved, the policy wins and is mirrored into the old settings (Export Settings still carries them). The load-time prompt's "Remember" box saves into the policy; its originals choice (a list) starts on the policy and applies to that load only.
+- The original is only moved after the new .cbz was checked (it opens, same page count); never deleted, never after a failure.
+- Tests: the old settings as default policy (all combinations), each Open choice, keep / quarantine (undo log, set folders, no overwrite) / Recycle Bin, the dry run, the page (OK, Apply, Cancel, untouched OK). The three tests that answered the old Yes/No question now answer the new confirmation.
+
 ## 2026-10-18#02 -- No Remove from List in the right-click menu
 
 - Right-click > Remove from List is gone (it sat next to commands that look destructive). File > Remove from List, the Delete key and Clear List stay. Nothing else in the menu changed.

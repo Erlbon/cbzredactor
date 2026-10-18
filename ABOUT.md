@@ -14,7 +14,9 @@ CBR, CB7 and CBT archives are never edited in place. By default they are
 added to the list unconverted (read-only rows) and converted to CBZ only
 when you ask (right-click > Convert to CBZ, or Repair > Convert to
 CBZ...); Tools > Preferences > Conversion can make loading convert them
-automatically or ask each time -- see README.md's "Foreign archive
+automatically or ask each time, and says what happens to the original
+afterwards (quarantine folder with an undo log, Recycle Bin, or keep) --
+see README.md's "Foreign archive
 formats" section.
 
 History of tag changes is opt-in, off by default. Turned on (Tools >

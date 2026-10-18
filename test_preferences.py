@@ -40,7 +40,7 @@ def test_fresh_install_shows_the_defaults():
     dlg = _dialog()
     assert dlg.value(core_prefs.KEY_ASCII_FILENAMES) is False
     assert dlg.value(core_prefs.KEY_ZERO_PAD_WIDTH) == 2
-    assert dlg.value(preferences.KEY_ON_LOAD) == app_settings.FOREIGN_LOAD_UNCONVERTED
+    assert dlg.policy_widget.policy().on_open == "never"
     assert dlg.value(preferences.KEY_RESIZE_MAX_WIDTH) == app_settings._DEFAULT_RESIZE_MAX_WIDTH
     assert dlg.value(preferences.KEY_RESIZE_OUTPUT_FORMAT) == ""
     assert dlg.changed_values() == {}
@@ -64,8 +64,8 @@ def test_existing_settings_are_shown():
     assert dlg.value(core_prefs.KEY_ZERO_PAD_NUMBERS) is True
     assert dlg.value(core_prefs.KEY_ZERO_PAD_WIDTH) == 4
     assert dlg.value(core_prefs.KEY_AUTO_NUMBER_PADDING) == 3
-    assert dlg.value(preferences.KEY_ON_LOAD) == "ask"
-    assert dlg.value(preferences.KEY_RECYCLE_ORIGINALS) is True
+    assert dlg.policy_widget.policy().on_open == "ask"
+    assert dlg.policy_widget.policy().originals == "recycle"
     assert dlg.value(preferences.KEY_RESIZE_MAX_WIDTH) == 1920
     assert dlg.value(preferences.KEY_RESIZE_MAX_HEIGHT) == 2500
     assert dlg.value(preferences.KEY_RESIZE_JPEG_QUALITY) == 75
@@ -82,8 +82,8 @@ def test_ok_writes_through_the_existing_storage_functions():
     dlg.set_value(core_prefs.KEY_ZERO_PAD_NUMBERS, True)
     dlg.set_value(core_prefs.KEY_ZERO_PAD_WIDTH, 10)
     dlg.set_value(core_prefs.KEY_AUTO_NUMBER_PADDING, 5)
-    dlg.set_value(preferences.KEY_ON_LOAD, "convert")
-    dlg.set_value(preferences.KEY_RECYCLE_ORIGINALS, True)
+    dlg.policy_widget._on_open["auto"].setChecked(True)
+    dlg.policy_widget._recycle.setChecked(True)
     dlg.set_value(preferences.KEY_RESIZE_MAX_WIDTH, 2560)
     dlg.set_value(preferences.KEY_RESIZE_MAX_HEIGHT, 3000)
     dlg.set_value(preferences.KEY_RESIZE_JPEG_QUALITY, 80)

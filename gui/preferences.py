@@ -36,8 +36,6 @@ from redactor_common.core.preferences import (
 from core.image_resize import DEFAULT_MAX_WIDTH
 from gui import app_settings
 
-KEY_ON_LOAD = "conversion_on_load"
-KEY_RECYCLE_ORIGINALS = "conversion_recycle_originals"
 KEY_RESIZE_MAX_WIDTH = "resize_max_width"
 KEY_RESIZE_MAX_HEIGHT = "resize_max_height"
 KEY_RESIZE_JPEG_QUALITY = "resize_jpeg_quality"
@@ -64,23 +62,6 @@ def preference_sections() -> list[PrefSection]:
         "conversion", "Conversion",
         (
             PrefSpec(
-                KEY_ON_LOAD, "When loading CBR/CBT/CB7 (or mislabeled) files", "choice",
-                app_settings.FOREIGN_LOAD_UNCONVERTED,
-                help="Add to the list unconverted: nothing is written until you ask. "
-                     "Convert automatically: converted while loading. "
-                     "Ask each time: one prompt per load.",
-                choices=(
-                    (app_settings.FOREIGN_LOAD_UNCONVERTED, "Add to the list unconverted (recommended)"),
-                    (app_settings.FOREIGN_LOAD_CONVERT, "Convert automatically"),
-                    (app_settings.FOREIGN_LOAD_ASK, "Ask each time"),
-                ),
-            ),
-            PrefSpec(
-                KEY_RECYCLE_ORIGINALS, "Move originals to the Recycle Bin after a conversion", "bool", False,
-                help="An original is only moved after its new .cbz opened cleanly with the "
-                     "same number of pages: never deleted permanently, never after a failure.",
-            ),
-            PrefSpec(
                 KEY_RESIZE_ON_CONVERT, "Resize pages while converting", "choice",
                 app_settings.RESIZE_ON_CONVERT_ASK,
                 help="Converting a CBR/CBT/CB7 can shrink its pages in the same step, with the "
@@ -93,7 +74,7 @@ def preference_sections() -> list[PrefSection]:
                 ),
             ),
         ),
-        "What happens when a file is not a real CBZ.",
+        "What happens when a file is not a real CBZ (a CBR, CBT or CB7, or an archive with the wrong extension).",
     )
     resize = PrefSection(
         "resize", "Resize defaults",
@@ -234,8 +215,6 @@ _READERS = {
     KEY_ZERO_PAD_NUMBERS: lambda: app_settings.load_rename_zero_pad()[0],
     KEY_ZERO_PAD_WIDTH: lambda: app_settings.load_rename_zero_pad()[1],
     KEY_AUTO_NUMBER_PADDING: app_settings.load_auto_number_padding,
-    KEY_ON_LOAD: app_settings.load_foreign_load_behavior,
-    KEY_RECYCLE_ORIGINALS: app_settings.load_recycle_originals,
     KEY_RESIZE_MAX_WIDTH: app_settings.load_resize_max_width,
     KEY_RESIZE_MAX_HEIGHT: app_settings.load_resize_max_height,
     KEY_RESIZE_JPEG_QUALITY: app_settings.load_resize_jpeg_quality,
@@ -257,8 +236,6 @@ _WRITERS = {
     KEY_ZERO_PAD_NUMBERS: lambda value: _write_zero_pad(enabled=value),
     KEY_ZERO_PAD_WIDTH: lambda value: _write_zero_pad(width=value),
     KEY_AUTO_NUMBER_PADDING: app_settings.save_auto_number_padding,
-    KEY_ON_LOAD: app_settings.save_foreign_load_behavior,
-    KEY_RECYCLE_ORIGINALS: app_settings.save_recycle_originals,
     KEY_RESIZE_MAX_WIDTH: app_settings.save_resize_max_width,
     KEY_RESIZE_MAX_HEIGHT: app_settings.save_resize_max_height,
     KEY_RESIZE_JPEG_QUALITY: app_settings.save_resize_jpeg_quality,
@@ -297,10 +274,58 @@ def make_dialog(parent=None):
     from redactor_common.gui.preferences_dialog import PreferencesDialog
 
     dialog = PreferencesDialog(preference_sections(), make_backend(), parent)
+    _add_conversion_policy(dialog)
     # The History page's Delete History... (a PrefAction): only usable while there is a file to delete.
     dialog.delete_history_button = delete_history_button(dialog)
     _refresh_delete_history(dialog)
     return dialog
+
+
+NEVER_TEXT = "the files are listed as read-only rows (right-click > Convert to CBZ converts them later)"
+
+
+def _add_conversion_policy(dialog) -> None:
+    """The shared conversion-policy widget (redactor_common) on top of the Conversion page. It is saved on
+    OK / Apply (only when it was changed, so an untouched page never pins the old settings) and dropped on Cancel,
+    like the other pages; `dialog.policy_widget` is the widget."""
+    from PyQt6.QtWidgets import QAbstractButton, QLineEdit, QSpinBox
+
+    from redactor_common.gui.conversion_policy_widget import ConversionPolicyWidget
+
+    baseline = app_settings.load_conversion_policy()
+    widget = ConversionPolicyWidget(baseline, never_text=NEVER_TEXT)
+    dialog.policy_widget = widget
+    index = dialog.page_titles().index("Conversion")
+    page = dialog._tabs.widget(index) if dialog._tabs is not None else dialog._stack.widget(index)
+    page.layout().insertWidget(1, widget)  # under the description, above the app's own options
+
+    state = {"baseline": baseline}
+
+    def changed() -> bool:
+        return widget.policy() != state["baseline"]
+
+    def save() -> None:
+        if changed():
+            state["baseline"] = widget.policy()
+            app_settings.save_conversion_policy(state["baseline"])
+        dialog._refresh_state()
+
+    refresh = dialog._refresh_state
+
+    def refresh_with_policy(*args) -> None:
+        refresh()
+        if changed():
+            dialog.apply_button.setEnabled(True)
+
+    dialog._refresh_state = refresh_with_policy
+    for button in widget.findChildren(QAbstractButton):
+        button.toggled.connect(refresh_with_policy)
+    for edit in widget.findChildren(QLineEdit):
+        edit.textChanged.connect(refresh_with_policy)
+    for spin in widget.findChildren(QSpinBox):
+        spin.valueChanged.connect(refresh_with_policy)
+    dialog.apply_button.clicked.connect(save)
+    dialog.accepted.connect(save)
 
 
 def delete_history_button(dialog):
