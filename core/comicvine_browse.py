@@ -132,8 +132,19 @@ def number_as_float(number: str):
         return None
 
 
+def _publisher_matches(wanted: str, actual: str) -> bool:
+    """True when every word of the wanted publisher is in the volume's publisher name ("DC" in "DC Comics",
+    "Marvel Comics" in "Marvel"); case and punctuation are ignored."""
+    wanted_words = set(_split_words(wanted))
+    actual_words = set(_split_words(actual))
+    if not wanted_words or not actual_words:
+        return False
+    return wanted_words <= actual_words or actual_words <= wanted_words  # either one may be the shorter form
+
+
 def score_volume(
-    volume: ComicVineVolume, series: str, number: str, year_hint: str, prior_volume_ids: frozenset = frozenset()
+    volume: ComicVineVolume, series: str, number: str, year_hint: str, prior_volume_ids: frozenset = frozenset(),
+    publisher_hint: str = "",
 ) -> float:
     """How well `volume` fits a file named `series` #`number` from `year_hint`.
     Higher is better; scores can be negative. Components, as in the plugin:
@@ -160,6 +171,8 @@ def score_volume(
     publisher = (volume.publisher or "").lower()
     if any(mirror in publisher for mirror in _MIRROR_PUBLISHERS):
         score -= 6
+    if (publisher_hint or "").strip() and _publisher_matches(publisher_hint, volume.publisher or ""):
+        score += 20  # the file names this publisher: the same-named series from another publisher is a different book
 
     wanted = number_as_float(number)
     if wanted is not None:
@@ -183,11 +196,12 @@ def score_volume(
 
 def rank_volumes(
     volumes: list[ComicVineVolume], series: str, number: str, year_hint: str,
-    prior_volume_ids: frozenset = frozenset(),
+    prior_volume_ids: frozenset = frozenset(), publisher_hint: str = "",
 ) -> list[ComicVineVolume]:
     """Best fit first; ties keep Comic Vine's own order (stable sort)."""
     return sorted(
-        volumes, key=lambda v: score_volume(v, series, number, year_hint, prior_volume_ids), reverse=True
+        volumes, key=lambda v: score_volume(v, series, number, year_hint, prior_volume_ids, publisher_hint),
+        reverse=True,
     )
 
 

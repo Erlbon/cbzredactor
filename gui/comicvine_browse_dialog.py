@@ -150,8 +150,12 @@ class ComicVineBrowseDialog(QDialog):
         self.number_edit.setMaximumWidth(80)
         self.year_edit = QLineEdit()
         self.year_edit.setMaximumWidth(80)
+        self.publisher_edit = QLineEdit()
+        self.publisher_edit.setMaximumWidth(140)
+        self.publisher_edit.setToolTip("Optional: volumes from this publisher rank higher")
         self.search_btn = QPushButton("Search")
-        for caption, edit in (("Series", self.series_edit), ("Number", self.number_edit), ("Year", self.year_edit)):
+        for caption, edit in (("Series", self.series_edit), ("Number", self.number_edit), ("Year", self.year_edit),
+                              ("Publisher", self.publisher_edit)):
             query_row.addWidget(QLabel(caption))
             query_row.addWidget(edit, 1 if edit is self.series_edit else 0)
         query_row.addWidget(self.search_btn)
@@ -161,6 +165,7 @@ class ComicVineBrowseDialog(QDialog):
         self.series_edit.returnPressed.connect(self._search_volumes)
         self.number_edit.returnPressed.connect(self._search_volumes)
         self.year_edit.returnPressed.connect(self._search_volumes)
+        self.publisher_edit.returnPressed.connect(self._search_volumes)
         self.search_btn.clicked.connect(self._search_volumes)
         self.key_btn.clicked.connect(self._change_key)
 
@@ -347,6 +352,7 @@ class ComicVineBrowseDialog(QDialog):
         self.series_edit.setText(series)
         self.number_edit.setText(number)
         self.year_edit.setText(guess_year(book.path, book.metadata.year))
+        self.publisher_edit.setText((book.metadata.publisher or "").strip())
 
         try:
             local = book.read_first_page_bytes()
@@ -390,6 +396,7 @@ class ComicVineBrowseDialog(QDialog):
             volumes = rank_volumes(
                 self._volume_cache[key], series, self.number_edit.text().strip(),
                 self.year_edit.text().strip(), frozenset(self._prior_volume_ids),
+                publisher_hint=self.publisher_edit.text().strip(),
             )
             top = volumes[:HASH_TOP_VOLUMES]
             wanted = [v.image_url for v in top if v.image_url and v.image_url not in self._image_cache]

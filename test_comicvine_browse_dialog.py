@@ -268,3 +268,21 @@ def test_the_series_and_issue_tables_sort_by_header_numerically(tmp_path, net):
     dialog.issue_table.sortByColumn(0, Qt.SortOrder.DescendingOrder)
     assert [dialog.issue_table.item(r, 0).text() for r in range(4)] == ["5", "3", "2", "1"]
     assert dialog._selected_issue() is not None  # the file's issue stays selected through the sort
+
+
+def test_a_matching_publisher_ranks_a_volume_higher():
+    from core.comicvine_browse import rank_volumes, score_volume
+
+    dc = ComicVineVolume(volume_id="1", name="Batman", start_year="2016", issue_count=140, publisher="DC Comics")
+    other = ComicVineVolume(volume_id="9", name="Batman", start_year="2016", issue_count=140, publisher="Panini")
+    assert [v.volume_id for v in rank_volumes([other, dc], "Batman", "1", "2016", publisher_hint="DC")] == ["1", "9"]
+    assert score_volume(dc, "Batman", "1", "2016", publisher_hint="DC Comics") == score_volume(dc, "Batman", "1", "2016") + 20
+    assert score_volume(other, "Batman", "1", "2016", publisher_hint="DC") == score_volume(other, "Batman", "1", "2016")
+    assert score_volume(dc, "Batman", "1", "2016", publisher_hint="") == score_volume(dc, "Batman", "1", "2016")
+
+
+def test_the_dialog_prefills_the_publisher_and_ranks_by_it(tmp_path, net):
+    book = _book(tmp_path)
+    book.metadata.publisher = "DC Comics"
+    dialog = ComicVineBrowseDialog([book])
+    assert dialog.publisher_edit.text() == "DC Comics"

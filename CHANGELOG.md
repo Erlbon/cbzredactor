@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026-10-18#01 -- Comic Vine browse ranks by publisher
+
+- The Comic Vine series browser has a new **Publisher** box beside Year, filled from the file's own Publisher tag. A series whose publisher matches ("DC" matches "DC Comics" either way round) ranks higher, so a same-named series from another publisher no longer comes first. Leave it empty to rank as before. The Year box was already there and still sharpens the ranking.
+- No extra requests: the volume list already carries each series' publisher.
+
 ## 2026-10-17#06 -- A visible error box and a clear result after every Save All
 
 Shared part: redactor_common 2026-10-17#11 (gui/crash_dialog.py, core/save_report.py, run_with_progress(on_error=)); all four Redactor apps get it.
