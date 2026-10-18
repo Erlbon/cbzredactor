@@ -151,7 +151,7 @@ def test_reviewer_can_accept_some_fields_but_not_others(window, monkeypatch):
     monkeypatch.setattr(OverwriteReviewDialog, "exec", _fake_exec_and_capture)
     window._resolve_overwrite_conflicts([book], changes)
     dialog = captured_dialog["dialog"]
-    dialog._controller._checkboxes[(0, "series")].setChecked(True)
+    dialog.tick_fields({"series"})
     result = {}
     for (index, attr), value in dialog.accepted_changes().items():
         result.setdefault(index, {})[attr] = value
