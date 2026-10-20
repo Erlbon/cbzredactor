@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026-10-20#03 -- Comic Vine lookup: the fields and table work again after every request
+
+Shared part: redactor_common 2026-10-20#01 (gui/progress.py).
+- Fixed: after any new Comic Vine request (Search, Back to Series, picking a series, Yes) the lookup window kept working buttons, but the boxes and the table could not be clicked, sorted or tabbed into. The busy box disables the window while it waits; Windows then hands the activation to another window and re-enabling did not take it back. The window that was active is now activated again when the request ends. Every app that uses the busy box gets the same fix.
+
 ## 2026-10-20#02 -- Page counts in file names (16p, 22 pages) are no longer read as the issue number
 
 - Fixed: "The Grim Ghost 000 (2010) 16p (+cvr a).cbz" was read as series "The Grim Ghost 000", issue "16p". The Comic Vine browser then ranked series with 15+ issues first (the real 7-issue series is cut by the issue-count rule) and preselected "Ghost". It now reads series "The Grim Ghost", issue 0. The same goes for "22p", "22 pages", "32pgs" after the title.
