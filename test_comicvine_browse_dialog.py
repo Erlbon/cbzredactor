@@ -208,6 +208,23 @@ def test_requests_run_under_a_cancellable_busy_dialog_and_cancel_is_quiet(tmp_pa
     assert shown == [] and dialog.volume_table.rowCount() == 0 and net["search"] == 0
 
 
+def test_yes_cannot_be_cancelled_by_a_stray_enter_on_the_busy_dialog(tmp_path, net, monkeypatch):
+    books = [_book(tmp_path, "Batman 002 (2017).cbz"), _book(tmp_path, "Batman 003 (2017).cbz", number="3")]
+    dialog = ComicVineBrowseDialog(books)
+    _select_volume(dialog, "1")
+    real = dlg_mod.run_busy
+    seen = []
+
+    def spy(parent, label, fn, *a, cancellable=False, **k):
+        seen.append((fn.__name__, cancellable))
+        return real(parent, label, fn, *a, cancellable=cancellable, **k)
+
+    monkeypatch.setattr(dlg_mod, "run_busy", spy)
+    dialog.use_btn.click()
+    assert seen[0] == ("issue_details", False)  # the Yes request, first
+    assert sorted(dialog.accepted_metadata()) == [0] and dialog._index == 1
+
+
 def test_editing_the_series_and_searching_again_shows_the_new_results(tmp_path, net):
     dialog = ComicVineBrowseDialog([_book(tmp_path)])
     dialog.series_edit.setText("Detective Comics")

@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026-10-20#01 -- Comic Vine lookup: Yes can no longer be silently cancelled
+
+- Fixed: in the Comic Vine browse, pressing Yes sometimes seemed to freeze and the file stayed on screen until you pressed Yes again. Yes starts a request; if it is slow, a busy box with a Cancel button appears, and the next Enter (Yes is the default button) pressed Cancel on it, which dropped the answer without a word. The busy box for Yes now has no Cancel (the request times out after 8 s anyway and then says why).
+- If it still happens with the mouse only, tell me: the next suspect is a slow Comic Vine response on the next file's search.
+
 ## 2026-10-18#03 -- The shared conversion policy on Tools > Preferences > Conversion
 
 Shared part: redactor_common 2026-10-18#06 (core/conversion_policy.py, gui/conversion_policy_widget.py); the same page is coming to every Redactor app.

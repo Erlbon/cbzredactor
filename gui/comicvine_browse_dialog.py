@@ -292,12 +292,12 @@ class ComicVineBrowseDialog(QDialog):
     # ------------------------------------------------------------------
     # Network, kept off the GUI thread
 
-    def _bg(self, fn, *args, label: str = "Asking Comic Vine..."):
+    def _bg(self, fn, *args, label: str = "Asking Comic Vine...", cancellable: bool = True):
         """Runs `fn` on a worker thread under the shared busy dialog (shown
         after a moment, with Cancel); re-raises whatever `fn` raised. Cancel
         abandons the request and raises _Cancelled (a ComicVineLookupError,
         so every caller's existing error path handles it, without a warning)."""
-        result = run_busy(self, label, fn, *args, cancellable=True, title="Comic Vine", on_cancel=_CANCELLED)
+        result = run_busy(self, label, fn, *args, cancellable=cancellable, title="Comic Vine", on_cancel=_CANCELLED)
         if result is _CANCELLED:
             raise _Cancelled("Cancelled")
         return result
@@ -595,7 +595,10 @@ class ComicVineBrowseDialog(QDialog):
     def _apply(self, volume: ComicVineVolume, issue: ComicVineIssue, advance: bool = True) -> bool:
         candidate = candidate_for(volume, issue)
         try:
-            details = self._bg(fetch_issue_details, self._api_key, candidate.detail_url)
+            # Not cancellable: with Yes bound to Enter, the next Enter used to land on the busy dialog's
+            # Cancel button, which silently abandoned the answer and left the file on screen (press Yes again).
+            # The request is bounded by the 8 s network timeout, so there is nothing to wait for forever.
+            details = self._bg(fetch_issue_details, self._api_key, candidate.detail_url, cancellable=False)
         except ComicVineLookupError as exc:
             self._warn(exc)
             return False
