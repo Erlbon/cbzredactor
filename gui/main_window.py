@@ -308,6 +308,11 @@ NUMERIC_FILENAME_FIELDS = {
     "number", "count", "volume", "alternate_number", "alternate_count",
     "year", "month", "day", "community_rating",
 }
+# Rename / Export / Move only (Parse Filename could not write it back to any field): the imprint when the file has one,
+# else the publisher ("Vertigo" rather than "DC Comics").
+IMPRINT_OR_PUBLISHER_KEY = "imprint_or_publisher"
+RENAME_PLACEHOLDERS: list[tuple[str, str]] = FILENAME_PLACEHOLDERS + [(IMPRINT_OR_PUBLISHER_KEY, "Imprint, else Publisher")]
+
 DEFAULT_RENAME_PATTERN = "%series% %number% - %title%"
 
 LOAD_PROGRESS_THRESHOLD = 3
@@ -2288,10 +2293,12 @@ class MainWindow(QMainWindow):
 
     def _make_rename_dialog(self, target_books: list[CbzBook]) -> RenamePatternDialog:
         def get_values(book: CbzBook) -> dict[str, str]:
-            return {key: getattr(book.metadata, key, "") for key, _ in FILENAME_PLACEHOLDERS}
+            values = {key: getattr(book.metadata, key, "") for key, _ in FILENAME_PLACEHOLDERS}
+            values[IMPRINT_OR_PUBLISHER_KEY] = (values.get("imprint") or "").strip() or values.get("publisher", "")
+            return values
 
         dialog = RenamePatternDialog(
-            target_books, FILENAME_PLACEHOLDERS, get_values, lambda book: book.path,
+            target_books, RENAME_PLACEHOLDERS, get_values, lambda book: book.path,
             pattern_history=app_settings.load_pattern_history(),
             default_pattern=DEFAULT_RENAME_PATTERN,
             title="Rename / Export by Metadata Pattern",

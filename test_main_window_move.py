@@ -129,3 +129,20 @@ def test_plain_rename_does_not_use_the_move_runner(window, tmp_path, monkeypatch
     window.open_rename_dialog()
     assert called == [] and os.path.exists(tmp_path / "Saga 1.cbz")
     assert window.books[0].path == str(tmp_path / "Saga 1.cbz")
+
+
+def test_imprint_else_publisher_token_in_a_rename(window, tmp_path, monkeypatch):
+    with_imprint = tmp_path / "a.cbz"
+    without = tmp_path / "b.cbz"
+    for path, imprint in ((with_imprint, "<Imprint>Vertigo</Imprint>"), (without, "")):
+        with zipfile.ZipFile(path, "w") as zf:
+            zf.writestr("001.jpg", b"p")
+            zf.writestr(
+                "ComicInfo.xml",
+                f"<ComicInfo><Series>Saga</Series><Number>1</Number><Publisher>DC Comics</Publisher>{imprint}</ComicInfo>",
+            )
+    window._load_paths([str(with_imprint), str(without)])
+    _choose(monkeypatch, window.mw, "%series% (%imprint_or_publisher%)")
+    window.table.selectAll()
+    window.open_rename_dialog()
+    assert sorted(n for n in os.listdir(tmp_path) if n.endswith(".cbz")) == ["Saga (DC Comics).cbz", "Saga (Vertigo).cbz"]

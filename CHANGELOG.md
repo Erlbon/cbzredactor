@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-10-20#04 -- Rename / Export / Move: new placeholder "Imprint, else Publisher"
+
+- New placeholder `%imprint_or_publisher%` in the Rename / Export / Move pattern dialog (listed as "Imprint, else Publisher"): the Imprint when the file has one, otherwise the Publisher. "Saga (%imprint_or_publisher%)" gives "Saga (Vertigo)" for a DC file with imprint Vertigo and "Saga (DC Comics)" without one. `%publisher%` and `%imprint%` work exactly as before, so no existing pattern changes name.
+
 ## 2026-10-20#03 -- Comic Vine lookup: the fields and table work again after every request
 
 Shared part: redactor_common 2026-10-20#01 (gui/progress.py).
