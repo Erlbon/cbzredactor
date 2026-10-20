@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-10-20#02 -- Page counts in file names (16p, 22 pages) are no longer read as the issue number
+
+- Fixed: "The Grim Ghost 000 (2010) 16p (+cvr a).cbz" was read as series "The Grim Ghost 000", issue "16p". The Comic Vine browser then ranked series with 15+ issues first (the real 7-issue series is cut by the issue-count rule) and preselected "Ghost". It now reads series "The Grim Ghost", issue 0. The same goes for "22p", "22 pages", "32pgs" after the title.
+
 ## 2026-10-20#01 -- Comic Vine lookup: Yes can no longer be silently cancelled
 
 - Fixed: in the Comic Vine browse, pressing Yes sometimes seemed to freeze and the file stayed on screen until you pressed Yes again. Yes starts a request; if it is slow, a busy box with a Cancel button appears, and the next Enter (Yes is the default button) pressed Cancel on it, which dropped the answer without a word. The busy box for Yes now has no Cancel (the request times out after 8 s anyway and then says why).

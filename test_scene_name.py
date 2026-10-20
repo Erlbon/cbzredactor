@@ -157,3 +157,12 @@ def test_built_in_list_has_no_junk():
         assert phrase == scene_tags.normalize(phrase)
         assert not phrase.endswith((".cbr", ".cbz"))
         assert len(phrase) > 2
+
+
+def test_a_page_count_after_the_title_is_not_the_issue_number():
+    # "16p" was read as issue "16p" and the series as "The Grim Ghost 000": Comic Vine's issue-count
+    # rule then threw out the right 7-issue series.
+    parsed = parse_filename("The Grim Ghost 000 (2010) 16p (+cvr a) (minutemen-twiztid-t).cbz")
+    assert (parsed.series, parsed.number, parsed.year) == ("The Grim Ghost", "0", "2010")
+    for name in ("Batman 012 (2016) 22p (c2c).cbz", "Batman 012 22 pages (2016).cbz", "Batman 012 32pgs (2016).cbz"):
+        assert parse_filename(name).number == "12", name

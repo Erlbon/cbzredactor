@@ -53,6 +53,9 @@ _MONTH_YEAR_RE = re.compile(
 _OF_RE = re.compile(r"^(?:(\d+)\s*)?of\s*(\d+)$", re.IGNORECASE)
 _CHAPTER_RE = re.compile(r"^(?:chapter|chap|ch)\.?\s*0*(\d+(?:\.\d+)?)$", re.IGNORECASE)
 
+# Scene page counts after the title ("... 000 (2010) 16p (+cvr a)", "22 pages", "32pgs"); never the first word.
+_PAGE_COUNT_RE = re.compile(r"(?<=\s)\d{1,3}\s?(?:p|pp|pgs?|pages?)(?=\s|$)", re.IGNORECASE)
+
 _NUMBER = r"#?(\d+(?:\.\d+)?[a-z]?)"
 _OF_TAIL_RE = re.compile(rf"^(.*?)\s+{_NUMBER}\s*of\s*(\d+)$", re.IGNORECASE)
 _VOLUME_RE = re.compile(r"^(.*?)\s+v(?:ol(?:ume)?)?\.?\s*0*(\d+)\b\s*(.*)$", re.IGNORECASE)
@@ -172,6 +175,7 @@ def parse_filename(path: str, extra_tags: dict[str, str] | None = None) -> Parse
     positions = {int(p) for p in re.findall(r"\x00(\d+)\x00", core)}
     core_plain = re.sub(r"\s*\x00\d+\x00\s*", " ", core)
     core_plain = re.sub(r"\s+-\s*|\s*-\s+", " - ", core_plain)
+    core_plain = _PAGE_COUNT_RE.sub(" ", core_plain)  # "16p" is a page count, not issue "16p"
     core_plain = re.sub(r"\s+", " ", core_plain).strip(" -_.")
 
     _parse_core(core_plain, result)
