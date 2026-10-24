@@ -2825,6 +2825,7 @@ class MainWindow(QMainWindow):
                     live["pages_before"] += live["total"]
             finally:
                 timer.stop()
+                timer.deleteLater()                      # a child of the window until then: one more for every run
         self.statusBar().clearMessage()
 
         if errors:

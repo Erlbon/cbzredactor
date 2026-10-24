@@ -35,6 +35,7 @@ from core.collection_report import (
     FIX_DUPLICATES, FIX_MISMATCH, FIX_MOVE, FIX_RENAME, LIST_COLUMNS, Report, fix_summary, format_fix_with, report_list,
 )
 from core.collection_scan import ScanInfo
+from redactor_common.gui.owned_dialog import OwnedDialog
 
 _LAZY_ROWS = 2000  # a tab with more rows is filled when first shown; filling 100,000 rows takes seconds
 
@@ -48,7 +49,7 @@ def _cells(row: list[str]) -> list[QTableWidgetItem]:
     return items
 
 
-class CollectionReportDialog(QDialog):
+class CollectionReportDialog(OwnedDialog):
     def __init__(self, info: ScanInfo, file_count: int, report: Report, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Collection Report")

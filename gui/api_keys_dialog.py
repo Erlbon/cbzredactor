@@ -34,11 +34,12 @@ from gui import app_settings
 from redactor_common.gui.secret_prompts import save_with_fallback_prompt
 from redactor_common.gui.progress import run_busy
 from redactor_common.gui.secret_field import SecretField
+from redactor_common.gui.owned_dialog import OwnedDialog
 
 GCD_SITE_URL = "https://www.comics.org/"
 
 
-class ApiKeysDialog(QDialog):
+class ApiKeysDialog(OwnedDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("API Keys")

@@ -49,6 +49,7 @@ from PyQt6.QtWidgets import (
 
 from core.image_resize import ResizeOptions
 from core.page_dimensions import OVERSIZED_FROM
+from redactor_common.gui.owned_dialog import OwnedDialog
 
 # Named target widths (single page). "Wide" is the default -- see
 # gui/app_settings.py's _DEFAULT_RESIZE_MAX_WIDTH.
@@ -157,7 +158,7 @@ class ResizeOptionsForm(QGroupBox):
         )
 
 
-class ResizeImagesDialog(QDialog):
+class ResizeImagesDialog(OwnedDialog):
     def __init__(
         self,
         file_count: int,

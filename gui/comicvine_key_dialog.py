@@ -13,9 +13,10 @@ from PyQt6.QtWidgets import QDialog, QDialogButtonBox, QFormLayout, QLabel, QVBo
 from gui import app_settings
 from redactor_common.gui.secret_prompts import save_with_fallback_prompt
 from redactor_common.gui.secret_field import SecretField
+from redactor_common.gui.owned_dialog import OwnedDialog
 
 
-class ComicVineKeyDialog(QDialog):
+class ComicVineKeyDialog(OwnedDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Comic Vine API Key")

@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026-10-24#01 -- Dialogs no longer stay in memory after they are closed
+
+Shared part: redactor_common 2026-10-24#03 (gui/owned_dialog.py).
+- **A memory leak is fixed.** Every dialog was made with the main window as its parent, and Qt keeps a child alive as long as its parent, so each dialog that had been opened stayed in memory with all its widgets until the program closed: the worst was the Changelog window, about 8 MB for every time it was opened; a stray timer in Resize Images is freed too. Now every dialog uses the shared `OwnedDialog` base, whose `exec()` frees the dialog once control is back in the event loop, so what the code reads from it right after it closes is still there. A test fails when a new dialog class is made straight from QDialog.
+
 ## 2026-10-20#04 -- Rename / Export / Move: new placeholder "Imprint, else Publisher"
 
 - New placeholder `%imprint_or_publisher%` in the Rename / Export / Move pattern dialog (listed as "Imprint, else Publisher"): the Imprint when the file has one, otherwise the Publisher. "Saga (%imprint_or_publisher%)" gives "Saga (Vertigo)" for a DC file with imprint Vertigo and "Saga (DC Comics)" without one. `%publisher%` and `%imprint%` work exactly as before, so no existing pattern changes name.

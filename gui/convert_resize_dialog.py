@@ -29,6 +29,7 @@ from PyQt6.QtWidgets import (
 
 from core.image_resize import ResizeOptions
 from gui.resize_dialog import ResizeOptionsForm
+from redactor_common.gui.owned_dialog import OwnedDialog
 
 # Says exactly what ticking it stores (T6: it used to read "Remember my choice",
 # and a Yes silently became the lossy "Always resize" for every later conversion).
@@ -38,7 +39,7 @@ REMEMBER_TEXT = (
 )
 
 
-class ConvertResizeDialog(QDialog):
+class ConvertResizeDialog(OwnedDialog):
     def __init__(self, file_count: int, options: ResizeOptions, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Resize pages in the same step?")

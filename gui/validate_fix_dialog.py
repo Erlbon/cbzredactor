@@ -25,6 +25,7 @@ from PyQt6.QtWidgets import (
 )
 
 from redactor_common.gui.table_columns import make_columns_resizable
+from redactor_common.gui.owned_dialog import OwnedDialog
 
 FILE_COL, FIELD_COL, PROBLEM_COL, CURRENT_COL, FIX_COL = range(5)
 
@@ -33,7 +34,7 @@ def _shown(value: str) -> str:
     return "(clear)" if value == "" else value
 
 
-class ValidateFixDialog(QDialog):
+class ValidateFixDialog(OwnedDialog):
     def __init__(self, found: list, skipped_note: str = "", parent=None):
         """`found`: (book, Finding) pairs."""
         super().__init__(parent)

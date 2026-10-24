@@ -25,6 +25,7 @@ from PyQt6.QtWidgets import (
 )
 
 from core.duplicates import BookFacts, DuplicateGroup
+from redactor_common.gui.owned_dialog import OwnedDialog
 
 COVER_HEIGHT = 120
 
@@ -33,7 +34,7 @@ def _size_text(size: int) -> str:
     return f"{size / 1024 ** 2:.1f} MB" if size >= 1024 ** 2 else f"{size / 1024:.0f} KB"
 
 
-class DuplicatesDialog(QDialog):
+class DuplicatesDialog(OwnedDialog):
     def __init__(
         self,
         groups: list[DuplicateGroup],

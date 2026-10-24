@@ -36,6 +36,7 @@ from PyQt6.QtWidgets import (
 )
 
 from core.credit_pages import KnownCreditPages, PageCandidate
+from redactor_common.gui.owned_dialog import OwnedDialog
 
 THUMB_HEIGHT = 144
 
@@ -52,7 +53,7 @@ def _thumbnail_label(png: bytes, text_if_missing: str = "(no preview)") -> QLabe
     return label
 
 
-class CreditPagesDialog(QDialog):
+class CreditPagesDialog(OwnedDialog):
     """One book: tick the credit pages, then Remove. Pre-ticks pages
     matching a known credit page; hints are shown but never pre-ticked."""
 
@@ -112,7 +113,7 @@ class CreditPagesDialog(QDialog):
         return [c for c in self.candidates if self._checks[c.index].isChecked()]
 
 
-class RemoveCreditPagesDialog(QDialog):
+class RemoveCreditPagesDialog(OwnedDialog):
     """Batch review: one row per found credit page -- the book, the page,
     its thumbnail, and an Apply checkbox (ticked)."""
 
@@ -163,7 +164,7 @@ class RemoveCreditPagesDialog(QDialog):
         return [entry for entry, check in zip(self.found, self._checks) if check.isChecked()]
 
 
-class KnownCreditPagesDialog(QDialog):
+class KnownCreditPagesDialog(OwnedDialog):
     """Settings > Known Credit Pages...: what has been learned, with Forget."""
 
     def __init__(self, known: KnownCreditPages, parent=None):

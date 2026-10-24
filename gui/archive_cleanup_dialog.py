@@ -29,6 +29,7 @@ from PyQt6.QtWidgets import (
 from redactor_common.gui.table_columns import make_columns_resizable
 
 from core.archive_contents import CleanupOptions, plan_cleanup
+from redactor_common.gui.owned_dialog import OwnedDialog
 
 EXPLANATION = (
     "Tidies the names <b>inside</b> each archive. Choose below what to do; the list shows the files "
@@ -51,7 +52,7 @@ OPTION_TEXTS = (
 )
 
 
-class ArchiveCleanupDialog(QDialog):
+class ArchiveCleanupDialog(OwnedDialog):
     def __init__(self, candidates: list, options: CleanupOptions = CleanupOptions(), skipped_note: str = "",
                  parent=None):
         """`candidates`: (book, entry names) for every file that could be cleaned. The table

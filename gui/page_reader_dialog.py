@@ -23,12 +23,13 @@ from redactor_common.gui.async_preview import AsyncPreviewLoader
 from core.cbz_file import CbzBook
 from core.page_cache import LruCache
 from core.page_reader import PageNavigator
+from redactor_common.gui.owned_dialog import OwnedDialog
 
 CACHE_SIZE = 4  # decoded pages kept, so stepping back is instant
 FIT_WIDTH_TALL = 20000  # decode height limit in Fit width mode (effectively "no limit")
 
 
-class PageReaderDialog(QDialog):
+class PageReaderDialog(OwnedDialog):
     def __init__(self, book: CbzBook, parent=None):
         super().__init__(parent)
         self.setWindowFlag(Qt.WindowType.Window, True)

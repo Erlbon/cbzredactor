@@ -72,6 +72,7 @@ from core.comicvine_lookup import ComicVineLookupError, _split_words, fetch_issu
 from core.cover_hash import MATCH_THRESHOLD, cover_hash, similarity
 from core.filename_guess import guess_series_and_number, guess_year
 from gui import app_settings
+from redactor_common.gui.owned_dialog import OwnedDialog
 
 # How many of the best-ranked volumes get their cover fetched up front so
 # the "Cover match" column can be filled (and the best look-alike preselected).
@@ -104,7 +105,7 @@ def _fetch_images(urls: list[str]) -> dict[str, bytes]:
     return images
 
 
-class ComicVineBrowseDialog(QDialog):
+class ComicVineBrowseDialog(OwnedDialog):
     def __init__(self, books: list[CbzBook], parent=None):
         super().__init__(parent)
         self.setWindowTitle("Look Up via Comic Vine")
