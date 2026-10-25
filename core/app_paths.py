@@ -23,6 +23,11 @@ def base_dir() -> str:
     return str(_shared.base_dir(PROJECT_ROOT))
 
 
+def updates_json_path() -> str:
+    """Help > Check for Updates' own small settings file (redactor_common.core.selfupdate.UpdateSettings)."""
+    return os.path.join(base_dir(), f"{APP_SLUG}_updates.json")
+
+
 def asset_path(*parts: str) -> str:
     """A bundled read-only asset (icon, README) -- sys._MEIPASS when frozen."""
     return str(_shared.asset_path(os.path.join(*parts), PROJECT_ROOT))

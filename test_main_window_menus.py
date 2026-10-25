@@ -146,7 +146,19 @@ def test_conversion_settings_live_only_in_preferences():
 
 def test_help_menu_structure():
     menu = _menus(MainWindow())["Help"]
-    assert _texts(menu) == ["Changelog…", "Credits…", "---", "About The ƆBZ Redactor"]
+    assert _texts(menu) == ["Changelog…", "Credits…", "---", "Check for Updates…", "---", "About The ƆBZ Redactor"]
+
+
+def test_check_for_updates_is_wired_and_the_daily_check_is_off_by_default(monkeypatch):
+    calls = []
+    monkeypatch.setattr(mw.UpdateController, "check_now", lambda self: calls.append(self))
+    window = MainWindow()
+    action = next(a for a in _menus(window)["Help"].actions() if _plain(a.text()) == "Check for Updates…")
+    assert action.isEnabled()
+    action.trigger()
+    assert calls == [window.updates]
+    assert window.updates.repo == "Erlbon/cbzredactor" and not window.updates.settings.enabled
+    assert window.updates.start_auto_check() is False
 
 
 def test_no_top_level_collection_menu_any_more():

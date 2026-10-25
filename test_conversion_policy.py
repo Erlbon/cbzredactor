@@ -245,7 +245,8 @@ def test_the_dry_run_changes_nothing_and_a_real_run_converts(window, tmp_path, m
 
 def test_the_page_has_the_shared_widget_on_top_of_the_resize_option():
     dlg = preferences.make_dialog()
-    page = dlg._tabs.widget(dlg.page_titles().index("Conversion"))
+    index = dlg.page_titles().index("Conversion")
+    page = dlg._tabs.widget(index) if dlg._tabs is not None else dlg._stack.widget(index)  # >6 pages: a side list
     layout = page.layout()
     assert layout.itemAt(1).widget() is dlg.policy_widget
     assert "read-only rows" in dlg.policy_widget._on_open["never"].text()

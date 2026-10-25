@@ -152,6 +152,8 @@ from core.redact_steps import (
 from core.credit_pages import KnownCreditPages, credit_matches, scan_book
 from core.duplicates import BookFacts, find_duplicates, fingerprint_book
 from core.version import APP_NAME, APP_REPO_URL, APP_VERSION
+from core import app_paths
+from redactor_common.gui.update_controller import UpdateController
 from gui import app_settings
 from gui.bedetheque_lookup_dialog import BedethequeLookupDialog
 from gui.manga_lookup_dialog import MangaLookupDialog
@@ -547,9 +549,12 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(self.splitter)
 
         self.setStatusBar(QStatusBar())
+        # Help > Check for Updates and the opt-in daily check (redactor_common's gui/update_controller.py).
+        self.updates = UpdateController(self, APP_NAME, APP_VERSION, APP_REPO_URL, app_paths.updates_json_path())
         self._build_menu()
         self._build_toolbar()
         self._update_status()
+        self.updates.start_auto_check()  # nothing unless switched on in Preferences > Updates
 
     # ------------------------------------------------------------------
     # Menu
@@ -669,7 +674,8 @@ class MainWindow(QMainWindow):
             history=self.open_history_dialog,
         )
         help_items = standard_help_items(
-            APP_NAME, self.open_changelog_dialog, self.open_credits_dialog, self.open_about_dialog
+            APP_NAME, self.open_changelog_dialog, self.open_credits_dialog, self.open_about_dialog,
+            updates_slot=self.updates.check_now,
         )
         # Saving is always "all changed files" here (Save All, Ctrl+Shift+A):
         # the helper's separate selected-only Save entry is left out.

@@ -32,7 +32,9 @@ from redactor_common.core.preferences import (
     PrefSpec,
     filenames_section,
 )
+from redactor_common.core import selfupdate
 
+from core import app_paths
 from core.image_resize import DEFAULT_MAX_WIDTH
 from gui import app_settings
 
@@ -186,7 +188,7 @@ def preference_sections() -> list[PrefSection]:
             ),
         ),
     )
-    return [filenames, conversion, resize, lookups, paths, history_section]
+    return [filenames, conversion, resize, lookups, paths, history_section, selfupdate.updates_section()]
 
 
 def _history_help() -> str:
@@ -266,7 +268,9 @@ def _set(values: dict[str, object]) -> None:
 
 
 def make_backend() -> CallbackBackend:
-    return CallbackBackend(_get, _set)
+    """The app's own settings, plus the Updates page's switch, which lives in cbzredactor_updates.json."""
+    return selfupdate.with_update_settings(CallbackBackend(_get, _set),
+                                           selfupdate.UpdateSettings(app_paths.updates_json_path()))
 
 
 def make_dialog(parent=None):
