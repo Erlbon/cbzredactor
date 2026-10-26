@@ -1,0 +1,43 @@
+name: macOS build (experimental)
+
+# Unsigned .app built with PyInstaller on a macOS runner. Not part of the
+# release yet; runs on demand and on pushes to this experiment branch.
+on:
+  workflow_dispatch:
+  push:
+    branches: [claude/project-thread-07wuab]
+
+jobs:
+  macos:
+    runs-on: macos-latest
+    timeout-minutes: 30
+    env:
+      QT_QPA_PLATFORM: offscreen
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt pytest pyinstaller
+      # Qt aborts when a test creates a window on the runner (2026-10-26);
+      # do not let that block seeing whether the .app builds.
+      - name: Run tests
+        continue-on-error: true
+        run: python -m pytest -q
+      - name: Make the .icns icon
+        run: |
+          mkdir icon.iconset
+          for s in 16 32 64 128 256 512; do
+            sips -z $s $s assets/icon.png --out icon.iconset/icon_${s}x${s}.png
+          done
+          iconutil -c icns icon.iconset -o assets/icon.icns
+      - name: Build the .app
+        run: python -m PyInstaller cbzredactor-mac.spec --noconfirm
+      - name: Zip the .app
+        run: cd dist && ditto -c -k --keepParent cbzredactor.app cbzredactor-macos.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cbzredactor-macos
+          path: dist/cbzredactor-macos.zip
