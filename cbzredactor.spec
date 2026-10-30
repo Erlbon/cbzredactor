@@ -47,7 +47,9 @@ exe = EXE(
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
-    upx=True,
+    # UPX off (2026-10-30): Defender flagged the UPX-packed, unsigned release
+    # exe as Trojan:Win32/Yomal!rfn. A larger exe beats one that is quarantined.
+    upx=False,
     upx_exclude=[],
     runtime_tmpdir=None,
     console=False,  # windowed app -- no console popup
