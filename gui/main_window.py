@@ -1296,6 +1296,8 @@ class MainWindow(QMainWindow):
         # covers Refresh List and Convert to CBZ/Resize Images' "load
         # the result back in" calls, all of which route through here).
         if self._sort_key:
+            self._commit_current_edits()  # while the selected row numbers still point at the right books
+            self._selected_rows = []  # the rebuild below clears the selection (see _on_header_clicked)
             if self._sort_key == "size":
                 self._ensure_page_sizes(self.books)
             self.books.sort(
@@ -1612,13 +1614,24 @@ class MainWindow(QMainWindow):
             action.setEnabled(False)
 
     def _commit_current_edits(self) -> None:
-        """Writes the panel's current widget values back into whichever
-        book was selected *before* the selection changes -- otherwise
-        an in-progress edit is silently discarded the instant the user
-        clicks a different row. Only applies in single-selection mode;
-        a bulk edit in progress is deliberately NOT auto-committed just
-        because the selection changed -- see ComicInfoPanel's module
-        docstring on why that needs an explicit Apply instead."""
+        """Writes the panel's pending edits into whichever book(s) were
+        selected *before* the selection changes (or before a save,
+        export, sort, lookup...) -- otherwise an in-progress edit is
+        silently discarded the instant the user clicks a different row.
+        One file selected: the panel's values go into that book. Two or
+        more selected (bulk mode): the typed fields are applied to the
+        selected editable books exactly as the Apply button would (one
+        undo entry, dirty flags), without its "Nothing to Apply" box --
+        Apply is a shortcut, no longer a requirement (decided
+        2026-11-04). Never in "apply all" mode (nothing selected): that
+        would write to every loaded file without Apply's confirmation,
+        so there the typed values wait for the explicit Apply."""
+        if len(self._selected_rows) > 1:
+            if self.panel.bulk_mode and not self.panel.apply_all_mode and self.panel.bulk_changed_fields():
+                books = [self.books[row] for row in self._editable_selected_rows()]
+                if books and self._write_bulk_fields(books, all_mode=False):
+                    self.statusBar().showMessage(f"Applied pending edits to {len(books)} files", 8000)
+            return
         if len(self._selected_rows) != 1:
             return
         row = self._selected_rows[0]
@@ -1628,12 +1641,16 @@ class MainWindow(QMainWindow):
 
     def _on_fields_changed(self) -> None:
         if len(self._selected_rows) != 1:
-            return  # bulk mode: nothing applies until the explicit Apply button
+            return  # bulk mode: applied by Apply, or by _commit_current_edits when the selection changes
         row = self._selected_rows[0]
         self.books[row].dirty = True
         self._refresh_table_row(row, self.books[row])
 
     def _apply_bulk_edit(self) -> None:
+        """The Apply button: the panel's typed fields to the selected
+        files, or to every loaded file when nothing is selected (asking
+        first above APPLY_ALL_CONFIRM_ABOVE). The writing itself is
+        _write_bulk_fields, shared with _commit_current_edits."""
         if not self.panel.bulk_mode:
             return
         changed_fields = self.panel.bulk_changed_fields()
@@ -1661,10 +1678,20 @@ class MainWindow(QMainWindow):
             )
             if reply != QMessageBox.StandardButton.Yes:
                 return
+        if self._write_bulk_fields(target_books, all_mode) and all_mode:
+            self.statusBar().showMessage(f"Applied to all {len(target_books)} files")
+
+    def _write_bulk_fields(self, target_books: list[CbzBook], all_mode: bool) -> bool:
+        """Writes the panel's typed bulk fields into `target_books` (after
+        the overwrite review): one undo entry, dirty flags, rows refreshed,
+        fields cleared for another round. No questions of its own -- the
+        callers decide whether to ask. False if the user cancelled the
+        overwrite review."""
+        changed_fields = self.panel.bulk_changed_fields()
         metadata_changes = {i: dict(changed_fields) for i in range(len(target_books))}
         metadata_changes = self._resolve_overwrite_conflicts(target_books, metadata_changes)
         if metadata_changes is None:
-            return
+            return False
 
         self._push_undo("Bulk edit", target_books)
         for i, fields in metadata_changes.items():
@@ -1677,8 +1704,7 @@ class MainWindow(QMainWindow):
         self.panel.set_bulk_mode(len(target_books), all_mode=all_mode)  # clears the fields, ready for another round
         self._update_apply_bulk_edit_action()
         self._update_status()
-        if all_mode:
-            self.statusBar().showMessage(f"Applied to all {len(target_books)} files")
+        return True
 
     def _toggle_panel(self) -> None:
         self._panel_collapser.toggle()
@@ -1788,6 +1814,10 @@ class MainWindow(QMainWindow):
         key = self._column_keys[logical_index]
 
         self._commit_current_edits()
+        # Forget the old row numbers BEFORE reordering: _rebuild_table's
+        # selectionChanged runs _commit_current_edits again, which would
+        # write the panel into whichever book now sits at the old row.
+        self._selected_rows = []
         if key == self._sort_key:
             self._sort_ascending = not self._sort_ascending
         else:
@@ -1874,6 +1904,7 @@ class MainWindow(QMainWindow):
         if not self._selected_rows:
             self.statusBar().showMessage("Remove from List: select the rows to remove first.", 8000)
             return
+        self._commit_current_edits()  # a pending bulk edit counts as unsaved in the question below
         to_remove = set(self._selected_rows)
         # Unsaved edits live only in memory: removing the row loses them (as mp3redactor asks too).
         dirty = sum(1 for i, book in enumerate(self.books) if i in to_remove and book.dirty)
@@ -1892,6 +1923,7 @@ class MainWindow(QMainWindow):
         if not self.books:
             self.statusBar().showMessage("Clear List: the list is already empty.", 5000)
             return
+        self._commit_current_edits()  # a pending bulk edit counts as unsaved in the question below
         if self._count_dirty() and not self._confirm_discard("clear the entire list"):
             return
         self.books = []
@@ -2089,6 +2121,7 @@ class MainWindow(QMainWindow):
         if not self.books:
             self.statusBar().showMessage("Refresh List: nothing is loaded yet (File > Open Folder... first).", 8000)
             return
+        self._commit_current_edits()  # a pending bulk edit counts as unsaved in the question below
         if self._count_dirty() and not self._confirm_discard("refresh the list (discarding unsaved changes)"):
             return
 

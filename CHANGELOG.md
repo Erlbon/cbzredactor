@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-11-04#01 -- Bulk edits are no longer lost when you click another row
+
+- With two or more files selected, values typed into the metadata panel used to be thrown away the moment the selection changed unless you had pressed **Apply** first. Now they are applied to the files that were selected, as Apply would (one Undo entry, the files marked unsaved), and the status bar says "Applied pending edits to N files". Apply still works; it is just no longer required. Save, Remove from List, Clear List, Refresh List, sorting and the lookups apply pending bulk edits first too, so Remove/Clear/Refresh ask about them as unsaved changes.
+- With nothing selected (the panel edits every loaded file) nothing is applied automatically: that still needs **Apply**, which asks first for large lists.
+- Fixed: sorting a column with one file selected copied that file's metadata onto the file that moved into its row.
+
 ## 2026-10-30#01 -- The exe is no longer UPX-compressed
 
 - Windows Defender flagged a UPX-packed release exe of the family (epubredactor 2026-10-18#03) as `Trojan:Win32/Yomal!rfn`, a false positive that UPX-packed, unsigned programs often draw. The build no longer runs UPX (`upx=False` in the spec, `build_exe.bat` no longer puts it on PATH). The exe grows from 44.8 MB to 52.9 MB (+18%).

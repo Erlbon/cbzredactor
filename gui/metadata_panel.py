@@ -19,7 +19,10 @@ when MainWindow has more than one file selected, it puts this panel
 into bulk mode instead of loading any one file's metadata -- every
 field starts blank, and only the fields the user actually types
 something into get applied (to every selected file at once) when they
-click "Apply to N Selected Files", via bulkApplyRequested. A field
+click "Apply to N Selected Files", via bulkApplyRequested -- or, without
+the click, when the selection changes (MainWindow's
+_commit_current_edits applies them to the previous selection; not in
+"all files" mode, which waits for the explicit Apply). A field
 left blank is left untouched on every file, not cleared -- same
 "blank means don't touch" convention used throughout the sibling
 Redactor tools' own bulk-edit features.
