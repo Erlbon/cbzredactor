@@ -154,7 +154,13 @@ selection.
   the ones you actually fill in get applied -- to every selected file
   at once -- via the toolbar/Edit menu's "Apply to N Selected" action
   (Ctrl+Enter). A field left blank is left untouched on every file,
-  not cleared.
+  not cleared. Forgot to Apply? Clicking other files applies what you
+  typed to the files you were editing (one undo step, with a status-bar
+  message; the overwrite review still appears if it would replace
+  different values), and Remove from List, Clear List and Refresh List
+  count it as an unsaved change before they ask. With nothing selected
+  the panel edits every loaded file, and that mode never applies by
+  itself.
 - Sidebar shows the first page (by filename sort order) as a cover
   thumbnail (single-file selection only -- bulk mode hides it, since
   there's no one "the" cover across different files) -- **below the
