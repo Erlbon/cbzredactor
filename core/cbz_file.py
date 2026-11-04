@@ -34,6 +34,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from typing import Callable, Optional
 
+from redactor_common.core.comicinfo_write import comicinfo_rewrite_plan
 from redactor_common.core.scan_stamp import ScanStamp, make_stamp, parse_stamp
 
 from core.cbz_fingerprint import cbz_fingerprint
@@ -557,19 +558,14 @@ class CbzBook:
         # otherwise (none, or a nested one) write the spec-correct name at the
         # root. A nested source is dropped, so there are never two. A nested
         # copy beside an existing root one is not the source and is left alone.
-        old_name = self.comicinfo_name
-        write_name = old_name if old_name and "/" not in old_name else COMICINFO_NAME
-
         # The archive comment (e.g. the cover fingerprint stamp, core/cover_stamp.py)
-        # is carried over by the helper. ComicInfo.xml is rewritten last, with
-        # the updated bytes. The helper's temp file (target + ".tmp_write") is 10
-        # characters longer than the real target, so a path-too-long error can
-        # hit here even when the final, shorter path would have just fit
-        # (describe_save_error() words that case).
-        plan = RewritePlan(
-            decide=lambda entry, read: Action(drop=True) if entry.name == old_name else None,
-            after=[NewEntry(write_name, new_xml_bytes)],
-        )
+        # is carried over by the helper. ComicInfo.xml is rewritten last, deflated,
+        # with the updated bytes, and checked before the swap (redactor_common's
+        # comicinfo_rewrite_plan, the plan Dossier uses too). The helper's temp
+        # file (target + ".tmp_write") is 10 characters longer than the real
+        # target, so a path-too-long error can hit here even when the final,
+        # shorter path would have just fit (describe_save_error() words that case).
+        plan, write_name = comicinfo_rewrite_plan(self.comicinfo_name, new_xml_bytes)
         own_file = output_path is None or output_path == self.path
         new_fields = fields_text(self.metadata)
         entry_id = None

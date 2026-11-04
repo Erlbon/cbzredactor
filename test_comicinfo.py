@@ -77,7 +77,7 @@ def test_unknown_pages_element_is_preserved_on_roundtrip():
     assert metadata.title == "Has Pages"
     assert metadata.community_rating == "4.5"
     assert len(metadata.extra_elements) == 1
-    assert etree.QName(metadata.extra_elements[0]).localname == "Pages"
+    assert metadata.extra_elements[0].tag == "Pages"  # an ElementTree element (redactor_common's parser)
 
     serialized = serialize_comicinfo_xml(metadata)
     root = etree.fromstring(serialized)
@@ -138,7 +138,12 @@ def test_external_entities_are_not_resolved(tmp_path):
         f'<?xml version="1.0"?><!DOCTYPE ComicInfo [<!ENTITY x SYSTEM "{secret.as_uri()}">]>'
         "<ComicInfo><Title>&x;</Title></ComicInfo>"
     ).encode()
-    assert "TOPSECRET" not in parse_comicinfo_xml(xml).title
+    # The shared parser (expat) refuses an undefined external entity outright: never resolved.
+    try:
+        title = parse_comicinfo_xml(xml).title
+    except ComicInfoError:
+        title = ""
+    assert "TOPSECRET" not in title
 
 
 def test_non_numeric_int_field_round_trips_as_written():

@@ -1,5 +1,16 @@
 # Changelog
 
+## 2026-11-04#02 -- ComicInfo.xml and archives are written by the writer Dossier uses too
+
+Shared part: redactor_common 2026-11-04#02 (core/comicinfo_write.py, core/zip_rewrite.py, core/zip_names.py; this app's rewrite, ComicInfo lookup and legacy-name handling moved there, so cbzredactor and Dossier now write the same file the same way).
+- ComicInfo.xml is now stored deflated (it was always stored uncompressed, though the code asked for deflate) and is checked in the new archive before it replaces the old one.
+- Every rewrite (Save, Remove Pages, Clean Up, Resize) now checks the CRC of every entry in the new archive before the swap, not only the entry count.
+- ComicInfo.xml keeps the attributes of its root element (such as `xsi:noNamespaceSchemaLocation`); before, they were dropped on save.
+- Pages nobody changes are copied in chunks instead of being read whole into memory.
+- ComicInfo.xml is read with Python's own XML parser instead of lxml. A ComicInfo.xml that declares an external entity is now refused as unreadable instead of being read with the entity left out.
+- Convert to CBZ and the collection scan's report write their zip through the same shared writer.
+- New test `test_shared_writers.py`: fails if anything in the app writes a zip, ComicInfo.xml or tags outside the shared writer.
+
 ## 2026-11-04#01 -- Bulk edits are no longer lost when you click another row
 
 - With two or more files selected, values typed into the metadata panel used to be thrown away the moment the selection changed unless you had pressed **Apply** first. Now they are applied to the files that were selected, as Apply would (one Undo entry, the files marked unsaved), and the status bar says "Applied pending edits to N files". Apply still works; it is just no longer required. Save, Remove from List, Clear List, Refresh List, sorting and the lookups apply pending bulk edits first too, so Remove/Clear/Refresh ask about them as unsaved changes.

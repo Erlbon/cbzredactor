@@ -66,7 +66,7 @@ from core.cbz_file import (
     resize_zip,
 )
 from core.image_resize import ResizeOptions
-from core.zip_rewrite import CbzError
+from core.zip_rewrite import CbzError, NewEntry, write_new_archive
 
 FOREIGN_ARCHIVE_EXTENSIONS = (".cbr", ".cbt", ".cb7")
 
@@ -338,62 +338,53 @@ def _write_zip(
         PageResizer(resize, [arc for _full, arc in files if _is_image(arc)]) if resize is not None else None
     )
     pending: deque = deque()  # (arcname, finish, source size) of pages being resized, oldest first
-    done = 0
+    # Progress is source bytes: a passed-through file counts what was written, a
+    # resized page its source size (its new bytes are taken back out).
+    resized = {"in": 0, "out": 0}
 
-    def new_info(arcname: str, compress_type: Optional[int] = None) -> zipfile.ZipInfo:
-        # zf.write(full_path, arcname) would use the extracted file's own mtime --
-        # and ZIP can't represent anything before 1980, which a source archive's
-        # entries can easily be (tar in particular often defaults to the epoch,
-        # 1970, when nothing else was specified). Stamping the current time
-        # instead (what writestr() with a plain string arcname did) sidesteps that
-        # entirely; per-page timestamps aren't meaningful for a comic archive's
-        # contents anyway.
-        info = zipfile.ZipInfo(arcname, date_time=time.localtime(time.time())[:6])
-        if compress_type is None:
-            compress_type = (
-                zipfile.ZIP_STORED if os.path.splitext(arcname)[1].lower() in STORED_EXTENSIONS
-                else zipfile.ZIP_DEFLATED
-            )
-        info.compress_type = compress_type
-        info.external_attr = 0o600 << 16
-        return info
+    def compress_for(arcname: str) -> int:
+        return (
+            zipfile.ZIP_STORED if os.path.splitext(arcname)[1].lower() in STORED_EXTENSIONS
+            else zipfile.ZIP_DEFLATED
+        )
 
-    def write_resized(zf: zipfile.ZipFile) -> None:
-        nonlocal done
+    # The current time stamps every entry (date_time None): a source archive's
+    # entries can predate 1980, which ZIP can't hold (tar often defaults to the
+    # epoch), and per-page timestamps aren't meaningful for a comic anyway.
+    def finish_resized() -> NewEntry:
         arcname, finish, size = pending.popleft()
         new_name, data, compress_type = finish()
-        zf.writestr(new_info(new_name or arcname, compress_type), data)
-        done += size
-        report.report(1, done, "Resizing")
+        name = new_name or arcname
+        resized["in"] += size
+        resized["out"] += len(data)
+        return NewEntry(name, data, compress_type if compress_type is not None else compress_for(name))
+
+    def entries():
+        for full_path, arcname in files:
+            report.check()
+            size = os.path.getsize(full_path)
+            if resizer is not None and _is_image(arcname):
+                with open(full_path, "rb") as src:
+                    original = src.read()
+                pending.append((arcname, resizer.submit(arcname, original), size))
+                while len(pending) >= resizer.window:
+                    yield finish_resized()
+                    report.check()
+                continue
+            yield NewEntry(arcname, compress_type=compress_for(arcname), source_path=full_path)
+            if resizer is not None:
+                resizer.passed_through(size)
+        while pending:
+            report.check()
+            yield finish_resized()
+
+    def progress(written: int, _total: int) -> None:
+        report.report(1, written - resized["out"] + resized["in"], "Resizing" if resized["in"] else "")
 
     try:
-        with zipfile.ZipFile(tmp_output, "w", zipfile.ZIP_DEFLATED) as zf:
-            for full_path, arcname in files:
-                report.check()
-                size = os.path.getsize(full_path)
-                if resizer is not None and _is_image(arcname):
-                    with open(full_path, "rb") as src:
-                        original = src.read()
-                    pending.append((arcname, resizer.submit(arcname, original), size))
-                    while len(pending) >= resizer.window:
-                        write_resized(zf)
-                        report.check()
-                    continue
-                info = new_info(arcname)
-                with open(full_path, "rb") as src, zf.open(info, "w", force_zip64=size >= 0x3FFFFFFF) as dst:
-                    while True:
-                        report.check()
-                        chunk = src.read(_CHUNK)
-                        if not chunk:
-                            break
-                        dst.write(chunk)
-                        done += len(chunk)
-                        report.report(1, done)
-                if resizer is not None:
-                    resizer.passed_through(size)
-            while pending:
-                report.check()
-                write_resized(zf)
+        # redactor_common's write_new_archive: the one zip writer (streams each
+        # file in chunks; cancel is report.check(), raised from entries()).
+        write_new_archive(tmp_output, entries(), byte_progress=progress)
     finally:
         if resizer is not None:
             resizer.close()

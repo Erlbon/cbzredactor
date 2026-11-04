@@ -2,8 +2,7 @@
 core/comicinfo.py
 
 Pure-logic ComicInfo.xml metadata engine. No GUI, no zip handling --
-just parsing an lxml element tree into a plain dataclass and
-serializing it back, plus the field list and enum constraints from the
+just turning ComicInfo.xml into a plain dataclass and back, plus the field list and enum constraints from the
 ComicInfo schema (the Anansi Project's v2.0, the closest thing to a
 canonical reference now that ComicRack itself is no longer developed):
 https://github.com/anansi-project/comicinfo
@@ -58,6 +57,13 @@ sibling EPUB tool):
   editor for -- is kept as a verbatim clone of the original XML
   element and written back out unchanged. Round-tripping a file this
   tool doesn't fully understand must never silently drop data from it.
+
+Since 2026-11-04 the XML itself is read and written by redactor_common's
+core/comicinfo_write.py, the one ComicInfo writer the apps and Dossier share
+(standard-library ElementTree, so extra_elements are ElementTree elements):
+schema order, xsi/xsd declared, root attributes kept, empty elements dropped,
+values stripped. This module only maps the elements to the dataclass.
+test_shared_writers.py fails if ComicInfo.xml is serialized anywhere else.
 """
 
 from __future__ import annotations
@@ -65,22 +71,22 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Optional
 
-from lxml import etree
+import xml.etree.ElementTree as ET
 
-ROOT_TAG = "ComicInfo"
-XSI_NS = "http://www.w3.org/2001/XMLSchema-instance"
-XSD_NS = "http://www.w3.org/2001/XMLSchema"
+from redactor_common.core import comicinfo_write as shared
+from redactor_common.core.comicinfo_write import ComicInfoError  # noqa: F401 -- re-exported
+
+ROOT_TAG = shared.ROOT_TAG
+XSI_NS = shared.XSI_NS
+XSD_NS = shared.XSD_NS
 
 # Fixed value lists per the v2.0 schema (ComicInfo.xsd). An empty
-# string represents "unset" -- most real-world writers simply omit the
-# element rather than writing an explicit "Unknown".
-BLACK_AND_WHITE_VALUES = ["", "Unknown", "No", "Yes"]
-MANGA_VALUES = ["", "Unknown", "No", "Yes", "YesAndRightToLeft"]
-AGE_RATING_VALUES = [
-    "", "Unknown", "Adults Only 18+", "Early Childhood", "Everyone",
-    "Everyone 10+", "G", "Kids to Adults", "M", "MA15+", "Mature 17+",
-    "PG", "R18+", "Rating Pending", "Teen", "X18+",
-]
+# string represents "unset" (the GUI's dropdowns start with it) -- most
+# real-world writers simply omit the element rather than writing an
+# explicit "Unknown".
+BLACK_AND_WHITE_VALUES = ["", *shared.BLACK_AND_WHITE_VALUES]
+MANGA_VALUES = ["", *shared.MANGA_VALUES]
+AGE_RATING_VALUES = ["", *shared.AGE_RATING_VALUES]
 
 # Tag <-> dataclass-attribute mapping, and the two field groups that
 # sit either side of <Pages> in the schema's declared element order
@@ -89,23 +95,8 @@ AGE_RATING_VALUES = [
 # extra_elements handles Pages -- preserved verbatim -- but placed in
 # that same slot, since in practice unrecognized elements are newer
 # schema-draft additions that also live in that region.
-FIELD_ORDER_BEFORE_EXTRAS = [
-    "Title", "Series", "Number", "Count", "Volume",
-    "AlternateSeries", "AlternateNumber", "AlternateCount",
-    "Summary", "Notes",
-    "Year", "Month", "Day",
-    "Writer", "Penciller", "Inker", "Colorist", "Letterer",
-    "CoverArtist", "Editor", "Translator",  # Translator: v2.1 draft
-    "Publisher", "Imprint",
-    "Genre", "Tags", "Web", "PageCount", "LanguageISO", "Format",  # Tags: v2.1 draft
-    "BlackAndWhite", "Manga",
-    "Characters", "Teams", "Locations",
-    "ScanInformation", "StoryArc", "StoryArcNumber", "SeriesGroup",  # StoryArcNumber: v2.1 draft
-    "AgeRating",
-]
-FIELD_ORDER_AFTER_EXTRAS = [
-    "CommunityRating", "MainCharacterOrTeam", "Review", "GTIN",  # GTIN: v2.1 draft
-]
+FIELD_ORDER_BEFORE_EXTRAS = list(shared.FIELDS_BEFORE_EXTRAS)
+FIELD_ORDER_AFTER_EXTRAS = list(shared.FIELDS_AFTER_EXTRAS)
 FIELD_ORDER = FIELD_ORDER_BEFORE_EXTRAS + FIELD_ORDER_AFTER_EXTRAS
 
 TAG_TO_ATTR = {
@@ -137,13 +128,9 @@ ATTR_TO_TAG = {attr: tag for tag, attr in TAG_TO_ATTR.items()}
 # TAG_TO_ATTR on purpose: it isn't a field the user edits, so it must stay
 # out of columns, filename patterns and the Redact fill logic. Readers that
 # don't know the element skip it, like any other unrecognized one.
-SCAN_STAMP_TAG = "RedactorScan"
+SCAN_STAMP_TAG = shared.SCAN_STAMP_TAG
 
-INT_FIELDS = {"Count", "Volume", "AlternateCount", "Year", "Month", "Day", "PageCount"}
-
-
-class ComicInfoError(Exception):
-    """Raised for a problem parsing an existing ComicInfo.xml."""
+INT_FIELDS = set(shared.INT_FIELDS)
 
 
 @dataclass
@@ -197,7 +184,7 @@ class ComicInfoMetadata:
 
     # Verbatim clones of any child element not in TAG_TO_ATTR (most
     # notably <Pages>) -- see module docstring. Not compared by
-    # dataclass equality/repr in any meaningful way since lxml elements
+    # dataclass equality/repr in any meaningful way since ElementTree elements
     # don't define that, but that's fine: nothing in this app needs to
     # diff two ComicInfoMetadata instances by extra_elements.
     extra_elements: list = field(default_factory=list)
@@ -207,35 +194,27 @@ class ComicInfoMetadata:
     # still round-trips.
     scan_stamp: str = ""
 
+    # The root element's attributes as read (xsi:noNamespaceSchemaLocation...),
+    # written back as they were.
+    root_attributes: dict = field(default_factory=dict)
+
 
 def parse_comicinfo_xml(data: bytes) -> ComicInfoMetadata:
     """Parses ComicInfo.xml bytes into a ComicInfoMetadata. Raises
     ComicInfoError on malformed XML or an unexpected root element --
     the caller decides how to surface that (core/cbz_file.py treats it
-    as a load error for that one file, not a crash)."""
-    try:
-        root = etree.fromstring(data, parser=etree.XMLParser(remove_blank_text=False, resolve_entities=False, no_network=True))
-    except etree.XMLSyntaxError as exc:
-        raise ComicInfoError(f"Malformed ComicInfo.xml: {exc}") from exc
-
-    # Namespaces are stripped for tag comparison -- some writers
-    # declare the xsi/xsd namespaces on the root (per the original
-    # ComicRack schema) but never actually use a prefix on the field
-    # elements themselves, so a plain localname match is what's
-    # actually needed to read every real-world file correctly.
-    root_local = etree.QName(root).localname
-    if root_local != ROOT_TAG:
-        raise ComicInfoError(f"Expected root element <{ROOT_TAG}>, found <{root_local}>")
-
-    metadata = ComicInfoMetadata()
+    as a load error for that one file, not a crash). Namespaces are
+    ignored for tag comparison (some writers declare them on the root)."""
+    root = shared.parse_comicinfo(data)
+    metadata = ComicInfoMetadata(root_attributes=dict(root.attrib))
     for child in root:
-        if not isinstance(child.tag, str):
+        tag = shared.local_name(child.tag)
+        if not tag:
             continue  # skip comments/PIs
-        tag = etree.QName(child).localname
         attr = TAG_TO_ATTR.get(tag)
         if tag == SCAN_STAMP_TAG:
             metadata.scan_stamp = (child.text or "").strip()
-        elif attr:
+        elif attr and len(child) == 0:
             setattr(metadata, attr, child.text or "")
         else:
             metadata.extra_elements.append(child)
@@ -243,36 +222,19 @@ def parse_comicinfo_xml(data: bytes) -> ComicInfoMetadata:
 
 
 def serialize_comicinfo_xml(metadata: ComicInfoMetadata) -> bytes:
-    """Serializes a ComicInfoMetadata back to ComicInfo.xml bytes,
-    pretty-printed with an XML declaration -- matching the format most
-    real-world writers (and readers' own expectations) produce.
-
-    A field left as "" is omitted entirely rather than written as an
-    empty element, matching how most real-world writers represent
-    "unset" -- this also means clearing a field in the GUI and saving
-    actually removes it from the file, not just blanks its text.
-    """
-    root = etree.Element(ROOT_TAG, nsmap={"xsi": XSI_NS, "xsd": XSD_NS})
-
-    def _add_fields(tags: list[str]) -> None:
-        for tag in tags:
-            value = getattr(metadata, TAG_TO_ATTR[tag])
-            value = (value or "").strip()
-            if not value:
-                continue
-            # A non-numeric value in an int field (typically hand-edited
-            # or carried over from a malformed source file) is written
-            # as-is rather than silently dropped -- letting it round-trip
-            # is safer than guessing at a "corrected" number.
-            etree.SubElement(root, tag).text = value
-
-    _add_fields(FIELD_ORDER_BEFORE_EXTRAS)
+    """Serializes a ComicInfoMetadata back to ComicInfo.xml bytes through
+    the shared writer (see the module docstring). A field left as "" is
+    omitted entirely, so clearing a field in the GUI and saving removes
+    it from the file. A non-numeric value in an int field is written
+    as-is rather than dropped -- letting it round-trip is safer than
+    guessing at a "corrected" number."""
+    root = ET.Element(ROOT_TAG, metadata.root_attributes)
+    for tag in FIELD_ORDER:
+        value = (getattr(metadata, TAG_TO_ATTR[tag]) or "").strip()
+        if value:
+            ET.SubElement(root, tag).text = value
     for element in metadata.extra_elements:
         root.append(element)
-    _add_fields(FIELD_ORDER_AFTER_EXTRAS)
     if (metadata.scan_stamp or "").strip():
-        etree.SubElement(root, SCAN_STAMP_TAG).text = metadata.scan_stamp.strip()
-
-    return etree.tostring(
-        root, xml_declaration=True, encoding="utf-8", pretty_print=True
-    )
+        ET.SubElement(root, SCAN_STAMP_TAG).text = metadata.scan_stamp.strip()
+    return shared.serialize_comicinfo(root)

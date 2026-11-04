@@ -59,7 +59,7 @@ def test_stamp_round_trips_through_save_and_foreign_content_survives(tmp_path):
     with zipfile.ZipFile(path) as zf:
         assert zf.comment == b"someone else's comment"
         info = zf.read("ComicInfo.xml")
-    assert b"<FutureThing>keep me</FutureThing>" in info and b'<Page Image="0" Type="FrontCover"/>' in info
+    assert b"<FutureThing>keep me</FutureThing>" in info and b'<Page Image="0" Type="FrontCover" />' in info
     assert info.count(b"<RedactorScan>") == 1
 
 

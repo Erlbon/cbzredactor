@@ -53,6 +53,7 @@ from core.comicinfo import ComicInfoError, parse_comicinfo_xml
 from core.comicinfo_locate import find_comicinfo_entry
 from core.cover_stamp import make_stamp, read_stamp, write_comment
 from core.zip_names import open_zip
+from core.zip_rewrite import NewEntry, write_new_archive
 from redactor_common.core.temp_names import is_app_temp_name
 
 SCAN_FILE_NAME = "collection_scan.zip"
@@ -332,9 +333,11 @@ def write_scan(zip_path: str, info: ScanInfo, rows: list[ScanRow]) -> None:
     for row in sorted(rows, key=lambda r: r.path.casefold()):
         writer.writerow([getattr(row, c) for c in COLUMNS])
     temp = zip_path + ".tmp"
-    with zipfile.ZipFile(temp, "w", zipfile.ZIP_DEFLATED, compresslevel=9) as archive:
-        archive.writestr(CSV_NAME, "﻿" + text.getvalue())
-        archive.comment = json.dumps(asdict(info)).encode("utf-8")
+    data = ("﻿" + text.getvalue()).encode("utf-8")
+    write_new_archive(
+        temp, [NewEntry(CSV_NAME, data, zipfile.ZIP_DEFLATED, compresslevel=9)],
+        comment=json.dumps(asdict(info)).encode("utf-8"),
+    )
     os.replace(temp, zip_path)
 
 

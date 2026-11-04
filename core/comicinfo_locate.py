@@ -3,8 +3,9 @@ core/comicinfo_locate.py
 
 Which entry of a CBZ is its ComicInfo.xml -- ONE rule for everything that
 looks (the editor's load, the collection scan and its report, the scan
-fingerprint, the cleanup plan), so the report can never call a file tagged
-that the editor shows blank.
+fingerprint, the cleanup plan, and Dossier), so the report can never call a
+file tagged that the editor shows blank. The rule lives in redactor_common
+(core/comicinfo_write.locate_comicinfo, promoted from here on 2026-11-04):
 
 - A ComicInfo.xml at the archive root (any letter case: some writers use
   comicinfo.xml) always wins.
@@ -16,47 +17,9 @@ that the editor shows blank.
   was read from (CbzBook.save), so an archive never ends up with two.
 """
 
-from __future__ import annotations
-
-import posixpath
-from dataclasses import dataclass, field
-from typing import Iterable, Optional
-
-COMICINFO_NAME = "ComicInfo.xml"
-
-
-@dataclass(frozen=True)
-class ComicInfoLocation:
-    name: str  # the entry that is read
-    nested: bool  # it is not at the archive root
-    others: tuple = field(default_factory=tuple)  # further nested copies that were passed over
-
-
-def _is_candidate(name: str) -> bool:
-    """A real ComicInfo.xml entry: right file name, not a folder entry, not
-    inside macOS's __MACOSX resource-fork folder."""
-    if name.endswith("/") or posixpath.basename(name).lower() != COMICINFO_NAME.lower():
-        return False
-    lowered = name.lower()
-    return not (lowered.startswith("__macosx/") or "/__macosx/" in lowered)
-
-
-def locate_comicinfo(names: Iterable[str]) -> Optional[ComicInfoLocation]:
-    nested = []
-    for name in names:
-        if not _is_candidate(name):
-            continue
-        if "/" not in name:
-            return ComicInfoLocation(name, False)
-        nested.append(name)
-    if not nested:
-        return None
-    nested.sort(key=lambda n: (n.count("/"), n.casefold(), n))
-    return ComicInfoLocation(nested[0], True, tuple(nested[1:]))
-
-
-def find_comicinfo_entry(names: Iterable[str]) -> Optional[str]:
-    """The name of the ComicInfo.xml entry to read (see the module
-    docstring), or None."""
-    found = locate_comicinfo(names)
-    return found.name if found else None
+from redactor_common.core.comicinfo_write import (  # noqa: F401 -- re-exported
+    COMICINFO_NAME,
+    ComicInfoLocation,
+    locate_comicinfo,
+)
+from redactor_common.core.comicinfo_write import find_comicinfo_member as find_comicinfo_entry  # noqa: F401
