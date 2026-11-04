@@ -22,7 +22,7 @@ import threading
 import time
 
 from PyQt6.QtCore import QSize, Qt, QTimer
-from PyQt6.QtGui import QColor, QIcon, QImage
+from PyQt6.QtGui import QColor, QIcon, QImage, QKeySequence
 from PyQt6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
@@ -677,7 +677,7 @@ class MainWindow(QMainWindow):
             APP_NAME, self.open_changelog_dialog, self.open_credits_dialog, self.open_about_dialog,
             updates_slot=self.updates.check_now,
         )
-        # Saving is always "all changed files" here (Save All, Ctrl+Shift+A):
+        # Saving is always "all changed files" here (Save All, Ctrl+S):
         # the helper's separate selected-only Save entry is left out.
         file_items = [i for i in file_items if not (isinstance(i, MenuAction) and i.key == "save")]
         spec = StandardMenuSpec(
@@ -691,6 +691,8 @@ class MainWindow(QMainWindow):
             registry["include_subfolders"], load=app_settings.load_include_subfolders, save=app_settings.save_include_subfolders,
         )
         self.actions_ = {key: registry[key] for key in registry.keys()}
+        # Save All: Ctrl+S (the key everybody presses; owner, 2026-11-04) and Ctrl+Shift+A (family key).
+        self.actions_["save_all"].setShortcuts([QKeySequence(shortcuts.SAVE), QKeySequence(shortcuts.SAVE_ALL)])
         self._refresh_macro_actions()
         add_command_palette(self, registry)  # Ctrl+K / View > Command Palette: every menu action, searchable
         # Keys this file (and its tests) used before the skeleton renamed them.

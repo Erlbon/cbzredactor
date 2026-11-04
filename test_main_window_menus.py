@@ -313,7 +313,7 @@ def _two_cbz(tmp_path):
 
 def test_there_is_one_save_and_it_saves_all_changed_files(tmp_path, monkeypatch):
     """No selected-only Save: Save All is the only save command, on
-    Ctrl+Shift+A only (the Ctrl+S alias was dropped 2026-10-14), and saves
+    Ctrl+S and Ctrl+Shift+A (Ctrl+S for good, owner 2026-11-04), and saves
     every changed file whatever is selected."""
     from PyQt6.QtGui import QKeySequence
 
@@ -321,9 +321,10 @@ def test_there_is_one_save_and_it_saves_all_changed_files(tmp_path, monkeypatch)
     assert "save" not in window.actions_
     save_all = window.actions_["save_all"]
     portable = QKeySequence.SequenceFormat.PortableText
-    assert [s.toString(portable) for s in save_all.shortcuts()] == ["Ctrl+Shift+A"]
-    bound = {s.toString(portable) for a in window.findChildren(type(save_all)) for s in a.shortcuts()}
-    assert "Ctrl+S" not in bound
+    assert [s.toString(portable) for s in save_all.shortcuts()] == ["Ctrl+S", "Ctrl+Shift+A"]
+    on_ctrl_s = [a for a in window.findChildren(type(save_all))
+                 if "Ctrl+S" in {s.toString(portable) for s in a.shortcuts()}]
+    assert on_ctrl_s == [save_all]
 
     window._load_paths(_two_cbz(tmp_path))
     saved = []

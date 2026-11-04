@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-11-04#03 -- Ctrl+S saves again
+
+- **Ctrl+S** is Save All again, for good, and the menu shows it. Ctrl+Shift+A still works too. It was dropped on 2026-10-14 as an expiring alias, but that was never the intent: Ctrl+S is the key everybody presses to save.
+
 ## 2026-11-04#02 -- ComicInfo.xml and archives are written by the writer Dossier uses too
 
 Shared part: redactor_common 2026-11-04#02 (core/comicinfo_write.py, core/zip_rewrite.py, core/zip_names.py; this app's rewrite, ComicInfo lookup and legacy-name handling moved there, so cbzredactor and Dossier now write the same file the same way).

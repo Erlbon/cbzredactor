@@ -46,7 +46,7 @@ command is also searchable in the **Command Palette** (Ctrl+K).
 - **File**: Open Files... (Ctrl+O), Open Folder... (Ctrl+Shift+O),
   **Include Subfolders** (a tick: Open Folder and Refresh List also look
   in subfolders; both leave out the Redactor apps' own leftover temp and
-  backup files, such as a `.redact-orig.cbz` from an interrupted Redact), Save As... (Ctrl+Shift+S), Save All (Ctrl+Shift+A),
+  backup files, such as a `.redact-orig.cbz` from an interrupted Redact), Save As... (Ctrl+Shift+S), Save All (Ctrl+S or Ctrl+Shift+A),
   Rename File... (F2), Undo
   Last Rename, Rename / Export / Move... (Ctrl+E), Rename / Export / Move
   Macros (slots 1-5 on **Ctrl+Shift+1** to **Ctrl+Shift+5**), Export /
