@@ -115,6 +115,19 @@ def test_undo_restores_metadata_and_dirty_flag(window):
     assert window.actions_["undo"].isEnabled() is False
 
 
+def test_undo_keeps_more_than_five_steps(window):
+    """redactor_common 2026-11-05#01: the undo history holds 50 steps (it was 5, which typed panel edits used up fast)."""
+    book = _fake_book(series="0")
+    window.books = [book]
+    window._rebuild_table()
+    for n in range(1, 8):
+        window._push_undo(f"Edit {n}", [book])
+        book.metadata.series = str(n)
+    for _ in range(7):
+        window.undo_last_action()
+    assert book.metadata.series == "0"
+
+
 def test_undo_stack_cleared_by_remove_selected(window):
     book_a = _fake_book(title="A")
     book_b = _fake_book(title="B")

@@ -3,7 +3,7 @@
 Third-party libraries and references this project depends on or draws from:
 
 - [PyQt6](https://www.riverbankcomputing.com/software/pyqt/) -- GUI toolkit
-- [lxml](https://lxml.de/) -- XML parsing/serialization for ComicInfo.xml
+- [lxml](https://lxml.de/) -- HTML parsing for the Bedetheque lookup (ComicInfo.xml is read and written with Python's own XML parser)
 - [Pillow](https://python-pillow.org/) -- page-image decoding/resizing for Repair > Resize Images...
 - [rarfile](https://github.com/markokr/rarfile) -- optional CBR reading (Repair > Convert to CBZ)
 - [py7zr](https://github.com/miurahr/py7zr) -- optional CB7 reading (Repair > Convert to CBZ)

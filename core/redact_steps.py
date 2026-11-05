@@ -31,6 +31,12 @@ rename pattern) without the dialogs. How one file flows:
      runs finalize after every step, so the save stage performs them on
      the finished file. The live row is then reloaded from disk.
 
+A dry run (redact -n) runs only the steps marked dry_run_safe and never
+calls save_stage: the metadata steps (path, filename, lookups, validate,
+low-res tag) change only the working copy in memory, and rename / move
+only plan. Convert, clean-up, credit-page removal and resize stay out: they
+write a scratch archive beside the original (ensure_scratch / convert).
+
 A file with unsaved edits or a load error is SKIPPED by the internal
 guard step (never overwrite what is only in memory). Steps that cannot do
 their job (offline, nothing configured) answer NOTHING with a note.
@@ -379,6 +385,7 @@ class GuardStep(Step):
 
     key = "guard"
     label = "Check the file"
+    dry_run_safe = True  # only reads ctx.skip_reason
 
     def run(self, ctx: CbzCtx) -> StepResult:
         if ctx.skip_reason:
@@ -582,6 +589,7 @@ def _under_root(path: str, root: str) -> bool:
 class PathTagsStep(Step):
     key = "path_tags"
     label = "Fill empty fields from the folder path"
+    dry_run_safe = True  # parses the path, fills the working copy in memory
     description = (
         "Fills ComicInfo fields that are EMPTY from the folders the file sits in, with a path pattern such as "
         "%publisher%/%series% (%year%)/%series% %number%: the last part matches the file name, the parts before "
@@ -638,6 +646,7 @@ class PathTagsStep(Step):
 class FilenameTagsStep(Step):
     key = "filename_tags"
     label = "Fill empty fields from the filename"
+    dry_run_safe = True  # parses the name, fills the working copy in memory
     description = (
         "Fills ComicInfo fields that are EMPTY by parsing the filename with a pattern. Leave the pattern blank "
         "to use the most recent saved Rename / Parse Filename pattern that fits the name; a pattern typed here "
@@ -717,6 +726,7 @@ def _normalized_number(number: str) -> str:
 class LookupStep(Step):
     key = "lookup"
     label = "Fill empty fields from a database"
+    dry_run_safe = True  # local databases open read-only (mode=ro), Comic Vine is only asked; no cache on disk
     description = (
         "Looks the comic up by Series + Number (+ year) from ComicInfo or the filename and fills fields that "
         "are EMPTY. Sources, in order: your local GCD database and ComicRack library (when set up under "
@@ -837,6 +847,7 @@ class MangaLookupStep(Step):
         "manga library, or tick \"Only books tagged as manga\" in a mixed one."
     )
     default_enabled = False
+    dry_run_safe = True  # AniList / MangaUpdates are only asked; the client remembers answers in memory
     options = (
         OptionSpec(
             "only_manga", "Only books tagged as manga (Manga = Yes or YesAndRightToLeft)", "bool", False,
@@ -884,6 +895,7 @@ class MangaLookupStep(Step):
 class ValidateFixStep(Step):
     key = "validate_fix"
     label = "Fix ComicInfo issues"
+    dry_run_safe = True  # fixes and the scan stamp go into the working copy's metadata; record_scan only reads the archive
     description = (
         "Applies every fixable problem Repair > Validate and Fix finds: stray spaces, scene tags or an "
         "extension left in Series/Title, '#' or leading zeros in Number, an implausible Year/Month/Day cleared, "
@@ -914,6 +926,7 @@ class ValidateFixStep(Step):
 class TagLowResStep(Step):
     key = "tag_low_res"
     label = "Tag low-res scans"
+    dry_run_safe = True  # measures the pages (read), changes Tags in memory
     description = (
         f'Adds the "{LOW_RES_TAG}" tag to a book whose pages are under 1000px wide, and removes it from one '
         "that no longer is (as Repair > Tag Low-Res Scans does). Other tags are kept."
@@ -940,6 +953,7 @@ class RenameStep(Step):
     key = "rename"
     label = "Rename by pattern"
     position = "last"
+    dry_run_safe = True  # run() only PLANS the name (ctx.rename_to); save_stage renames, and a dry run never calls it
     description = (
         "Renames the saved file with a pattern, without overwriting anything; logged for File > Undo Last "
         "Rename. Leave the pattern blank to use the newest saved Rename / Export pattern without a '/'. It "
@@ -977,6 +991,7 @@ class MoveIntoFoldersStep(Step):
     label = "Move into folders"
     position = "last"
     default_enabled = False  # moves files around a library
+    dry_run_safe = True  # run() only PLANS the move (plan_moves makes no folders); save_stage moves
     description = (
         "Moves the saved (and renamed) file into a folder tree under the library root, from the Rename / Export "
         "dialog's 'Move into folders' mode. Leave the pattern blank to use the newest saved pattern that has a "

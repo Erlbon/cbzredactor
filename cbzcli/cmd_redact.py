@@ -5,6 +5,11 @@ cbzcli/cmd_redact.py
                    (convert, clean up, remove credit pages, resize, fill from the filename and path,
                    lookups, validate and fix, tag, rename, move), saved in place with each original in the
                    Recycle Bin (or moved to --trash-dir).
+  redact -n PATH   dry run: shows what a real run would change and writes nothing. Only the steps that work
+                   in memory run (fill from the path / filename, lookups, validate and fix, tag; rename and
+                   move are planned, not done); convert, clean up, credit pages and resize write a scratch
+                   copy, so they are left out and named in the report. Nothing is saved, renamed, moved or
+                   trashed, and the History is not touched.
 
 The recipe is the one saved in the app (Operations > Edit Redact Recipe) unless --recipe FILE names a
 JSON recipe; --enable / --disable / --threshold adjust it for this run only. A Comic Vine key comes from
@@ -35,7 +40,9 @@ def add_redact_parser(sub) -> None:
     parser = sub.add_parser(
         "redact", help="run the Redact recipe",
         description="Run the Redact recipe on the comics. Each file is saved in place and its original goes to the "
-                    "Recycle Bin (or --trash-dir). Guesses below the confidence threshold are listed, not applied.",
+                    "Recycle Bin (or --trash-dir). Guesses below the confidence threshold are listed, not applied. "
+                    "With -n/--dry-run nothing is written: the report lists what a real run would change "
+                    "(convert, clean up, credit pages and resize are left out of a dry run).",
     )
     parser.add_argument("paths", nargs="*", metavar="PATH", help="comic files, folders or wildcards")
     parser.add_argument("-R", "--no-recurse", action="store_true", help="for a folder, look only at the files directly in it")
@@ -64,6 +71,10 @@ def build_env(args: argparse.Namespace) -> RedactEnv:
     )
 
 
+def _refuse_in_dry_run(path: str) -> None:
+    raise RuntimeError(f"dry run: {os.path.basename(path)} was not moved to the Recycle Bin")
+
+
 def run_redact(args: argparse.Namespace, out: Output) -> int:
     env = build_env(args)
     catalogue = build_catalogue(env)
@@ -75,9 +86,14 @@ def run_redact(args: argparse.Namespace, out: Output) -> int:
         raise CliError("give the comics to redact (or --list-steps)")
 
     books = load_books(collect(args.paths, out, recurse=not args.no_recurse), out)
-    env.begin()
+    if args.dry_run:
+        # Belt and braces: save_stage (the only caller of these) never runs in a dry run, but should a step
+        # ever call them anyway, nothing is trashed and the History's entries are not moved.
+        env.on_move = None
+        env.trash = _refuse_in_dry_run
+    env.begin()  # only resets the run's "source unreachable" flags; writes nothing
     return redact_items(
         books, recipe_for_run(recipe), run_catalogue(env), make_context=lambda book: CbzCtx(book, env),
         describe=lambda book: os.path.basename(book.path), finalize=save_stage, finalize_label=FINALIZE_LABEL,
-        path_of=lambda book: book.path, out=out,
+        path_of=lambda book: book.path, out=out, dry_run=args.dry_run,
     )

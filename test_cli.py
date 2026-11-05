@@ -308,6 +308,66 @@ def test_redact_text_report_and_a_failing_file_is_exit_1(tmp_path, capsys):
     assert broken.read_bytes() == b"not a zip"
 
 
+def _snapshot(folder):
+    """Every folder and file under `folder`: relative path -> (bytes, mtime) for a file, None for a folder."""
+    seen = {}
+    for root, dirs, files in os.walk(folder):
+        for name in dirs:
+            seen[os.path.relpath(os.path.join(root, name), folder)] = None
+        for name in files:
+            path = os.path.join(root, name)
+            with open(path, "rb") as f:
+                seen[os.path.relpath(path, folder)] = (f.read(), os.stat(path).st_mtime_ns)
+    return seen
+
+
+def test_redact_dry_run_with_every_safe_step_on_writes_nothing_and_lists_the_changes(tmp_path, capsys, monkeypatch):
+    import socket
+
+    from core import redact_steps
+    from core.redact_steps import run_catalogue
+    from gui import app_settings
+    from test_manga_lookup import FakeNet, client
+    from test_redact_steps import _jpeg
+
+    # No lookup may reach the internet: no Comic Vine key, the manga sources answer from a canned net,
+    # and any real connection fails the test.
+    monkeypatch.delenv("COMICVINE_API_KEY", raising=False)
+    monkeypatch.setattr(redact_steps, "MangaClient", lambda: client(FakeNet()))
+    monkeypatch.setattr(socket.socket, "connect", lambda *a: pytest.fail("a dry run went online"))
+
+    library = tmp_path / "library"
+    (library / "Berserk").mkdir(parents=True)
+    book = _cbz(
+        library / "Berserk" / "Berserk 001.cbz",
+        comicinfo=b'<?xml version="1.0"?><ComicInfo><Number>#1</Number></ComicInfo>',
+        pages=[(f"{i:03}.jpg", _jpeg(600, 900, seed=i)) for i in range(1, 4)],
+        extra=[("Thumbs.db", b"junk")],
+    )
+    app_settings.save_library_root(str(library))
+    app_settings.save_pattern_history(["%series% %number%", "%series%/%series% %number%"])
+    trash = tmp_path / "trash"
+    before = _snapshot(library)
+
+    steps = [s.key for s in run_catalogue(None) if s.key != "guard"]
+    enable = [arg for key in steps for arg in ("--enable", key)]
+    code, document = run_json(capsys, "redact", "-n", str(library), *enable, "--trash-dir", str(trash))
+
+    assert _snapshot(library) == before  # same folders, same files, same bytes, same times
+    assert not trash.exists()
+    assert code == 0 and document["dry_run"] is True and document["failed"] == 0
+    entry = document["results"][0]
+    applied = " ".join(entry["applied"])
+    assert 'added "Low-res scan"' in applied  # tag_low_res ran
+    assert "Number: '#1'" in applied  # validate_fix ran
+    assert "from AniList + MangaUpdates" in applied  # the (canned) manga lookup ran
+    assert "rename to 'Berserk 1.cbz'" in applied  # rename planned, not done
+    assert {r["step"] for r in entry["needs_review"]} >= {"Fill empty fields from the folder path"}
+    held = " ".join(document["run_notes"])
+    for label in ("Convert", "Clean up archive contents", "credit pages", "Resize"):
+        assert label in held
+
+
 def test_redact_rejects_unknown_steps_and_thresholds(library):
     from redactor_common.cli import CliError
 

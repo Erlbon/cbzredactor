@@ -1,5 +1,14 @@
 # Changelog
 
+## 2026-11-05#01 -- `redact --dry-run`, and Undo keeps 50 steps
+
+Shared part: redactor_common 2026-11-05#01 (the engine's dry run, the 50-step undo history).
+- **`cbzredactor redact -n` / `--dry-run`** shows what a real run would change and writes nothing: no file is saved, renamed, moved or sent to the Recycle Bin, and the History is not touched. The JSON output has `"dry_run": true`.
+- In a dry run the steps that work on the comic in memory run as usual: fill from the path and the filename, the database and manga lookups, Fix ComicInfo issues, Tag low-res scans. Rename by pattern and Move into folders show the new name or folder without doing it.
+- Convert to CBZ, Clean up archive contents, Remove known credit pages and Resize images write a working copy beside the file, so a dry run leaves them out and the report names them.
+- **Undo** now keeps the last 50 changes instead of 5 (typed edits in the metadata panel each take one step, so 5 ran out fast).
+- CREDITS.md: lxml is credited for what it does now (the Bedetheque page parsing); ComicInfo.xml has used Python's own XML parser since 2026-11-04#02.
+
 ## 2026-11-04#03 -- Ctrl+S saves again
 
 - **Ctrl+S** is Save All again, for good, and the menu shows it. Ctrl+Shift+A still works too. It was dropped on 2026-10-14 as an expiring alias, but that was never the intent: Ctrl+S is the key everybody presses to save.

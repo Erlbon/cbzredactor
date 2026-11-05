@@ -149,6 +149,17 @@ def test_default_enabled_states(env):
     assert "rename" not in [s.key for s, _ in Recipe(order=[s.key for s in steps]).resolve(steps)]
 
 
+def test_which_steps_may_run_in_a_dry_run():
+    """dry_run_safe: prepare/run/apply_suggestion only read and change the working copy in memory. Rename and
+    move only PLAN (save_stage does them); the four structure steps copy the file to a scratch archive beside
+    the original (CbzCtx.ensure_scratch) or convert into one, so they stay out of a dry run."""
+    safe = {s.key for s in run_catalogue(None) if s.dry_run_safe}
+    assert safe == {
+        "guard", "path_tags", "filename_tags", "lookup", "manga_lookup", "validate_fix", "tag_low_res",
+        "rename", "move_into_folders",
+    }
+
+
 def test_rename_and_move_are_pinned_last_and_guard_first(env):
     resolved = [s.key for s, _ in _recipe(env, enable=("move_into_folders", "rename")).resolve(run_catalogue(env))]
     assert resolved[0] == "guard"

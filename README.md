@@ -633,7 +633,7 @@ records nothing either.
 | `--json` | Print one JSON document on stdout instead of text (see "JSON output"). Nothing else goes to stdout. |
 | `-q`, `--quiet` | No progress lines and no warnings on stderr (errors are still shown). |
 | `-o FILE`, `--output FILE` | Write the result (the text, or with `--json` the JSON document) to FILE instead of stdout. The file is complete when the program exits. This is the reliable way for a script to read a result. |
-| `-n`, `--dry-run` | Only on the commands that change files (`set`, `convert`, `rename`, `move`): show what would happen and change nothing. |
+| `-n`, `--dry-run` | Only on the commands that change files (`set`, `convert`, `rename`, `move`, `redact`): show what would happen and change nothing. |
 | `-h`, `--help` | Help for the program or for one command. |
 | `--version` | The version (top level only). |
 
@@ -748,16 +748,17 @@ has no name for is `skipped`. There is no undo for a move either: preview with `
 
 ### redact
 
-`cbzredactor redact [PATH...] [--recipe FILE] [--enable STEP] [--disable STEP] [--threshold N] [--trash-dir FOLDER] [--list-steps]`
+`cbzredactor redact [PATH...] [-n] [--recipe FILE] [--enable STEP] [--disable STEP] [--threshold N] [--trash-dir FOLDER] [--list-steps]`
 
 Runs the Redact recipe on the comics, the same steps as Edit > Redact: convert, clean up archive contents,
 remove credit pages, resize, fill from the path and the filename, database lookups, fix ComicInfo issues, tag
 low-res scans, rename, move into folders. Each file is saved in place and its original goes to the Recycle Bin
-(or `--trash-dir`). Guesses below the confidence threshold are listed under "needs review" and not applied. There
-is no `--dry-run`: use `info` first, and `--disable` for the steps you do not want.
+(or `--trash-dir`). Guesses below the confidence threshold are listed under "needs review" and not applied.
+Preview a run with `--dry-run`.
 
 | Option | Meaning |
 | --- | --- |
+| `-n`, `--dry-run` | Show what a real run would change and write nothing: no file is saved, renamed, moved or sent to the Recycle Bin. The steps that work on the comic in memory run as usual (fill from the path and the filename, lookups, fix ComicInfo issues, tag low-res scans; rename and move into folders show the new name or folder). `convert_to_cbz`, `clean_contents`, `remove_credit_pages` and `resize_images` write a working copy beside the file, so a dry run leaves them out and names them in the report. The lookups still ask Comic Vine, AniList and MangaUpdates. |
 | `--recipe FILE` | Use this recipe (a JSON file in the format the app stores) instead of the one saved in the app. |
 | `--enable STEP` | Turn a step on for this run (repeatable). |
 | `--disable STEP` | Turn a step off for this run (repeatable). |
@@ -785,7 +786,7 @@ for that. Exit code 1 if any file failed; files that need review are not failure
 | `convert` | `path`, `status`, `new_path`, `message` | `files`, `failed`, `dry_run` |
 | `rename` | `path`, `status`, `new_path`, `message` | `files`, `failed`, `dry_run`, `pattern` |
 | `move` | `path`, `status`, `new_path`, `message` | `files`, `failed`, `dry_run`, `root` |
-| `redact` | `file`, `path`, `status`, `applied`, `needs_review` (step, value, confidence, reason), `failures`, `notes`, `skipped`, `not_saved` | `files`, `failed`, `needs_review`, `cancelled`, `confidence_threshold`, `run_notes` |
+| `redact` | `file`, `path`, `status`, `applied`, `needs_review` (step, value, confidence, reason), `failures`, `notes`, `skipped`, `not_saved` | `files`, `failed`, `needs_review`, `cancelled`, `confidence_threshold`, `run_notes`, `dry_run` |
 | `redact --list-steps` | `step`, `label`, `enabled` | `confidence_threshold` |
 
 ### Exit codes
