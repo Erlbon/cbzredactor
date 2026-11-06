@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-11-06#03 -- build_exe.bat builds with this repo's own .venv
+
+- **`build_exe.bat` builds with this repo's own `.venv`** (made at the redactor_common pin by
+  `..\redactor-build-tools\devenv\venv_sync.py`) instead of installing the requirements into the shared Python, which
+  breaks the other Redactor apps' pins. README's run, test and build steps say the same. No change to the app.
+
 ## 2026-11-06#02 -- Comic Vine and GCD addresses are links
 
 - **Settings > API Keys** and **Comic Vine API Key...**: "comicvine.gamespot.com/api/" (where you register for a key) now opens in your browser when clicked, instead of being plain text.

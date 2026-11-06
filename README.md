@@ -846,8 +846,9 @@ could be a prompt in the window is a flag here or a skipped file in the report.
 ## Running from source
 
 ```bash
-pip install -r requirements.txt
-python main.py
+python ../redactor-build-tools/devenv/venv_sync.py .   # this repo's own .venv at the redactor_common pin (never pip
+                                                       # install -r requirements.txt into the shared Python)
+.venv\Scripts\python main.py                           # .venv/bin/python on Linux
 ```
 
 ## Linux
@@ -876,8 +877,11 @@ You need to do this step **on a Windows machine** (PyInstaller builds
 for the OS it runs on).
 
 1. Install Python 3.10+ from python.org (check "Add to PATH" during install).
-2. Copy this whole folder to the Windows machine.
-3. Double-click `build_exe.bat`, or run it from a command prompt.
+2. Copy this whole folder to the Windows machine, with
+   [redactor-build-tools](https://github.com/Erlbon/redactor-build-tools)
+   next to it.
+3. Double-click `build_exe.bat`, or run it from a command prompt. It makes
+   or refreshes this repo's own `.venv` (`venv_sync.py`) and builds with it.
 4. When it finishes, your standalone app is at `dist\cbzredactor.exe`.
 
 ## Development
@@ -892,8 +896,7 @@ path at once), column/panel-visibility
 sync, the side-panel collapse toggle, column sorting, and more:
 
 ```bash
-pip install pytest
-pytest
+.venv\Scripts\python -m pytest     # as the pre-push hook does (pytest itself comes from the shared Python)
 ```
 
 ## Releasing a new version
