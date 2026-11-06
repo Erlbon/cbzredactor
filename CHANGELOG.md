@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026-11-06#01 -- each rename macro shortcut runs its own macro
+
+Shared part: redactor_common 2026-11-06#01 (menu items no longer pass Qt's "checked" flag into their slots).
+- **File > Rename / Export / Move Macros** and **Ctrl+Shift+1..9** ran macro 1 whichever item you picked: Qt's "checked" flag (False, read as 0) took the place of the macro number. Each item now runs its own macro.
+
 ## 2026-11-05#01 -- `redact --dry-run`, and Undo keeps 50 steps
 
 Shared part: redactor_common 2026-11-05#01 (the engine's dry run, the 50-step undo history).

@@ -209,6 +209,18 @@ def test_every_action_is_connected_to_a_slot():
         assert act.receivers(act.triggered) > 0, key
 
 
+def test_each_rename_macro_item_runs_its_own_macro(monkeypatch):
+    """Ctrl+Shift+N runs macro N. PyQt6 used to pass triggered's checked=False into
+    `lambda n=slot`, so every item ran macro 1 (False == 0)."""
+    ran = []
+    monkeypatch.setattr(MainWindow, "run_rename_macro", lambda self, n: ran.append(n))
+    window = MainWindow()
+    for slot in range(mw.app_settings.RENAME_MACRO_SLOTS):
+        window.actions_[f"rename_macro_{slot + 1}"].trigger()
+    assert ran == list(range(mw.app_settings.RENAME_MACRO_SLOTS))
+    assert all(type(n) is int for n in ran)
+
+
 def _main_toolbar(window):
     return next(t for t in window.findChildren(QToolBar) if t.windowTitle() == "Main")
 

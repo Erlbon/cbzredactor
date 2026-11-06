@@ -592,7 +592,7 @@ class MainWindow(QMainWindow):
             extra_rename=[Submenu("Rename / Export / Move Macros", [
                 MenuAction(
                     f"rename_macro_{slot + 1}", f"{slot + 1}: (empty)",
-                    lambda n=slot: self.run_rename_macro(n), shortcut=f"Ctrl+Shift+{slot + 1}",
+                    lambda _checked=False, n=slot: self.run_rename_macro(n), shortcut=f"Ctrl+Shift+{slot + 1}",
                 )
                 for slot in range(app_settings.RENAME_MACRO_SLOTS)
             ])],
