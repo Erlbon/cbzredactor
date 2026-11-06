@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026-11-06#02 -- Comic Vine and GCD addresses are links
+
+- **Settings > API Keys** and **Comic Vine API Key...**: "comicvine.gamespot.com/api/" (where you register for a key) now opens in your browser when clicked, instead of being plain text.
+- **Tools > GCD Local Database...**: "see comics.org for its licence" links to comics.org too.
+
 ## 2026-11-06#01 -- each rename macro shortcut runs its own macro
 
 Shared part: redactor_common 2026-11-06#01 (menu items no longer pass Qt's "checked" flag into their slots).

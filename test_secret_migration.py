@@ -232,3 +232,18 @@ def test_startup_applies_the_remembered_fallback_answer(tmp_ini):
     app_settings.save_allow_unencrypted_fallback(False)
     app_settings.migrate_legacy_secrets()
     assert secret_store.allow_unencrypted_fallback_enabled() is False
+
+
+def test_key_dialog_web_addresses_are_links_that_open_in_the_browser(fake_keyring):
+    # Every URL shown in Help/settings text is a clickable link (Erlend, 2026-11-06).
+    from PyQt6.QtCore import Qt
+    from PyQt6.QtWidgets import QLabel
+    from gui.api_keys_dialog import COMICVINE_API_URL, ApiKeysDialog
+    from gui.comicvine_key_dialog import ComicVineKeyDialog
+    from gui.gcd_local_settings_dialog import INSTRUCTIONS
+
+    dialogs = [ApiKeysDialog(), ComicVineKeyDialog()]      # kept alive while their labels are read
+    for label in (dialogs[0].cv_intro, dialogs[1].intro):
+        assert f'<a href="{COMICVINE_API_URL}">' in label.text()
+        assert label.openExternalLinks() and label.textFormat() == Qt.TextFormat.RichText
+    assert "see <a href='https://www.comics.org/'>comics.org</a> for its licence" in INSTRUCTIONS

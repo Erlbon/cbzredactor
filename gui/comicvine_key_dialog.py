@@ -8,9 +8,11 @@ the settings file.
 
 from __future__ import annotations
 
+from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QDialog, QDialogButtonBox, QFormLayout, QLabel, QVBoxLayout
 
 from gui import app_settings
+from gui.api_keys_dialog import COMICVINE_API_URL
 from redactor_common.gui.secret_prompts import save_with_fallback_prompt
 from redactor_common.gui.secret_field import SecretField
 from redactor_common.gui.owned_dialog import OwnedDialog
@@ -22,11 +24,14 @@ class ComicVineKeyDialog(OwnedDialog):
         self.setWindowTitle("Comic Vine API Key")
         self.setMinimumWidth(440)
         outer = QVBoxLayout(self)
-        intro = QLabel(
+        self.intro = intro = QLabel(
             "Enter your Comic Vine API key (free -- register at "
-            "comicvine.gamespot.com/api/). Leave the box empty to keep the stored key."
+            f'<a href="{COMICVINE_API_URL}">comicvine.gamespot.com/api/</a>). '
+            "Leave the box empty to keep the stored key."
         )
         intro.setWordWrap(True)
+        intro.setTextFormat(Qt.TextFormat.RichText)
+        intro.setOpenExternalLinks(True)
         outer.addWidget(intro)
 
         form = QFormLayout()

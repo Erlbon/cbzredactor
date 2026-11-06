@@ -30,7 +30,7 @@ INSTRUCTIONS = (
     "named after the dump date (e.g. <code>2026-09-15.db</code>).</li>"
     "<li>Choose the unzipped <code>.db</code> file below.</li></ol>"
     "Download a newer dump now and then to pick up GCD's latest additions. The "
-    "GCD data is the work of GCD's volunteers; see comics.org for its licence."
+    "GCD data is the work of GCD's volunteers; see <a href='https://www.comics.org/'>comics.org</a> for its licence."
 )
 
 

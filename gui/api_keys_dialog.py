@@ -37,6 +37,7 @@ from redactor_common.gui.secret_field import SecretField
 from redactor_common.gui.owned_dialog import OwnedDialog
 
 GCD_SITE_URL = "https://www.comics.org/"
+COMICVINE_API_URL = "https://comicvine.gamespot.com/api/"
 
 
 class ApiKeysDialog(OwnedDialog):
@@ -49,11 +50,14 @@ class ApiKeysDialog(OwnedDialog):
         # --- Comic Vine -------------------------------------------------
         comicvine = QGroupBox("Comic Vine")
         cv_layout = QVBoxLayout(comicvine)
-        cv_intro = QLabel(
-            "Your Comic Vine API key (free -- register at comicvine.gamespot.com/api/). "
+        self.cv_intro = cv_intro = QLabel(
+            "Your Comic Vine API key (free -- register at "
+            f'<a href="{COMICVINE_API_URL}">comicvine.gamespot.com/api/</a>). '
             "Leave the box empty to keep the stored key."
         )
         cv_intro.setWordWrap(True)
+        cv_intro.setTextFormat(Qt.TextFormat.RichText)
+        cv_intro.setOpenExternalLinks(True)
         cv_layout.addWidget(cv_intro)
         cv_form = QFormLayout()
         self.key_field = SecretField(app_settings.SECRET_APP, app_settings.COMICVINE_SECRET)
