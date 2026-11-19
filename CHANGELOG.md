@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-11-19#04 -- redactor_common 2026-11-18-01
+
+- Moved to the family's newest shared code (from 2026-11-06-01), so this release is built on the same pin as its siblings. Brings the shared key store's latest fixes and the column-header menu's on/off switches. No other change to the app.
+
 ## 2026-11-19#03 -- Comic Vine lookup: green ▶, red ✕
 
 - In the Comic Vine lookup, **▶** (use this issue) is green and **✕** (close, use nothing) is red. The other buttons stay in the text colour.
