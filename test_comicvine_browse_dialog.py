@@ -54,6 +54,38 @@ def _book(tmp_path, name="Batman 002 (2017).cbz", series="Batman", number="2") -
     return CbzBook(str(path))
 
 
+def _run_now(mailbox, fn, args, on_done):
+    """start_background, but at once on this thread (the tests read the result straight after)."""
+    try:
+        result, error = fn(*args), None
+    except Exception as exc:  # noqa: BLE001
+        result, error = None, exc
+    on_done(result, error)
+
+
+class _Later:
+    """start_background that keeps each request until the test answers it with run()."""
+
+    def __init__(self):
+        self.jobs = []
+
+    def __call__(self, mailbox, fn, args, on_done):
+        self.jobs.append((fn, args, on_done))
+
+    def run(self, name=None):
+        """Answers the oldest waiting request (of function `name`, if given)."""
+        for job in self.jobs:
+            if name is None or job[0].__name__ == name:
+                self.jobs.remove(job)
+                _run_now(None, *job)
+                return
+        raise AssertionError(f"no waiting request {name}")
+
+    def run_all(self):
+        while self.jobs:
+            self.run()
+
+
 @pytest.fixture
 def net(monkeypatch):
     calls = {"search": 0, "issues": []}
@@ -75,7 +107,8 @@ def net(monkeypatch):
         return ComicVineIssueDetails(volume_name="Batman", issue_number="2", name=f"details of {detail_url}")
 
     monkeypatch.setattr("gui.app_settings.load_comicvine_api_key", lambda: "KEY")
-    monkeypatch.setattr(dlg_mod, "run_busy", lambda parent, label, fn, *a, **k: fn(*a))
+    monkeypatch.setattr(dlg_mod, "start_background", _run_now)
+    monkeypatch.setattr(dlg_mod, "SELECTION_DELAY_MS", 0)
     monkeypatch.setattr(dlg_mod, "search_volumes", search_volumes)
     monkeypatch.setattr(dlg_mod, "fetch_volume_issues", fetch_volume_issues)
     monkeypatch.setattr(dlg_mod, "download_image", download_image)
@@ -117,7 +150,7 @@ def test_choosing_a_series_lists_its_issues_in_order_with_the_files_number_selec
     dialog = ComicVineBrowseDialog([_book(tmp_path)])
     dialog.browse_btn.click()  # choose the preselected series (volume 2... which has only #1)
     assert dialog.stack.currentIndex() == STEP_ISSUES
-    assert net["issues"] == ["2"]
+    assert net["issues"][-1] == "2"  # (the best-named series was looked at first, until the covers came in)
     assert dialog._selected_issue() is None
     assert "No issue #2 in this series. It has: 1." in dialog.info_label.text()
 
@@ -193,36 +226,79 @@ def test_an_api_error_is_shown_in_a_warning_not_raised(tmp_path, net, monkeypatc
     assert dialog.volume_table.rowCount() == 0
 
 
-def test_requests_run_under_a_cancellable_busy_dialog_and_cancel_is_quiet(tmp_path, net, monkeypatch):
-    # P1: the Comic Vine calls used to run with only a wait cursor (no dialog, no Cancel).
-    shown, seen = [], []
-    monkeypatch.setattr(dlg_mod.QMessageBox, "warning", lambda *a, **k: shown.append(a[2]))
-
-    def cancelled(parent, label, fn, *a, cancellable=False, on_cancel=None, **k):
-        seen.append(cancellable)
-        return on_cancel  # what run_busy returns when Cancel was clicked
-
-    monkeypatch.setattr(dlg_mod, "run_busy", cancelled)
+def test_nothing_waits_for_comic_vine_the_dialog_says_loading(tmp_path, net, monkeypatch):
+    # 2026-11-19: every request used to run under a modal busy box with Cancel; a slow Comic Vine
+    # looked like a freeze. Now the dialog opens at once and fills in as the answers come.
+    later = _Later()
+    monkeypatch.setattr(dlg_mod, "start_background", later)
     dialog = ComicVineBrowseDialog([_book(tmp_path)])
-    assert seen and all(seen)
-    assert shown == [] and dialog.volume_table.rowCount() == 0 and net["search"] == 0
+    assert "Searching" in dialog.info_label.text() and dialog.volume_table.rowCount() == 0
+    assert not dialog.use_btn.isEnabled()
+    later.run("search_volumes")
+    assert dialog.volume_table.rowCount() == 2
+    assert "Loading the issue list" in dialog.info_label.text()
+    later.run_all()
+    assert _selected_series(dialog).volume_id == "2"  # the look-alike cover, once it arrived
+    assert "same cover" in dialog.match_label.text()
 
 
-def test_yes_cannot_be_cancelled_by_a_stray_enter_on_the_busy_dialog(tmp_path, net, monkeypatch):
+def test_a_late_answer_for_the_previous_file_is_never_shown_on_the_next(tmp_path, net, monkeypatch):
+    # The "carried over to the next file" complaint: an answer must land on the file it was asked for.
+    later = _Later()
+    monkeypatch.setattr(dlg_mod, "start_background", later)
+    books = [_book(tmp_path, "Batman 002 (2017).cbz"), _book(tmp_path, "Superman 001 (2017).cbz", series="Superman", number="1")]
+    dialog = ComicVineBrowseDialog(books)
+    dialog.skip_btn.click()  # on to Superman before Comic Vine answered the Batman search
+    assert dialog._index == 1
+    later.run("search_volumes")  # the Batman answer arrives late
+    assert dialog.volume_table.rowCount() == 0
+    assert dialog.series_edit.text() == "Superman"
+    assert not dialog.use_btn.isEnabled()  # nothing from Batman can be applied to Superman
+    assert dialog._volume_cache.get("batman")  # but it is kept for a later Batman file
+
+
+def test_yes_moves_on_at_once_and_the_last_file_waits_for_the_details(tmp_path, net, monkeypatch):
     books = [_book(tmp_path, "Batman 002 (2017).cbz"), _book(tmp_path, "Batman 003 (2017).cbz", number="3")]
     dialog = ComicVineBrowseDialog(books)
+    later = _Later()
+    monkeypatch.setattr(dlg_mod, "start_background", later)
     _select_volume(dialog, "1")
-    real = dlg_mod.run_busy
-    seen = []
-
-    def spy(parent, label, fn, *a, cancellable=False, **k):
-        seen.append((fn.__name__, cancellable))
-        return real(parent, label, fn, *a, cancellable=cancellable, **k)
-
-    monkeypatch.setattr(dlg_mod, "run_busy", spy)
     dialog.use_btn.click()
-    assert seen[0] == ("issue_details", False)  # the Yes request, first
-    assert sorted(dialog.accepted_metadata()) == [0] and dialog._index == 1
+    assert dialog._index == 1  # no waiting for the details of file 1
+    dialog.use_btn.click()  # file 2 (straight to its issue: the series is remembered)
+    assert dialog.result() != dialog.DialogCode.Accepted  # still waiting for the two answers
+    assert "Waiting for Comic Vine" in dialog.step_label.text()
+    later.run_all()
+    assert dialog.result() == dialog.DialogCode.Accepted
+    assert sorted(dialog.accepted_metadata()) == [0, 1]
+
+
+def test_a_failed_detail_fetch_is_reported_and_that_file_left_alone(tmp_path, net, monkeypatch):
+    shown = []
+    monkeypatch.setattr(dlg_mod.QMessageBox, "warning", lambda *a, **k: shown.append(a[2]))
+
+    def broken(*a, **k):
+        raise ComicVineLookupError("timed out")
+
+    monkeypatch.setattr(dlg_mod, "fetch_issue_details", broken)
+    dialog = ComicVineBrowseDialog([_book(tmp_path)])
+    _select_volume(dialog, "1")
+    dialog.use_btn.click()
+    assert dialog.result() == dialog.DialogCode.Accepted
+    assert dialog.accepted_metadata() == {}
+    assert shown and "timed out" in shown[0]
+
+
+def test_cancel_while_waiting_discards_everything(tmp_path, net, monkeypatch):
+    dialog = ComicVineBrowseDialog([_book(tmp_path)])
+    later = _Later()
+    monkeypatch.setattr(dlg_mod, "start_background", later)
+    _select_volume(dialog, "1")
+    dialog.use_btn.click()
+    dialog.cancel_btn.click()
+    later.run_all()  # the answer arrives after the window closed
+    assert dialog.result() == dialog.DialogCode.Rejected
+    assert dialog.accepted_metadata() == {}
 
 
 def test_editing_the_series_and_searching_again_shows_the_new_results(tmp_path, net):

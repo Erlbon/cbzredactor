@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-11-19#01 -- Comic Vine lookup no longer freezes or carries an answer to the next file
+
+- **No more freezing.** Every Comic Vine request (the series search, a series' issue list, each cover) used to run under a busy box with a Cancel button that blocked the window. A slow Comic Vine looked like a freeze, and you had to click Cancel to go on. Now nothing waits: the requests run in the background, the window stays usable, and "Loading..." shows where the answer will go.
+- **Nothing carries over to the next file.** The Cancel you clicked to get out of a freeze cancelled a request that belonged to the next file, and the series-step answer of the previous file could still be applied to the new one. Now an answer that arrives for a file or row no longer on screen is only kept for later, never shown or applied, and each file starts clean.
+- **Yes moves on at once.** The issue's details are fetched in the background. Stop or the last file waits for them ("Waiting for Comic Vine...") and closes by itself; Cancel still discards everything. A file whose details could not be fetched is named in a message and left alone.
+- Running down the series list with the arrow keys looks a row up only once you stop on it, so Comic Vine is not sent one request per row.
+
 ## 2026-11-06#03 -- build_exe.bat builds with this repo's own .venv
 
 - **`build_exe.bat` builds with this repo's own `.venv`** (made at the redactor_common pin by

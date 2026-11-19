@@ -69,8 +69,9 @@ def test_comicvine_browse_dialog_columns_draggable(tmp_path, monkeypatch):
     volumes = [ComicVineVolume(volume_id="1", name="Batman", start_year="2016", issue_count=140,
                                publisher="DC Comics", image_url="", detail_url="")]
     monkeypatch.setattr("gui.app_settings.load_comicvine_api_key", lambda: "KEY")
-    monkeypatch.setattr(dlg_mod, "run_busy", lambda parent, label, fn, *a, **k: fn(*a))
+    monkeypatch.setattr(dlg_mod, "start_background", lambda mailbox, fn, args, on_done: on_done(fn(*args), None))
     monkeypatch.setattr(dlg_mod, "search_volumes", lambda *a, **k: list(volumes))
+    monkeypatch.setattr(dlg_mod, "fetch_volume_issues", lambda *a, **k: [])
     dialog = dlg_mod.ComicVineBrowseDialog([_book(tmp_path)])
     assert dialog.volume_table.rowCount() == 1
     _assert_draggable(dialog.volume_table)
