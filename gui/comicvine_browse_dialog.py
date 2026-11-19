@@ -41,8 +41,8 @@ import os
 import threading
 from typing import Callable, Optional
 
-from PyQt6.QtCore import QObject, Qt, QTimer, pyqtSignal
-from PyQt6.QtGui import QColor, QPixmap
+from PyQt6.QtCore import QObject, QPointF, QSize, Qt, QTimer, pyqtSignal
+from PyQt6.QtGui import QColor, QIcon, QPainter, QPalette, QPen, QPixmap, QPolygonF
 from PyQt6.QtWidgets import (
     QAbstractItemView,
     QDialog,
@@ -55,6 +55,7 @@ from PyQt6.QtWidgets import (
     QSizePolicy,
     QSplitter,
     QStackedWidget,
+    QStyle,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
@@ -114,6 +115,44 @@ def _fetch_images(urls: list[str]) -> dict[str, bytes]:
         except ComicVineLookupError:
             pass
     return images
+
+
+ICON_SIZE = 26
+GROUP_GAP = 28
+
+
+def _media_icon(shape: str, color: QColor) -> QIcon:
+    """A player-style icon ("back", "play", "forward", "stop", "cross") drawn in `color`."""
+    size = 64  # drawn large, Qt scales it down to ICON_SIZE
+    pixmap = QPixmap(size, size)
+    pixmap.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    painter.setPen(Qt.PenStyle.NoPen)
+    painter.setBrush(color)
+
+    def triangle(x: float, width: float, pointing_right: bool) -> None:
+        tip, base = (x + width, x) if pointing_right else (x, x + width)
+        painter.drawPolygon(QPolygonF([QPointF(base, 10), QPointF(base, 54), QPointF(tip, 32)]))
+
+    if shape == "play":
+        triangle(16, 36, True)
+    elif shape == "forward":
+        triangle(6, 26, True)
+        triangle(32, 26, True)
+    elif shape == "back":
+        triangle(6, 26, False)
+        triangle(32, 26, False)
+    elif shape == "stop":
+        painter.drawRect(14, 14, 36, 36)
+    elif shape == "cross":
+        pen = QPen(color, 8)
+        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        painter.setPen(pen)
+        painter.drawLine(16, 16, 48, 48)
+        painter.drawLine(48, 16, 16, 48)
+    painter.end()
+    return QIcon(pixmap)
 
 
 class _Mailbox(QObject):
@@ -186,6 +225,7 @@ class ComicVineBrowseDialog(OwnedDialog):
         self._answers: dict[int, int] = {}  # file index -> token of its latest "Use"
         self._pending: dict[int, int] = {}  # file index -> token, issue details still on their way
         self._errors: dict[int, str] = {}
+        self._used: dict[int, str] = {}  # file index -> "Series #N" it was given with ▶ (shown when going back to it)
         self._finishing = False
         self._selecting = 0  # > 0 while the code (not the user) changes a table's selection
         self._user_moved = False  # the user picked a series row himself: covers arriving late don't move it
@@ -232,8 +272,14 @@ class ComicVineBrowseDialog(OwnedDialog):
         self.search_btn.clicked.connect(self._search_volumes)
         self.key_btn.clicked.connect(self._change_key)
 
+        step_row = QHBoxLayout()
         self.step_label = QLabel("")
-        root.addWidget(self.step_label)
+        self.step_label.setWordWrap(True)
+        step_row.addWidget(self.step_label, 1)
+        self.browse_btn = QPushButton("Show Issues of This Series")
+        self.browse_btn.setToolTip("List every issue of the selected series, to pick another one")
+        step_row.addWidget(self.browse_btn)
+        root.addLayout(step_row)
 
         splitter = QSplitter(Qt.Orientation.Horizontal)
         root.addWidget(splitter, 1)
@@ -267,30 +313,53 @@ class ComicVineBrowseDialog(OwnedDialog):
         splitter.setStretchFactor(0, 3)
         splitter.setStretchFactor(1, 2)
 
+        # Player-style controls (the user's choice, 2026-11-19): ◀◀ back, ▶ use this issue, ■ stop and keep
+        # what was used, ✕ close and use nothing, ▶▶ next file without using one.
         buttons = QHBoxLayout()
-        self.back_btn = QPushButton("◀ Back to Series")
-        self.skip_btn = QPushButton("No – Skip This File")
-        self.use_btn = QPushButton("Yes – Use This Issue")
-        self.browse_btn = QPushButton("Browse Issues ▶")
+        self.back_btn = QPushButton("◀◀")
+        self.use_btn = QPushButton("▶")
+        self.use_btn.setToolTip("Use this issue for this file and go to the next file (Enter)")
         self.use_btn.setDefault(True)
-        self.finish_btn = QPushButton("Stop – Keep Matches So Far")
-        self.cancel_btn = QPushButton("Cancel – Discard All")
-        for button in (self.back_btn, self.browse_btn):
-            buttons.addWidget(button)
+        self.skip_btn = QPushButton("▶▶")
+        self.skip_btn.setToolTip("Next file, without using a match for this one")
+        self.finish_btn = QPushButton("■")
+        self.finish_btn.setToolTip(
+            "Stop here. Files you used an issue for (▶) keep it; this file and the rest are left alone."
+        )
+        self.cancel_btn = QPushButton("✕")
+        self.cancel_btn.setToolTip("Close and use nothing, not even the files you already used an issue for.")
+        # Kept APART on purpose (user, 2026-11-19): ◀◀ on the outer left, ▶▶ on the outer right, ▶ ■ ✕ in
+        # the middle, so back, use and forward can't be hit by mistake for one another.
+        # The text triangles came out tiny next to ■, and Qt's own media icons are black on the dark theme:
+        # the shapes are drawn here, in the theme's text colour, all the same size. The glyph stays as the
+        # accessible name (what tests and screen readers read).
+        shapes = {self.back_btn: "back", self.use_btn: "play", self.finish_btn: "stop",
+                  self.cancel_btn: "cross", self.skip_btn: "forward"}
+        for button, shape in shapes.items():
+            button.setAccessibleName(button.text())
+            button.setText("")
+            button.setIcon(_media_icon(shape, button.palette().color(QPalette.ColorRole.ButtonText)))
+            button.setIconSize(QSize(ICON_SIZE, ICON_SIZE))
+            button.setMinimumSize(84, 46)
+        # One group in the middle (user, 2026-11-19): apart enough to tell and hit each one, near enough to
+        # work through a long list without moving the mouse. ■ and ✕ are rare: out of the way on the right.
         buttons.addStretch(1)
-        for button in (self.use_btn, self.skip_btn, self.finish_btn, self.cancel_btn):
-            buttons.addWidget(button)
+        buttons.addWidget(self.back_btn)
+        buttons.addSpacing(GROUP_GAP)
+        buttons.addWidget(self.use_btn)
+        buttons.addSpacing(GROUP_GAP)
+        buttons.addWidget(self.skip_btn)
+        buttons.addStretch(1)
+        buttons.addWidget(self.finish_btn)
+        buttons.addSpacing(GROUP_GAP)
+        buttons.addWidget(self.cancel_btn)
         root.addLayout(buttons)
-        self.back_btn.clicked.connect(self._back_to_series)
+        self.back_btn.clicked.connect(self._back)
         self.skip_btn.clicked.connect(self._next_book)
         self.use_btn.clicked.connect(self._use_current)
         self.browse_btn.clicked.connect(self._use_volume)
         self.finish_btn.clicked.connect(self._stop)
-        self.finish_btn.setToolTip(
-            "Stop the lookup here. Files you answered Yes to keep their metadata; this file and the rest are left alone."
-        )
         self.cancel_btn.clicked.connect(self.reject)
-        self.cancel_btn.setToolTip("Close the lookup and apply nothing, not even the files you answered Yes to.")
 
     @staticmethod
     def _reset_sort(table: QTableWidget) -> None:
@@ -472,7 +541,11 @@ class ComicVineBrowseDialog(OwnedDialog):
         self._user_moved = False
         self._selection_timer.stop()
         book = self._book
-        self.header.setText(f"File {self._index + 1} of {len(self._books)}: {os.path.basename(book.path)}")
+        used = self._used.get(self._index)
+        self.header.setText(
+            f"File {self._index + 1} of {len(self._books)}: {os.path.basename(book.path)}"
+            + (f"   (already using {used}: ▶ replaces it, ▶▶ keeps it)" if used else "")
+        )
         series, number = guess_series_and_number(book.path, book.metadata.series, book.metadata.number)
         self.series_edit.setText(series)
         self.number_edit.setText(number)
@@ -809,6 +882,16 @@ class ComicVineBrowseDialog(OwnedDialog):
         )
         self._update_buttons()
 
+    def _back(self) -> None:
+        """◀◀: from the issue list back to the series list; from the series list back to the previous file."""
+        if self._finishing:
+            return
+        if self.stack.currentIndex() == STEP_ISSUES:
+            self._back_to_series()
+        elif self._index > 0:
+            self._index -= 1
+            self._load_book()
+
     def _back_to_series(self) -> None:
         self._last_volume = None  # the remembered choice was wrong for this file
         self._last_series_key = ""
@@ -834,6 +917,7 @@ class ComicVineBrowseDialog(OwnedDialog):
         self._pending[index] = token
         self._results.pop(index, None)
         self._errors.pop(index, None)
+        self._used[index] = f"{volume.name} #{issue.number}"
         name = os.path.basename(self._book.path)
         candidate = candidate_for(volume, issue)
 
@@ -901,11 +985,13 @@ class ComicVineBrowseDialog(OwnedDialog):
     def _set_step(self, step: int) -> None:
         self.stack.setCurrentIndex(step)
         in_issues = step == STEP_ISSUES
-        self.back_btn.setVisible(in_issues)
         self.browse_btn.setVisible(not in_issues)
+        self.back_btn.setToolTip("Back to the series list" if in_issues else "Back to the previous file")
         self.step_label.setText(
-            "Choose the issue (the covers are side by side), then Yes. Back to Series changes the series." if in_issues
-            else "Is this the right issue? Yes applies it; pick another series in the list, or Browse Issues to choose a different issue."
+            "Choose the issue (the covers are side by side), then ▶ to use it. ◀◀ goes back to the series list."
+            if in_issues
+            else "Is this the right issue? ▶ uses it. Pick another series in the list, or Show Issues to choose "
+                 "a different issue. ▶▶ goes on without one."
         )
         if not in_issues:
             self.match_label.setText("")
@@ -914,6 +1000,7 @@ class ComicVineBrowseDialog(OwnedDialog):
     def _update_buttons(self) -> None:
         if self._finishing:
             return
+        self.back_btn.setEnabled(self.stack.currentIndex() == STEP_ISSUES or self._index > 0)
         if self.stack.currentIndex() == STEP_ISSUES:
             self.use_btn.setEnabled(self._selected_issue() is not None)
         else:

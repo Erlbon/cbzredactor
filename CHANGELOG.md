@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-11-19#02 -- Comic Vine lookup: player-style buttons
+
+- The lookup's buttons are now player controls, drawn as large icons: **◀◀** back, **▶** use this issue and go to the next file (also Enter), **▶▶** next file without using a match. They sit in one group in the middle, spaced apart, so a long list can be worked through without moving the mouse far. **■** (stop, keep what was used so far) and **✕** (close, use nothing) sit apart on the right.
+- **◀◀** on the series list goes back to the previous file (on the issue list it goes back to the series list, as before). A file you go back to says what it already uses: ▶ replaces it, ▶▶ keeps it.
+- "Browse Issues" is now **Show Issues of This Series**, next to the step text above the list.
+
 ## 2026-11-19#01 -- Comic Vine lookup no longer freezes or carries an answer to the next file
 
 - **No more freezing.** Every Comic Vine request (the series search, a series' issue list, each cover) used to run under a busy box with a Cancel button that blocked the window. A slow Comic Vine looked like a freeze, and you had to click Cancel to go on. Now nothing waits: the requests run in the background, the window stays usable, and "Loading..." shows where the answer will go.

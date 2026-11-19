@@ -289,6 +289,31 @@ def test_a_failed_detail_fetch_is_reported_and_that_file_left_alone(tmp_path, ne
     assert shown and "timed out" in shown[0]
 
 
+def test_back_on_the_series_list_goes_to_the_previous_file_and_says_what_it_uses(tmp_path, net):
+    books = [_book(tmp_path, "Batman 002 (2017).cbz"), _book(tmp_path, "Superman 001 (2017).cbz", series="Superman", number="1")]
+    dialog = ComicVineBrowseDialog(books)
+    assert not dialog.back_btn.isEnabled()  # nothing before the first file
+    _select_volume(dialog, "1")
+    dialog.use_btn.click()  # ▶ for Batman
+    assert dialog._index == 1 and dialog.stack.currentIndex() == STEP_SERIES
+    assert dialog.back_btn.isEnabled()
+    dialog.back_btn.click()  # ◀◀ from the series list: the previous file
+    assert dialog._index == 0
+    assert "already using Batman #2" in dialog.header.text()
+    dialog.skip_btn.click()  # ▶▶ keeps that answer
+    assert sorted(dialog.accepted_metadata()) == [0]
+
+
+def test_back_use_forward_are_one_spaced_group_and_stop_cancel_sit_apart(tmp_path, net):
+    dialog = ComicVineBrowseDialog([_book(tmp_path)])
+    layout = dialog.layout().itemAt(dialog.layout().count() - 1).layout()
+    items = [layout.itemAt(i) for i in range(layout.count())]
+    names = [it.widget().accessibleName() if it.widget() else ("gap" if it.spacerItem().sizeHint().width() else "stretch")
+             for it in items]
+    assert names == ["stretch", "◀◀", "gap", "▶", "gap", "▶▶", "stretch", "■", "gap", "✕"]
+    assert all(not dialog.use_btn.icon().isNull() for _ in [0]) and dialog.use_btn.text() == ""
+
+
 def test_cancel_while_waiting_discards_everything(tmp_path, net, monkeypatch):
     dialog = ComicVineBrowseDialog([_book(tmp_path)])
     later = _Later()
