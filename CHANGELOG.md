@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-11-19#03 -- Comic Vine lookup: green ▶, red ✕
+
+- In the Comic Vine lookup, **▶** (use this issue) is green and **✕** (close, use nothing) is red. The other buttons stay in the text colour.
+
 ## 2026-11-19#02 -- Comic Vine lookup: player-style buttons
 
 - The lookup's buttons are now player controls, drawn as large icons: **◀◀** back, **▶** use this issue and go to the next file (also Enter), **▶▶** next file without using a match. They sit in one group in the middle, spaced apart, so a long list can be worked through without moving the mouse far. **■** (stop, keep what was used so far) and **✕** (close, use nothing) sit apart on the right.

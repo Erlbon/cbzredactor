@@ -311,7 +311,19 @@ def test_back_use_forward_are_one_spaced_group_and_stop_cancel_sit_apart(tmp_pat
     names = [it.widget().accessibleName() if it.widget() else ("gap" if it.spacerItem().sizeHint().width() else "stretch")
              for it in items]
     assert names == ["stretch", "◀◀", "gap", "▶", "gap", "▶▶", "stretch", "■", "gap", "✕"]
-    assert all(not dialog.use_btn.icon().isNull() for _ in [0]) and dialog.use_btn.text() == ""
+    assert not dialog.use_btn.icon().isNull() and dialog.use_btn.text() == ""
+
+
+def test_only_use_and_cancel_are_coloured(tmp_path, net):
+    def centre_colour(button):
+        image = button.icon().pixmap(64, 64).toImage()
+        return image.pixelColor(image.width() // 2, image.height() // 2).name()
+
+    dialog = ComicVineBrowseDialog([_book(tmp_path)])
+    assert centre_colour(dialog.use_btn) == dlg_mod.USE_COLOUR.name()
+    assert centre_colour(dialog.cancel_btn) == dlg_mod.DISCARD_COLOUR.name()
+    text = dialog.finish_btn.palette().color(dialog.finish_btn.palette().ColorRole.ButtonText).name()
+    assert centre_colour(dialog.finish_btn) == text
 
 
 def test_cancel_while_waiting_discards_everything(tmp_path, net, monkeypatch):

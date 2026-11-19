@@ -119,6 +119,8 @@ def _fetch_images(urls: list[str]) -> dict[str, bytes]:
 
 ICON_SIZE = 26
 GROUP_GAP = 28
+USE_COLOUR = QColor(60, 175, 90)  # readable on both the light and the dark theme
+DISCARD_COLOUR = QColor(215, 70, 60)
 
 
 def _media_icon(shape: str, color: QColor) -> QIcon:
@@ -335,10 +337,14 @@ class ComicVineBrowseDialog(OwnedDialog):
         # accessible name (what tests and screen readers read).
         shapes = {self.back_btn: "back", self.use_btn: "play", self.finish_btn: "stop",
                   self.cancel_btn: "cross", self.skip_btn: "forward"}
+        # Colour on two only (user's choice, 2026-11-19): ▶ green, the one pressed most; ✕ red, the one
+        # that throws work away. The rest in the text colour. A disabled ▶ is greyed by Qt as usual.
+        colours = {self.use_btn: USE_COLOUR, self.cancel_btn: DISCARD_COLOUR}
         for button, shape in shapes.items():
             button.setAccessibleName(button.text())
             button.setText("")
-            button.setIcon(_media_icon(shape, button.palette().color(QPalette.ColorRole.ButtonText)))
+            colour = colours.get(button, button.palette().color(QPalette.ColorRole.ButtonText))
+            button.setIcon(_media_icon(shape, colour))
             button.setIconSize(QSize(ICON_SIZE, ICON_SIZE))
             button.setMinimumSize(84, 46)
         # One group in the middle (user, 2026-11-19): apart enough to tell and hit each one, near enough to
