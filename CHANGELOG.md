@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-11-21#02 -- redactor_common 2026-11-21-02
+
+- Moved to the family's newest shared code (from 2026-11-18-01), so this app is on the same pin as its siblings. What it brings: the shared notes and folder-cover code also reads and writes folders whose names end in a dot. No other change to the app.
+
 ## 2026-11-21#01 -- Move to Folder
 
 - **Right-click one or more files > Move to Folder…** (also File > Move to Folder…, Ctrl+Shift+M) moves them, names unchanged, into a folder you pick. No pattern and no renamer needed. The folder dialog starts where you moved files last time.
