@@ -42,6 +42,8 @@ BOOKS = [
         Penciller="Tony Daniel", Colorist="Tomeu Morey", Editor="Jamie S. Rich, Brittany Holzherr",
         Genre="Superhero, Action", LanguageISO="EN", Teams="Justice League",
         Notes="Scraped metadata from ComicVine [CVDB654321].",
+        Imprint="DC Black Label", StoryArc="The Gift", AlternateSeries="Batman", AlternateNumber="846",
+        Count="163", SeriesGroup="Batman Family", Format="Main Series", BlackAndWhite="No",
     ),
     # Batman (1940) is another series: same name, other Volume.
     _book("c1", Series="Batman", Number="45", Volume="1940", Publisher="DC Comics", Year="1948", Month="2"),
@@ -113,6 +115,11 @@ def test_best_tagged_copy_wins_and_details_read_like_gcd(library):
     assert details["genre"] == "Superhero, Action"
     assert details["language_iso"] == "en"
     assert details.get("web", "") == ""  # ComicRack had no Web link for it: never a made-up comics.org one
+    # The user's own ComicRack values come back (they used to be stored but never read).
+    assert details["teams"] == "Justice League" and details["story_arc"] == "The Gift"
+    assert details["imprint"] == "DC Black Label" and details["series_group"] == "Batman Family"
+    assert (details["alternate_series"], details["alternate_number"]) == ("Batman", "846")
+    assert details["count"] == "163" and details["format"] == "Main Series" and details["black_and_white"] == "No"
     copies, cv_issue = sqlite3.connect(dest).execute(
         "select copies, comicvine_issue_id from cr_issue where issue_id = ?", (found[0].issue_id,)
     ).fetchone()

@@ -194,10 +194,39 @@ def test_multi_annotation_and_translation_credits_stripped():
     details = fetch_issue_details(
         "https://comics.org/api/issue/999/?format=json", fetch=_fetch_returning(TRANSLATED_ISSUE_RESPONSE)
     )
-    assert details.writer == "J. Michael Straczynski, Jotapê Martins"
+    # "Jotapê Martins (tradução)" is the translator, not a second writer (it used to land in Writer).
+    assert details.writer == "J. Michael Straczynski"
+    assert details.translator == "Jotapê Martins"
     assert details.editor == "Will Dennis"  # "(credited) (editor original)" both stripped
     assert details.month == "5"
     assert details.day == ""  # "00" day -- unknown
+
+
+def test_issue_details_fill_cover_artist_gtin_imprint_and_legacy_number():
+    data = dict(ISSUE_DETAIL_RESPONSE, number="1 (707)", isbn="", barcode="76194120401700111",
+                brand_emblem="DC; Vertigo", indicia_publisher="DC Comics")
+    details = fetch_issue_details("https://comics.org/api/issue/1/?format=json", fetch=_fetch_returning(data))
+    fields = details.as_dict()
+    assert (fields["number"], fields["alternate_number"]) == ("1", "707")
+    assert fields["cover_artist"] == "Dave Gibbons"  # the "cover" story's pencils
+    assert fields["gtin"] == "761941204017"  # the UPC, its 5-digit add-on dropped
+    assert fields["imprint"] == "Vertigo"  # "DC" is only the publisher itself
+
+
+def test_imprint_from_brands_drops_the_publisher_and_anniversary_emblems():
+    from core.gcd_lookup import imprint_from_brands
+
+    assert imprint_from_brands(["DC [bullet]"], ["DC Comics Inc."]) == ""
+    assert imprint_from_brands(["Marvel Knights"], ["Marvel Comics"]) == "Marvel Knights"
+    assert imprint_from_brands(["20 1992-2012 Image"], ["Image Comics Inc."]) == ""
+    assert imprint_from_brands(["Icon"], ["Marvel Comics"]) == "Icon"
+
+
+def test_gtin_prefers_the_isbn():
+    from core.gcd_lookup import gtin_from
+
+    assert gtin_from("978-1-4012-4525-2", "9781401245252 51999") == "9781401245252"
+    assert gtin_from("", "") == ""
 
 
 def test_as_dict_omits_empty_fields():

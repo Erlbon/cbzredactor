@@ -59,6 +59,7 @@ ANILIST_INTERVAL_SECONDS = 2.0
 MANGAUPDATES_INTERVAL_SECONDS = 0.5
 RESULTS_PER_SOURCE = 6
 MAX_TAGS = 8
+MAX_CHARACTERS = 10  # main characters first (the query sorts by ROLE), then supporting ones
 MIN_TAG_RANK = 60  # AniList ranks a tag 1-100 by how many voters agree
 PAIR_MIN_SIMILARITY = 0.88
 EXACT_PAIRED_CONFIDENCE = 0.95
@@ -83,6 +84,7 @@ query ($search: String, $perPage: Int) {
       tags { name rank isGeneralSpoiler isMediaSpoiler }
       coverImage { extraLarge large }
       staff(sort: RELEVANCE, perPage: 10) { edges { role node { name { full } } } }
+      characters(sort: [ROLE, RELEVANCE], perPage: 10) { edges { role node { name { full } } } }
     }
   }
 }
@@ -184,6 +186,7 @@ class AniListSeries:
     cover_url: str = ""
     writers: list[str] = field(default_factory=list)
     artists: list[str] = field(default_factory=list)
+    characters: list[str] = field(default_factory=list)  # main characters first
 
     @property
     def title(self) -> str:
@@ -242,6 +245,11 @@ def _anilist_series(media: dict) -> AniListSeries | None:
         and not _dict(tag).get("isGeneralSpoiler") and not _dict(tag).get("isMediaSpoiler")
     ]
     cover = _dict(media.get("coverImage"))
+    characters: list[str] = []
+    for edge in _list(_dict(media.get("characters")).get("edges")):
+        name = " ".join(_text(_dict(_dict(_dict(edge).get("node")).get("name")).get("full")).split())
+        if name:
+            characters.append(name)
     return AniListSeries(
         series_id=_text(media.get("id")), url=_text(media.get("siteUrl")), titles=titles, english=english,
         romaji=romaji, year=_text(start.get("year")), month=_text(start.get("month")), day=_text(start.get("day")),
@@ -251,6 +259,7 @@ def _anilist_series(media: dict) -> AniListSeries | None:
         genres=[g for g in map(_text, _list(media.get("genres"))) if g],
         tags=[t for t in tags if t][:MAX_TAGS], cover_url=_text(cover.get("extraLarge")) or _text(cover.get("large")),
         writers=list(dict.fromkeys(writers)), artists=list(dict.fromkeys(artists)),
+        characters=list(dict.fromkeys(characters))[:MAX_CHARACTERS],
     )
 
 
@@ -378,6 +387,7 @@ def build_details(match: MangaMatch) -> MangaDetails:
     genres = list(dict.fromkeys((ani.genres if ani else []) + (mu.genres if mu else [])))
     put("genre", ", ".join(genres))
     put("tags", ", ".join(ani.tags if ani else []))
+    put("characters", ", ".join(ani.characters if ani else []))
     put("web", (ani.url if ani else "") or (mu.url if mu else ""))
     japanese = (ani.country == "JP") if ani and ani.country else bool(mu and mu.kind.casefold() == "manga")
     if japanese:

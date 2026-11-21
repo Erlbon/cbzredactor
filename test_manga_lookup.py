@@ -31,6 +31,13 @@ ANILIST_BERSERK = {
         {"role": "Translator (Portuguese)", "node": {"name": {"full": "Drik Sada"}}},
         {"role": "Assistant", "node": {"name": {"full": "Some Assistant"}}},
     ]},
+    # shape captured live from AniList (Media.characters(sort: [ROLE, RELEVANCE], perPage: 10)), 2026-11-21
+    "characters": {"edges": [
+        {"role": "MAIN", "node": {"name": {"full": "Guts"}}},
+        {"role": "MAIN", "node": {"name": {"full": "Casca"}}},
+        {"role": "MAIN", "node": {"name": {"full": "Griffith"}}},
+        {"role": "SUPPORTING", "node": {"name": {"full": "Judeau"}}},
+    ]},
 }
 ANILIST_OTHER = dict(
     ANILIST_BERSERK, id=2, siteUrl="https://anilist.co/manga/2", title={"romaji": "Berserk of Gluttony", "english": None, "native": "x"},
@@ -116,6 +123,27 @@ def test_an_anilist_series_has_the_credits_tags_and_dates_in_order():
     assert series.tags == ["Tragedy", "Seinen"]  # ranked, no spoilers, nothing weak
     assert series.description == "His name is Guts.\n\n(Source: Dark Horse)"
     assert series.cover_url == "https://img.anilist.co/berserk.jpg"
+
+
+def test_anilist_characters_come_main_first_capped_and_without_blanks_or_repeats():
+    assert "characters(sort: [ROLE, RELEVANCE]" in ml._ANILIST_QUERY
+    assert ml._anilist_series(ANILIST_BERSERK).characters == ["Guts", "Casca", "Griffith", "Judeau"]
+    many = {"edges": [{"role": "MAIN", "node": {"name": {"full": f"Hero {i}"}}} for i in range(15)]}
+    messy = {"edges": [
+        {"node": {"name": {"full": "Fate  Graphite"}}}, {"node": {"name": {"full": "Fate Graphite"}}},
+        {"node": {"name": {"full": None}}}, None, {"node": None},
+    ]}
+    assert len(ml._anilist_series(dict(ANILIST_BERSERK, characters=many)).characters) == ml.MAX_CHARACTERS
+    assert ml._anilist_series(dict(ANILIST_BERSERK, characters=messy)).characters == ["Fate Graphite"]
+    assert ml._anilist_series(dict(ANILIST_BERSERK, characters=None)).characters == []
+
+
+def test_details_carry_the_characters_as_a_comma_list():
+    fields = client(FakeNet()).details(client(FakeNet()).search("Berserk")[0]).as_dict()
+    assert fields["characters"] == "Guts, Casca, Griffith, Judeau"
+    bare = dict(ANILIST_BERSERK, characters={"edges": []})
+    net = FakeNet(anilist={"data": {"Page": {"media": [bare]}}})
+    assert "characters" not in client(net).details(client(net).search("Berserk")[0]).as_dict()
 
 
 def test_a_mangaupdates_detail_adds_publishers_credits_and_a_finished_series_count():

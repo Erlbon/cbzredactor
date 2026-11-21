@@ -192,6 +192,54 @@ def test_fetch_issue_details_does_not_blend_the_two_editions():
     assert details.year == "2000"  # not 2002 (the second Identifiant block's own Depot legal)
 
 
+def _page_with(info_lis: str, head: str = "") -> bytes:
+    return (
+        f'<html><head>{head}</head><body><h1>Blacksad</h1><ul class="infos">'
+        f"<li>Identifiant : 15161</li>{info_lis}</ul></body></html>"
+    ).encode()
+
+
+_URL = "https://www.bedetheque.com/BD-Blacksad-Tome-1-Quelque-part-entre-les-ombres-15161.html"
+
+
+def test_gtin_is_the_digits_of_the_ean_isbn_entry():
+    for shown in ("978-2-205-04777-3", "9782205047773", "978 2 205 04777 3"):
+        page = _page_with(f"<li>EAN/ISBN : {shown}</li>")
+        details = fetch_issue_details(_URL, fetch=lambda url, page=page: page)
+        assert details.gtin == "9782205047773" and details.as_dict()["gtin"] == "9782205047773"
+
+
+def test_gtin_comes_from_the_matching_edition_and_is_left_out_when_missing_or_not_a_code():
+    two = (
+        b'<html><body><h1>Blacksad</h1>'
+        b'<ul class="infos"><li>Identifiant : 15161</li><li>EAN/ISBN : 9782205047773</li></ul>'
+        b'<ul class="infos"><li>Identifiant : 391756</li><li>EAN/ISBN : 9782205050000</li></ul></body></html>'
+    )
+    assert fetch_issue_details(_URL, fetch=lambda url: two).gtin == "9782205047773"
+    for page in (_page_with(""), _page_with("<li>EAN/ISBN : </li>"), _page_with("<li>EAN/ISBN : n/a</li>")):
+        details = fetch_issue_details(_URL, fetch=lambda url, page=page: page)
+        assert details.gtin == "" and "gtin" not in details.as_dict()
+
+
+def test_community_rating_is_the_ratingvalue_with_one_decimal():
+    for markup, expected in (
+        ('<span itemprop="ratingValue">4.2</span>', "4.2"),
+        ('<span itemprop="ratingValue">4,25</span>', "4.2"),
+        ('<meta itemprop="ratingValue" content="3.9">', "3.9"),
+        ('<span itemprop="ratingValue">5</span>', "5.0"),
+    ):
+        page = _page_with("", head="").replace(b"</body>", markup.encode() + b"</body>")
+        details = fetch_issue_details(_URL, fetch=lambda url, page=page: page)
+        assert details.community_rating == expected and details.as_dict()["community_rating"] == expected
+
+
+def test_community_rating_is_left_out_when_absent_or_unusable():
+    for markup in ("", '<span itemprop="ratingValue">n/a</span>', '<span itemprop="ratingValue">47</span>'):
+        page = _page_with("").replace(b"</body>", markup.encode() + b"</body>")
+        details = fetch_issue_details(_URL, fetch=lambda url, page=page: page)
+        assert details.community_rating == "" and "community_rating" not in details.as_dict()
+
+
 def test_download_cover_image_requires_a_url():
     from core.bedetheque_lookup import BedethequeIssueDetails
 

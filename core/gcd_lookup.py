@@ -135,6 +135,26 @@ class GcdIssueDetails:
     language_iso: str = ""  # only the local dump has this (core/gcd_local.py)
     # ComicInfo's Volume, the ComicRack / Comic Vine way: the year the SERIES began ("1986"), not a volume number.
     volume: str = ""
+    # GCD writes a legacy number after the series' own: "1 (707)" -> issue_number "1", alternate_number "707".
+    alternate_number: str = ""
+    cover_artist: str = ""  # the cover "story"'s artist (GCD keeps the cover as its own story, type "cover")
+    translator: str = ""  # script credits GCD marks "(translation)", "oversetter", "Übersetzung"...: never the Writer
+    gtin: str = ""  # the ISBN, else the barcode, digits only (a barcode's 2/5-digit add-on dropped)
+    imprint: str = ""  # GCD's brand (Vertigo, Marvel Knights, Icon), unless that is just the publisher itself
+    black_and_white: str = ""  # "Yes" / "No" from the series' colour note (local dump only)
+    # Only the ComicRack Library (core/comicrack_import.py's cr_issue) carries these: the user's own values.
+    alternate_series: str = ""
+    alternate_count: str = ""
+    count: str = ""
+    teams: str = ""
+    locations: str = ""
+    story_arc: str = ""
+    format: str = ""
+    age_rating: str = ""
+    manga: str = ""
+    series_group: str = ""
+    main_character_or_team: str = ""
+    tags: str = ""
 
     def as_dict(self) -> dict:
         """Only the fields that actually came back, keyed to match
@@ -143,6 +163,24 @@ class GcdIssueDetails:
             "series": self.series_name,
             "volume": self.volume,
             "number": self.issue_number,
+            "alternate_series": self.alternate_series,
+            "alternate_number": self.alternate_number,
+            "alternate_count": self.alternate_count,
+            "count": self.count,
+            "cover_artist": self.cover_artist,
+            "translator": self.translator,
+            "gtin": self.gtin,
+            "imprint": self.imprint,
+            "black_and_white": self.black_and_white,
+            "teams": self.teams,
+            "locations": self.locations,
+            "story_arc": self.story_arc,
+            "format": self.format,
+            "age_rating": self.age_rating,
+            "manga": self.manga,
+            "series_group": self.series_group,
+            "main_character_or_team": self.main_character_or_team,
+            "tags": self.tags,
             "title": self.title,
             "summary": self.summary,
             "year": self.year,
@@ -397,6 +435,79 @@ def _strip_annotations(name: str) -> str:
         name = stripped
 
 
+# A credit note or role that means translation, in the languages GCD's indexers use (checked against the dump:
+# "translation", "oversetter", "Übersetzung", "vertaling", "översättning", "traduzione", "tradução"...).
+_TRANSLATION_RE = re.compile(
+    r"translat|tradu|[uü]bersetz|oversett|[oö]vers[aä]tt|vertal|k[aä][aä]nn|t[lł]umacz|przek[lł]ad|p[rř]eklad|prevod|ford[ií]t",
+    re.IGNORECASE,
+)
+
+
+def is_translation(note: str) -> bool:
+    return bool(_TRANSLATION_RE.search(note or ""))
+
+
+def _split_script_names(raw: str) -> tuple[list[str], list[str]]:
+    """A free-text script credit split into (writers, translators): "Alan Moore; Jane Roe (translation)"."""
+    writers: list[str] = []
+    translators: list[str] = []
+    if not raw or raw == "None":
+        return writers, translators
+    for part in raw.split(";"):
+        name = _strip_annotations(part)
+        if not name:
+            continue
+        target = translators if is_translation(part.strip()[len(name):]) else writers
+        if name not in target:
+            target.append(name)
+    return writers, translators
+
+
+_LEGACY_NUMBER_RE = re.compile(r"^\s*([^\s()\[\]]+)\s*\(\s*(\d+)\s*\)\s*$")
+
+
+def split_legacy_number(number: str) -> tuple[str, str]:
+    """GCD's "1 (707)" (the series' own number, then the legacy one) -> ("1", "707"); anything else unchanged."""
+    match = _LEGACY_NUMBER_RE.match(number or "")
+    return (match.group(1), match.group(2)) if match else ((number or "").strip(), "")
+
+
+def gtin_from(isbn: str, barcode: str) -> str:
+    """The ISBN when there is one, else the barcode -- digits only. A barcode's 2- or 5-digit add-on (the
+    issue-number part printed beside a UPC/EAN, e.g. "76194120401700111") is dropped."""
+    digits = re.sub(r"[^0-9Xx]", "", isbn or "").upper()
+    if len(digits) in (10, 13):
+        return digits
+    digits = re.sub(r"\D", "", barcode or "")
+    trimmed = {15: 13, 17: 12, 18: 13}.get(len(digits))
+    digits = digits[:trimmed] if trimmed else digits
+    return digits if len(digits) in (8, 12, 13, 14) else ""
+
+
+_COMPANY_WORDS = {"comics", "comic", "inc", "publishing", "publications", "publication", "group", "entertainment",
+                  "llc", "ltd", "co", "company", "corp", "corporation", "the"}
+
+
+def _company_core(name: str) -> str:
+    words = re.sub(r"[^\w\s]", " ", (name or "").casefold()).split()
+    return " ".join(w for w in words if w not in _COMPANY_WORDS)
+
+
+def imprint_from_brands(brands, publishers) -> str:
+    """The brands that name an imprint (Vertigo, Marvel Knights, Icon): GCD's emblem notes in brackets are
+    dropped ("DC [bullet]" -> "DC"), and so is a brand that is only the publisher itself (DC, Image) or an
+    anniversary emblem with a year in it ("20 1992-2012 Image")."""
+    own = {_company_core(p) for p in publishers if p}
+    found: list[str] = []
+    for brand in brands:
+        name = _strip_annotations(re.sub(r"\[[^\]]*\]", "", brand or "")).strip()
+        if not name or re.search(r"\b\d{4}\b", name) or _company_core(name) in own:
+            continue
+        if name not in found:
+            found.append(name)
+    return ", ".join(found)
+
+
 def _split_credit_names(raw: str) -> list[str]:
     if not raw or raw == "None":
         return []
@@ -462,16 +573,34 @@ def fetch_issue_details(detail_url: str, fetch=None) -> GcdIssueDetails:
 
     summaries = [story.get("synopsis", "") for story in content_stories if story.get("synopsis")]
 
+    writers: list[str] = []
+    translators: list[str] = []
+    for story in content_stories:
+        story_writers, story_translators = _split_script_names(story.get("script", "") or "")
+        writers.extend(n for n in story_writers if n not in writers)
+        translators.extend(n for n in story_translators if n not in translators)
+    cover_artists: list[str] = []
+    for story in data.get("story_set") or []:
+        if story.get("type") == "cover":
+            cover_artists.extend(n for n in _split_credit_names(story.get("pencils", "") or "") if n not in cover_artists)
+    number, legacy = split_legacy_number(data.get("number", "") or data.get("descriptor", "") or "")
+    publisher = data.get("indicia_publisher", "") or ""
+
     return GcdIssueDetails(
         series_name=_clean_series_name(data.get("series_name", "") or ""),
         volume=_series_start_year(data.get("series_name", "") or ""),
-        issue_number=data.get("number", "") or data.get("descriptor", "") or "",
+        issue_number=number,
+        alternate_number=legacy,
+        cover_artist=", ".join(cover_artists),
+        translator=", ".join(translators),
+        gtin=gtin_from(data.get("isbn", "") or "", data.get("barcode", "") or ""),
+        imprint=imprint_from_brands((data.get("brand_emblem", "") or "").split(";"), [publisher]),
         title=title,
         year=year,
         month=month,
         day=day,
         summary=" ".join(summaries),
-        writer=_aggregate_credits("script"),
+        writer=", ".join(writers),
         penciller=_aggregate_credits("pencils"),
         inker=_aggregate_credits("inks"),
         colorist=_aggregate_credits("colors"),
@@ -479,7 +608,7 @@ def fetch_issue_details(detail_url: str, fetch=None) -> GcdIssueDetails:
         editor=editor,
         genre=_aggregate_list_field("genre"),
         characters=_aggregate_list_field("characters"),
-        publisher=data.get("indicia_publisher", "") or "",
+        publisher=publisher,
         cover_image_url=data.get("cover", "") or "",
         web=issue_page_url(detail_url),
     )

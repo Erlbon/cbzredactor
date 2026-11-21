@@ -103,6 +103,10 @@ TABLES = {
         "teams text", "locations text", "story_arc text", "alternate_series text", "alternate_number text",
         "series_count integer", "format text", "age_rating text", "manga text", "black_and_white text",
         "cover_width integer", "cover_height integer", "copies integer",
+        # Added 2026-11-21 (2026-11-21#05): a library converted before has none of these; gcd_local reads what
+        # exists. Convert again to get them.
+        "imprint text", "series_group text", "main_character_or_team text", "tags text",
+        "alternate_count integer", "translator text",
     ],
 }
 
@@ -337,12 +341,16 @@ def build_comicrack_database(
                 cv_issue, cv_volume = _comicvine_ids(book)
                 width, height = _cover_size(book)
                 count = _text(book, "Count")
+                alternate_count = _text(book, "AlternateCount")
                 out.add("cr_issue", (
                     issue_id, _text(book, "Web"), cv_issue, cv_volume, _text(book, "Teams"),
                     _text(book, "Locations"), _text(book, "StoryArc"), _text(book, "AlternateSeries"),
                     _text(book, "AlternateNumber"), int(count) if count.isdigit() else None,
                     _text(book, "Format"), _text(book, "AgeRating"), _text(book, "Manga"),
                     _text(book, "BlackAndWhite"), width, height, copies[ikey],
+                    _text(book, "Imprint"), _text(book, "SeriesGroup"), _text(book, "MainCharacterOrTeam"),
+                    _text(book, "Tags"), int(alternate_count) if alternate_count.isdigit() else None,
+                    _text(book, "Translator"),
                 ))
 
         for ids, table in ((publishers, "gcd_publisher"), (creators, "gcd_creator_name_detail"),

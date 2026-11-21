@@ -66,13 +66,19 @@ from core.gcd_lookup import (
     GcdIssueDetails,
     _split_credit_names,
     _split_key_date,
+    _split_script_names,
     _split_semicolon_list,
+    gtin_from,
+    imprint_from_brands,
+    is_translation,
+    split_legacy_number,
 )
 
 GCD_DOWNLOAD_URL = "https://www.comics.org/download/"
 # GCD's issue "number" for an unnumbered issue, e.g. most one-shots.
 NO_NUMBER = "[nn]"
 COMIC_STORY_TYPE_ID = 19  # gcd_story_type "comic story"
+COVER_STORY_TYPE_ID = 6  # gcd_story_type "cover"
 ISSUE_PAGE_URL = "https://www.comics.org/issue/{}/"
 
 _REQUIRED_TABLES = {"gcd_series", "gcd_issue", "gcd_story", "gcd_story_credit", "gcd_publisher"}
@@ -142,6 +148,13 @@ class GcdLocalDatabase(LocalDatabase):
             self.import_info = read_import_info(self._con)
         # A ComicRack library converted by core/comicrack_import.py.
         self.is_comicrack = self.import_info.get("source") == "ComicRack"
+        # Columns a ComicRack conversion (or an older one) may lack: every query below asks only for what exists.
+        self._credit_cols = set(self.table_columns("gcd_story_credit"))
+        self._issue_cols = set(self.table_columns("gcd_issue"))
+        self._series_cols = set(self.table_columns("gcd_series"))
+        self._cr_cols = set(self.table_columns("cr_issue")) if self.is_comicrack else set()
+        self._has_brands = all(self.has_table(t) for t in
+                               ("gcd_issue_brand_emblem", "gcd_brand_emblem_group", "gcd_brand_group"))
 
     def summary(self) -> dict:
         """Counts and the newest change date, for the Settings dialog."""
@@ -231,9 +244,14 @@ class GcdLocalDatabase(LocalDatabase):
     def details(self, issue_id: int) -> GcdIssueDetails:
         """ComicInfo-shaped details for one issue (same shape as the
         online lookup's, so the GUI treats both alike)."""
+        isbn_col = "i.isbn" if "isbn" in self._issue_cols else "''"
+        barcode_col = "i.barcode" if "barcode" in self._issue_cols else "''"
+        color_col = "s.color" if "color" in self._series_cols else "''"
+        credit_name_col = "sc.credit_name" if "credit_name" in self._credit_cols else "''"
         with self.lock:
             issue = self.query_one(
-                """select i.number, i.key_date, i.title, i.editing, s.name, p.name, l.code, s.year_began
+                f"""select i.number, i.key_date, i.title, i.editing, s.name, p.name, l.code, s.year_began,
+                          {isbn_col}, {barcode_col}, {color_col}
                    from gcd_issue i join gcd_series s on s.id = i.series_id
                    left join gcd_publisher p on p.id = s.publisher_id
                    left join stddata_language l on l.id = s.language_id
@@ -256,7 +274,7 @@ class GcdLocalDatabase(LocalDatabase):
             if story_ids:
                 marks = ",".join("?" * len(story_ids))
                 credit_rows = self.query(
-                    f"""select sc.story_id, ct.name, cnd.name
+                    f"""select sc.story_id, ct.name, cnd.name, {credit_name_col}
                         from gcd_story_credit sc
                         join gcd_credit_type ct on ct.id = sc.credit_type_id
                         join gcd_creator_name_detail cnd on cnd.id = sc.creator_id
@@ -279,8 +297,37 @@ class GcdLocalDatabase(LocalDatabase):
                    where ic.issue_id = ? and +ic.deleted = 0 and ct.name = 'editing'""",
                 (issue_id,),
             )
+            # The cover is its own "story" (type 6): its artist is ComicInfo's Cover Artist.
+            cover_stories = self.query(
+                """select st.id, st.pencils from gcd_story st
+                   where st.issue_id = ? and +st.type_id = ? and +st.deleted = 0 order by st.sequence_number""",
+                (issue_id, COVER_STORY_TYPE_ID),
+            )
+            cover_rows = []
+            if cover_stories:
+                marks = ",".join("?" * len(cover_stories))
+                cover_rows = self.query(
+                    f"""select sc.story_id, ct.name, cnd.name from gcd_story_credit sc
+                        join gcd_credit_type ct on ct.id = sc.credit_type_id
+                        join gcd_creator_name_detail cnd on cnd.id = sc.creator_id
+                        where sc.story_id in ({marks}) and +sc.deleted = 0 order by sc.id""",
+                    [s[0] for s in cover_stories],
+                )
+            brand_rows = []
+            if self._has_brands:
+                brand_rows = self.query(
+                    """select distinct bg.name from gcd_issue_brand_emblem ibe
+                       join gcd_brand_emblem_group eg on eg.brand_id = ibe.brand_id
+                       join gcd_brand_group bg on bg.id = eg.brandgroup_id
+                       where ibe.issue_id = ? and +bg.deleted = 0""",
+                    (issue_id,),
+                )
+            cr_row = None
+            if self._cr_cols:
+                cr_row = self.query_one(f"select * from cr_issue where issue_id = ?", (issue_id,))
 
-        number, key_date, issue_title, issue_editing, series_name, publisher, language, year_began = issue
+        (number, key_date, issue_title, issue_editing, series_name, publisher, language, year_began,
+         isbn, barcode, color) = issue
         credits = _collect_credits(stories, credit_rows)
         if not credits["editor"]:
             credits["editor"] = _dedupe([r[0] for r in issue_editors] or _split_credit_names(issue_editing or ""))
@@ -294,14 +341,26 @@ class GcdLocalDatabase(LocalDatabase):
             genres.extend(_split_semicolon_list(story[2] or ""))
         titles = [s[1] for s in stories if s[1]]
         year, month, day = _split_key_date(key_date or "")
+        cover_with_rows = {row[0] for row in cover_rows}
+        cover_artists = [name for _sid, role, name in cover_rows if _fields_for_role(role or "")[:1] == ["penciller"]
+                         or "painting" in (role or "").casefold()]
+        for story_id, pencils in cover_stories:
+            if story_id not in cover_with_rows:
+                cover_artists.extend(_split_credit_names(pencils or ""))
+        # "[nn]" is GCD's internal "no number" marker -- never written to ComicInfo; the file keeps its own Number.
+        main_number, legacy = split_legacy_number("" if number == NO_NUMBER else (number or ""))
 
         details = GcdIssueDetails(
             series_name=series_name or "",
             # ComicInfo's Volume = the series' start year (the ComicRack / Comic Vine convention).
             volume=str(year_began) if year_began else "",
-            # "[nn]" is GCD's internal "no number" marker -- never
-            # written to ComicInfo; the file keeps its own Number.
-            issue_number="" if number == NO_NUMBER else (number or ""),
+            issue_number=main_number,
+            alternate_number=legacy,
+            cover_artist=", ".join(_dedupe(cover_artists)),
+            translator=", ".join(credits["translator"]),
+            gtin=gtin_from(isbn or "", barcode or ""),
+            imprint=imprint_from_brands([r[0] for r in brand_rows], [publisher or ""]),
+            black_and_white=_black_and_white(color or ""),
             title=issue_title or "; ".join(dict.fromkeys(titles)),
             year=year, month=month, day=day,
             summary=" ".join(s[4] for s in stories if s[4]),
@@ -317,7 +376,29 @@ class GcdLocalDatabase(LocalDatabase):
             web=self._web_link(issue_id),
             language_iso=language or "",
         )
+        if cr_row is not None:
+            self._apply_comicrack_fields(details, dict(zip(self.table_columns("cr_issue"), cr_row)))
         return details
+
+    @staticmethod
+    def _apply_comicrack_fields(details: GcdIssueDetails, row: dict) -> None:
+        """A ComicRack Library's own values (cr_issue) win over anything derived: they are what the user
+        tagged. Columns an older conversion lacks are simply absent."""
+        def text(key: str) -> str:
+            value = row.get(key)
+            return "" if value is None else str(value).strip()
+
+        for attr, column in (
+            ("teams", "teams"), ("locations", "locations"), ("story_arc", "story_arc"),
+            ("alternate_series", "alternate_series"), ("alternate_number", "alternate_number"),
+            ("alternate_count", "alternate_count"), ("count", "series_count"), ("format", "format"),
+            ("age_rating", "age_rating"), ("manga", "manga"), ("black_and_white", "black_and_white"),
+            ("imprint", "imprint"), ("series_group", "series_group"),
+            ("main_character_or_team", "main_character_or_team"), ("tags", "tags"), ("translator", "translator"),
+        ):
+            value = text(column)
+            if value and not (attr in ("manga", "black_and_white") and value.casefold() == "unknown"):
+                setattr(details, attr, value)
 
 
     def _web_link(self, issue_id: int) -> str:
@@ -333,19 +414,49 @@ def _dedupe(items) -> list[str]:
 
 def _collect_credits(stories, credit_rows) -> dict[str, list[str]]:
     """Structured credit rows where a story has any; that story's
-    free-text fields otherwise (older GCD entries)."""
+    free-text fields otherwise (older GCD entries).
+    A credit noted as a translation ("translation", "oversetter",
+    "Übersetzung"...) goes to Translator, never to Writer."""
     fields = {field: [] for _word, field in _ROLE_WORDS}
+    fields["translator"] = []
     stories_with_rows = {row[0] for row in credit_rows}
-    for _story_id, role, name in credit_rows:
+    for row in credit_rows:
+        _story_id, role, name = row[:3]
+        note = row[3] if len(row) > 3 else ""
+        if is_translation(note or ""):
+            fields["translator"].append(name)
+            continue
         for field in _fields_for_role(role or ""):
             fields[field].append(name)
-    text_columns = {"writer": 5, "penciller": 6, "inker": 7, "colorist": 8, "letterer": 9, "editor": 10}
+    text_columns = {"penciller": 6, "inker": 7, "colorist": 8, "letterer": 9, "editor": 10}
     for story in stories:
         if story[0] in stories_with_rows:
             continue
+        writers, translators = _split_script_names(story[5] or "")
+        fields["writer"].extend(writers)
+        fields["translator"].extend(translators)
         for field, column in text_columns.items():
             fields[field].extend(_split_credit_names(story[column] or ""))
     return {field: _dedupe(names) for field, names in fields.items()}
+
+
+_BW_RE = re.compile(r"black\s*(and|&)\s*white|b\s*&\s*w|schwarz\s*-?\s*wei|zwart\s*-?\s*wit|noir\s*et\s*blanc|"
+                    r"svart\s*-?\s*hvit|svartvit|bianco\s*e\s*nero|blanco\s*y\s*negro|preto\s*e\s*branco|grayscale|greyscale",
+                    re.IGNORECASE)
+_COLOR_RE = re.compile(r"colou?r|farb|kleur|couleur|colorid|farge|f[aä]rg|colore", re.IGNORECASE)
+
+
+def _black_and_white(color_note: str) -> str:
+    """ComicInfo's BlackAndWhite from GCD's free-text series colour note: about the interior when the note
+    says ("color cover; black and white interior" -> Yes). "" when unclear."""
+    note = color_note or ""
+    parts = [p for p in re.split(r"[;,]", note) if "interior" in p.casefold() or "innen" in p.casefold()]
+    text = parts[0] if parts else note
+    if _BW_RE.search(text):
+        return "Yes"
+    if _COLOR_RE.search(text):
+        return "No"
+    return ""
 
 
 def _fields_for_role(role: str) -> list[str]:

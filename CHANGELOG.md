@@ -1,5 +1,18 @@
 # Changelog
 
+## 2026-11-21#05 -- Lookups fill more fields
+
+- **ComicRack Library** now gives back everything of yours it stores: Teams, Locations, Story Arc, Alternate Series / Number / Count, Count, Format, Age Rating, Manga, Black & White. Before, it stored them but read back only the Web link. Convert your library again (Settings > ComicRack Library) to also get Imprint, Series Group, Main Character or Team, Tags and Translator.
+- **GCD (online and local database):**
+  - **Cover Artist**, from the cover's own credits.
+  - **Translator.** Translators used to land in **Writer**: GCD marks them in the script credit ("translation", "oversetter", "Übersetzung", "vertaling"...). They now go to Translator only.
+  - **GTIN**, from the ISBN, otherwise the barcode (the small issue-number add-on is dropped).
+  - **Imprint**, from GCD's brand (Vertigo, Marvel Knights, Icon). A brand that is just the publisher itself (DC, Marvel, Image) is left out.
+  - **Legacy numbers are split.** "1 (707)" used to go into Number as it is; now Number is 1 and Alternate Number is 707.
+  - The local database also fills **Black & White** from the series' colour note.
+- **Bedetheque:** GTIN (EAN/ISBN) and Community Rating. Not yet checked against a live page: Bedetheque's bot check currently stops the lookup's own fetch.
+- **Manga:** Characters from AniList, main characters first, at most 10.
+
 ## 2026-11-21#04 -- Lookups fill Volume
 
 - Comic Vine, both GCD lookups (online and local database), the ComicRack Library lookup, and Redact's Comic Vine step now fill **Volume** with the year the series started (for example 1986). That is the ComicRack and Comic Vine convention, and what ComicTagger and Kavita read. Before, no lookup wrote Volume. Comic Vine already fetched the year and threw it away.

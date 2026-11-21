@@ -141,6 +141,8 @@ class BedethequeIssueDetails:
     language_iso: str = "fr"
     cover_image_url: str = ""
     web: str = ""  # the album's own Bedetheque page, e.g. https://www.bedetheque.com/BD-...-12345.html
+    gtin: str = ""  # digits of the "EAN/ISBN" entry
+    community_rating: str = ""  # Bedetheque's 0-5 average, one decimal (same scale as ComicInfo's CommunityRating)
 
     def as_dict(self) -> dict:
         """Only the fields that actually came back, keyed to match
@@ -160,6 +162,8 @@ class BedethequeIssueDetails:
             "publisher": self.publisher,
             "language_iso": self.language_iso,
             "web": self.web,
+            "gtin": self.gtin,
+            "community_rating": self.community_rating,
         }
         return {k: v for k, v in raw.items() if v}
 
@@ -336,6 +340,37 @@ def _credit_text(label_variants: list[str], info_lis: list) -> str:
     return ""
 
 
+_EAN_LABELS = ("ean/isbn", "ean-isbn", "isbn/ean", "ean", "isbn")
+
+
+def _gtin_digits(info: dict) -> str:
+    """Digits (plus a trailing X, for a 10-character ISBN) of the
+    EAN/ISBN entry, hyphens and spaces stripped; "" if there is none or
+    it doesn't look like a code (8-13 characters)."""
+    for label in _EAN_LABELS:
+        value = info.get(label, "")
+        if value:
+            code = re.sub(r"[^0-9Xx]", "", value).upper()
+            return code if 8 <= len(code) <= 13 else ""
+    return ""
+
+
+def _rating_text(tree) -> str:
+    """Bedetheque's schema.org ratingValue (0-5) as one decimal, or ""
+    if absent, unparseable or out of range."""
+    nodes = tree.xpath('//*[@itemprop="ratingValue"]')
+    if not nodes:
+        return ""
+    raw = (nodes[0].get("content") or nodes[0].text_content() or "").strip().replace(",", ".")
+    try:
+        value = float(raw)
+    except ValueError:
+        return ""
+    if not 0 <= value <= 5:
+        return ""
+    return f"{value:.1f}"
+
+
 _DEPOT_LEGAL_RE = re.compile(r"(\d{1,2})/(\d{4})")
 _ALBUM_ID_RE = re.compile(r"-(\d+)\.html(?:[?#].*)?$")
 
@@ -389,6 +424,8 @@ def fetch_issue_details(detail_url: str, fetch=None) -> BedethequeIssueDetails:
         publisher=info.get("editeur", ""),
         cover_image_url=(og_image[0].strip() if og_image else ""),
         web=detail_url,
+        gtin=_gtin_digits(info),
+        community_rating=_rating_text(tree),
     )
 
 

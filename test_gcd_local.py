@@ -137,6 +137,54 @@ def test_details_from_structured_credits(db):
     assert fields["publisher"] == "DC" and fields["language_iso"] == "en"
     assert fields["web"] == "https://www.comics.org/issue/101/"
     assert fields["volume"] == "2016"  # Volume = the series' start year (ComicRack / Comic Vine convention)
+    # This fixture is an older-style file without isbn/barcode/color/credit_name/brand tables: nothing breaks.
+    assert "gtin" not in fields and "imprint" not in fields and "black_and_white" not in fields
+
+
+def _full_db(tmp_path):
+    """A dump with the columns and tables a real current GCD dump has (isbn, barcode, colour, credit notes,
+    brands), for the fields read from them."""
+    path = tmp_path / "full.db"
+    con = sqlite3.connect(path)
+    con.executescript(SCHEMA + """
+        alter table gcd_issue add column isbn text default '';
+        alter table gcd_issue add column barcode text default '';
+        alter table gcd_series add column color text default '';
+        alter table gcd_story_credit add column credit_name text default '';
+        create table gcd_issue_brand_emblem (id integer primary key, issue_id int, brand_id int);
+        create table gcd_brand_emblem_group (id integer primary key, brand_id int, brandgroup_id int);
+        create table gcd_brand_group (id integer primary key, name text, deleted int default 0);
+    """)
+    con.execute("insert into gcd_publisher values (1, 'DC')")
+    con.execute("insert into stddata_language values (25, 'en')")
+    con.execute("insert into gcd_series (id,name,year_began,issue_count,publisher_id,language_id,color) "
+                "values (5,'Preacher',1995,66,1,25,'color cover; black and white interior')")
+    con.execute("insert into gcd_issue (id,number,series_id,key_date,barcode) values (7,'1 (707)',5,'1995-04-00','76194120401700111')")
+    con.executemany("insert into gcd_credit_type values (?,?)", [(1, "script"), (2, "pencils"), (9, "painting")])
+    con.executemany("insert into gcd_creator_name_detail values (?,?)",
+                    [(1, "Garth Ennis"), (2, "Steve Dillon"), (3, "Glenn Fabry"), (4, "Jan Jansen")])
+    con.executemany("insert into gcd_story (id,issue_id,type_id) values (?,?,?)", [(70, 7, 19), (71, 7, 6)])
+    con.executemany(
+        "insert into gcd_story_credit (id,story_id,credit_type_id,creator_id,credit_name) values (?,?,?,?,?)",
+        [(1, 70, 1, 1, ""), (2, 70, 2, 2, ""), (3, 70, 1, 4, "vertaling"), (4, 71, 9, 3, "")],
+    )
+    con.executemany("insert into gcd_brand_group values (?,?,0)", [(1, "DC"), (2, "Vertigo")])
+    con.executemany("insert into gcd_brand_emblem_group values (?,?,?)", [(1, 50, 1), (2, 50, 2)])
+    con.execute("insert into gcd_issue_brand_emblem values (1, 7, 50)")
+    con.commit()
+    con.close()
+    return GcdLocalDatabase(str(path))
+
+
+def test_details_fill_the_new_fields_from_a_full_dump(tmp_path):
+    fields = _full_db(tmp_path).details(7).as_dict()
+    assert fields["writer"] == "Garth Ennis"  # the "vertaling" credit is not a writer
+    assert fields["translator"] == "Jan Jansen"
+    assert fields["cover_artist"] == "Glenn Fabry"  # the cover story's painting credit
+    assert (fields["number"], fields["alternate_number"]) == ("1", "707")
+    assert fields["gtin"] == "761941204017"
+    assert fields["imprint"] == "Vertigo"  # the brand group, minus the publisher itself
+    assert fields["black_and_white"] == "Yes"  # the interior is black and white
 
 
 def test_details_fall_back_to_free_text_credits(db):
