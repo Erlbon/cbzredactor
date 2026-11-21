@@ -1039,13 +1039,19 @@ class MainWindow(QMainWindow):
             app_settings.save_last_directory(paths[0])
             self._load_paths(paths)
 
+    def _include_subfolders(self) -> bool:
+        """What the Include Subfolders checkbox shows right now. Open Folder and Refresh List follow the box,
+        not the saved setting: when the settings file can't be written (the exe in a read-only folder), the
+        saved value stays "on" and unticking the box used to change nothing."""
+        return self.actions_["include_subfolders"].isChecked()
+
     def load_folder_dialog(self) -> None:
         start_dir = app_settings.load_last_directory()
         folder = QFileDialog.getExistingDirectory(self, "Open Folder", start_dir)
         if not folder:
             return
         app_settings.save_last_directory(folder)
-        recursive = app_settings.load_include_subfolders()
+        recursive = self._include_subfolders()
         paths = run_busy(self, "Looking for comic files...", comic_files_in_folder, folder, recursive)
         if not paths:
             QMessageBox.information(
@@ -2139,7 +2145,7 @@ class MainWindow(QMainWindow):
         # for .cbz/.cbr, so a CBT/CB7 dropped into a loaded folder never
         # showed up on refresh.
         existing_paths = [os.path.normpath(book.path) for book in self.books]
-        recursive = app_settings.load_include_subfolders()
+        recursive = self._include_subfolders()
         new_paths = run_busy(
             self, "Looking for new files...", find_new_files_in_loaded_folders,
             existing_paths, lambda folder: comic_files_in_folder(folder, recursive),

@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-11-21#03 -- Include Subfolders: Open Folder follows the checkbox
+
+- Open Folder and Refresh List now do what the Include Subfolders checkbox shows. Before, they re-read the saved setting instead. When the settings file next to the exe could not be written (for example the exe in a read-only folder), the saved value stayed "on", and unticking the box changed nothing: subfolders were always included.
+
 ## 2026-11-21#02 -- redactor_common 2026-11-21-02
 
 - Moved to the family's newest shared code (from 2026-11-18-01), so this app is on the same pin as its siblings. What it brings: the shared notes and folder-cover code also reads and writes folders whose names end in a dot. No other change to the app.

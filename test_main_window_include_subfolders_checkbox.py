@@ -56,3 +56,22 @@ def test_checkbox_decides_whether_open_folder_finds_a_comic_in_a_subfolder(tmp_p
     window.include_subfolders_box.setChecked(True)
     window.load_folder_dialog()
     assert len(loaded) == 1 and loaded[0].endswith("a.cbz")
+
+
+def test_open_folder_follows_the_box_even_when_the_setting_cannot_be_saved(tmp_path, monkeypatch):
+    """The exe in a read-only folder: saving the setting fails silently and it stays "on". Unticking the
+    box must still keep Open Folder out of the subfolders."""
+    (tmp_path / "top.cbz").write_bytes(b"")
+    sub = tmp_path / "sub"
+    sub.mkdir()
+    (sub / "inner.cbz").write_bytes(b"")
+    app_settings.save_include_subfolders(True)
+    monkeypatch.setattr(app_settings, "save_include_subfolders", lambda on: None)
+    monkeypatch.setattr(QFileDialog, "getExistingDirectory", lambda *a, **k: str(tmp_path))
+    window = MainWindow()
+    loaded = []
+    monkeypatch.setattr(window, "_load_paths", lambda paths: loaded.extend(paths))
+    window.include_subfolders_box.setChecked(False)
+    assert app_settings.load_include_subfolders()  # the saved value never changed
+    window.load_folder_dialog()
+    assert [p.split("\\")[-1].split("/")[-1] for p in loaded] == ["top.cbz"]
