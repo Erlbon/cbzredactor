@@ -419,11 +419,12 @@ def test_comicvine_match_confidence_from_quality(env, tmp_path, monkeypatch):
     monkeypatch.setattr(
         rs, "fetch_issue_details", lambda key, url: ComicVineIssueDetails(volume_name="Saga", issue_number="1", writer="BKV")
     )
-    monkeypatch.setattr(rs, "fetch_publisher", lambda key, url: "Image")
+    monkeypatch.setattr(rs, "fetch_volume_info", lambda key, url: ("Image", "2012"))
     env.comicvine_key = "key"
     book = CbzBook(_cbz(tmp_path / "Saga 001 (2012).cbz", comicinfo=b"<ComicInfo/>"))
     entry = _only(_run(env, [book], _recipe(env, disable=("filename_tags",))))
     assert entry.status is FileStatus.CHANGED and book.metadata.publisher == "Image"
+    assert book.metadata.volume == "2012"  # Volume = the series' start year
     assert any("auto-applied at 95%" in a and "Comic Vine" in a for a in entry.applied)
 
 

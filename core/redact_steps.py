@@ -47,6 +47,7 @@ from __future__ import annotations
 import copy
 import dataclasses
 import os
+import re
 import shutil
 import zipfile
 import zlib
@@ -77,7 +78,7 @@ from core import history
 from core.comicvine_lookup import (
     ComicVineLookupError,
     fetch_issue_details,
-    fetch_publisher,
+    fetch_volume_info,
     search_comicvine,
 )
 from core.credit_pages import KnownCreditPages, credit_matches, hamming, scan_book
@@ -825,7 +826,9 @@ class LookupStep(Step):
             bool(year) and _year_of(top.cover_date) == year,
         )
         details = fetch_issue_details(key, top.detail_url)
-        details.publisher = fetch_publisher(key, top.volume_detail_url)
+        details.publisher, start_year = fetch_volume_info(key, top.volume_detail_url)
+        start = re.match(r"\d{4}", start_year or "")
+        details.volume = start.group(0) if start else ""
         return _Match(details.as_dict(), confidence, top.display_label(), "Comic Vine")
 
     def apply_suggestion(self, ctx: CbzCtx, result: StepResult) -> str:

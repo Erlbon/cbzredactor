@@ -187,6 +187,7 @@ def test_fetch_issue_details_series_name_cleaned():
         "https://comics.org/api/issue/41815/?format=json", fetch=_fetch_returning(ISSUE_DETAIL_RESPONSE)
     )
     assert details.series_name == "Watchmen"
+    assert details.as_dict()["volume"] == "1986"  # the "(1986 series)" year: the series' start year
 
 
 def test_multi_annotation_and_translation_credits_stripped():

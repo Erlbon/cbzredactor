@@ -133,12 +133,15 @@ class GcdIssueDetails:
     cover_image_url: str = ""
     web: str = ""  # the issue's GCD page, e.g. https://www.comics.org/issue/12345/
     language_iso: str = ""  # only the local dump has this (core/gcd_local.py)
+    # ComicInfo's Volume, the ComicRack / Comic Vine way: the year the SERIES began ("1986"), not a volume number.
+    volume: str = ""
 
     def as_dict(self) -> dict:
         """Only the fields that actually came back, keyed to match
         ComicInfoMetadata's own attribute names directly."""
         raw = {
             "series": self.series_name,
+            "volume": self.volume,
             "number": self.issue_number,
             "title": self.title,
             "summary": self.summary,
@@ -234,6 +237,12 @@ def _clean_series_name(raw_name: str) -> str:
     own Series field is meant to hold just the name (the year already
     lives in Year/Month/Day)."""
     return _SERIES_YEAR_SUFFIX_RE.sub("", raw_name or "").strip()
+
+
+def _series_start_year(raw_name: str) -> str:
+    """The year in GCD's "Watchmen (1986 series)" (the series' start year: ComicInfo's Volume), or ""."""
+    match = re.search(r"\((\d{4})(?:-\d{4})?\s*series\)\s*$", raw_name or "")
+    return match.group(1) if match else ""
 
 
 def build_search_url(series: str, number: str, year: str = "") -> str:
@@ -455,6 +464,7 @@ def fetch_issue_details(detail_url: str, fetch=None) -> GcdIssueDetails:
 
     return GcdIssueDetails(
         series_name=_clean_series_name(data.get("series_name", "") or ""),
+        volume=_series_start_year(data.get("series_name", "") or ""),
         issue_number=data.get("number", "") or data.get("descriptor", "") or "",
         title=title,
         year=year,

@@ -935,6 +935,8 @@ class ComicVineBrowseDialog(OwnedDialog):
                 self._errors[index] = f"{name}: {error}"
             else:
                 details.publisher = volume.publisher
+                if volume.year_number():
+                    details.volume = str(volume.year_number())
                 self._results[index] = details.as_dict()
             self._finish_if_done()
 

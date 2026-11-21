@@ -233,7 +233,7 @@ class GcdLocalDatabase(LocalDatabase):
         online lookup's, so the GUI treats both alike)."""
         with self.lock:
             issue = self.query_one(
-                """select i.number, i.key_date, i.title, i.editing, s.name, p.name, l.code
+                """select i.number, i.key_date, i.title, i.editing, s.name, p.name, l.code, s.year_began
                    from gcd_issue i join gcd_series s on s.id = i.series_id
                    left join gcd_publisher p on p.id = s.publisher_id
                    left join stddata_language l on l.id = s.language_id
@@ -280,7 +280,7 @@ class GcdLocalDatabase(LocalDatabase):
                 (issue_id,),
             )
 
-        number, key_date, issue_title, issue_editing, series_name, publisher, language = issue
+        number, key_date, issue_title, issue_editing, series_name, publisher, language, year_began = issue
         credits = _collect_credits(stories, credit_rows)
         if not credits["editor"]:
             credits["editor"] = _dedupe([r[0] for r in issue_editors] or _split_credit_names(issue_editing or ""))
@@ -297,6 +297,8 @@ class GcdLocalDatabase(LocalDatabase):
 
         details = GcdIssueDetails(
             series_name=series_name or "",
+            # ComicInfo's Volume = the series' start year (the ComicRack / Comic Vine convention).
+            volume=str(year_began) if year_began else "",
             # "[nn]" is GCD's internal "no number" marker -- never
             # written to ComicInfo; the file keeps its own Number.
             issue_number="" if number == NO_NUMBER else (number or ""),

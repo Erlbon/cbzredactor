@@ -139,6 +139,9 @@ class ComicVineIssueDetails:
     locations: str = ""
     story_arc: str = ""
     publisher: str = ""  # filled in separately by fetch_publisher(); "" until then
+    # ComicInfo's Volume, the ComicRack / Comic Vine way: the volume's (series') start_year, filled in
+    # separately like publisher; "" until then.
+    volume: str = ""
     # The issue's Comic Vine page (site_detail_url), written to
     # ComicInfo's Web field -- a permanent record of exactly which
     # Comic Vine issue this file was matched to, so a later run (or
@@ -152,6 +155,7 @@ class ComicVineIssueDetails:
         year, month, day = _split_cover_date(self.cover_date)
         raw = {
             "series": self.volume_name,
+            "volume": self.volume,
             "number": self.issue_number,
             "title": self.name,
             "summary": self.summary,

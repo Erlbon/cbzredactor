@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026-11-21#04 -- Lookups fill Volume
+
+- Comic Vine, both GCD lookups (online and local database), the ComicRack Library lookup, and Redact's Comic Vine step now fill **Volume** with the year the series started (for example 1986). That is the ComicRack and Comic Vine convention, and what ComicTagger and Kavita read. Before, no lookup wrote Volume. Comic Vine already fetched the year and threw it away.
+- The ComicRack Library lookup gives your own Volume when it is a year; otherwise, the year of the series' first issue.
+
 ## 2026-11-21#03 -- Include Subfolders: Open Folder follows the checkbox
 
 - Open Folder and Refresh List now do what the Include Subfolders checkbox shows. Before, they re-read the saved setting instead. When the settings file next to the exe could not be written (for example the exe in a read-only folder), the saved value stayed "on", and unticking the box changed nothing: subfolders were always included.

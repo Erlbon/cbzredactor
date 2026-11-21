@@ -136,6 +136,7 @@ def test_details_from_structured_credits(db):
     assert (fields["year"], fields["month"]) == ("2018", "6")
     assert fields["publisher"] == "DC" and fields["language_iso"] == "en"
     assert fields["web"] == "https://www.comics.org/issue/101/"
+    assert fields["volume"] == "2016"  # Volume = the series' start year (ComicRack / Comic Vine convention)
 
 
 def test_details_fall_back_to_free_text_credits(db):
