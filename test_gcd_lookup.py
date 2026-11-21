@@ -220,6 +220,63 @@ def test_imprint_from_brands_drops_the_publisher_and_anniversary_emblems():
     assert imprint_from_brands(["Marvel Knights"], ["Marvel Comics"]) == "Marvel Knights"
     assert imprint_from_brands(["20 1992-2012 Image"], ["Image Comics Inc."]) == ""
     assert imprint_from_brands(["Icon"], ["Marvel Comics"]) == "Icon"
+    # Thor (2018), online: the brand "Marvel" is the start of the publisher's full name.
+    assert imprint_from_brands(["Marvel [in horizontal box]"], ["Marvel Worldwide Inc."]) == ""
+    assert imprint_from_brands(["Marvel Knights"], ["Marvel Worldwide Inc."]) == "Marvel Knights"
+
+
+def test_count_alternate_series_age_rating_and_colour_from_the_series_record():
+    import json
+
+    issue = dict(ISSUE_DETAIL_RESPONSE, number="1 (707)", rating="Suggested for Mature Readers",
+                 series="https://www.comics.org/api/series/5247/?format=json")
+    # One entry per cover: 12 issues, two of them with a variant cover.
+    descriptors = [f"{n} [Main]" for n in range(1, 13)] + ["1 [Blank Cover]", "2 (708) [Second Printing]"]
+    ended = {"name": "Watchmen", "year_ended": 1987, "active_issues": [f"u{n}" for n in range(len(descriptors))],
+             "issue_descriptors": descriptors, "color": "color cover; black and white interior"}
+
+    def fetch(url):
+        return json.dumps(ended if "/series/" in url else issue).encode()
+
+    fields = fetch_issue_details("https://comics.org/api/issue/1/?format=json", fetch=fetch).as_dict()
+    assert fields["count"] == "12"  # the series has ended: its issue count
+    assert (fields["alternate_series"], fields["alternate_number"]) == ("Watchmen", "707")
+    assert fields["age_rating"] == "Mature 17+"
+    assert fields["black_and_white"] == "Yes"
+
+    ended.pop("year_ended")  # a running series: no Count (question 1, answer A)
+    assert "count" not in fetch_issue_details("https://comics.org/api/issue/1/?format=json", fetch=fetch).as_dict()
+
+
+def test_a_failing_series_request_leaves_the_rest_of_the_lookup_alone():
+    import json
+
+    issue = dict(ISSUE_DETAIL_RESPONSE, series="https://www.comics.org/api/series/5247/?format=json")
+
+    def fetch(url):
+        if "/series/" in url:
+            raise OSError("down")
+        return json.dumps(issue).encode()
+
+    fields = fetch_issue_details("https://comics.org/api/issue/1/?format=json", fetch=fetch).as_dict()
+    assert fields["series"] == "Watchmen" and "count" not in fields
+
+
+def test_age_rating_table():
+    from core.gcd_lookup import age_rating_from
+
+    for text, expected in [
+        ("Approved by the Comics Code Authority", ""), ("Authorized A. C. M. P. Conforms to the Comics Code", ""),
+        ("Rated T+", "Teen"), ("Teen+", "Teen"), ("T+", "Teen"), ("Rated T+ Teen Plus", "Teen"),
+        ("Rated T+ / Teen Plus", "Teen"), ("Rated T Teen", "Teen"), ("Rated T", "Teen"), ("Teen", "Teen"),
+        ("T", "Teen"), ("Ages 13+", "Teen"), ("Teen 13+", "Teen"), ("Rated Teen+", "Teen"),
+        ("Suggested for Mature Readers", "Mature 17+"), ("Mature Readers", "Mature 17+"),
+        ("Rated M / Mature", "Mature 17+"), ("Mature", "Mature 17+"), ("Ages 17+", "Mature 17+"),
+        ("Parental Advisory", "Mature 17+"), ("PSR", "Mature 17+"),
+        ("Adults Only", "Adults Only 18+"), ("All Ages", "Everyone"), ("Rated A", "Everyone"),
+        ("Something else", ""), ("", ""),
+    ]:
+        assert age_rating_from(text) == expected, text
 
 
 def test_gtin_prefers_the_isbn():

@@ -501,11 +501,53 @@ def imprint_from_brands(brands, publishers) -> str:
     found: list[str] = []
     for brand in brands:
         name = _strip_annotations(re.sub(r"\[[^\]]*\]", "", brand or "")).strip()
-        if not name or re.search(r"\b\d{4}\b", name) or _company_core(name) in own:
+        core = _company_core(name)
+        # The publisher itself, also when its full name goes on ("Marvel" vs "Marvel Worldwide Inc.").
+        if not name or not core or re.search(r"\b\d{4}\b", name) or any(core == p or p.startswith(core + " ") for p in own):
             continue
         if name not in found:
             found.append(name)
     return ", ".join(found)
+
+
+_BW_RE = re.compile(r"black\s*(and|&)\s*white|b\s*&\s*w|schwarz\s*-?\s*wei|zwart\s*-?\s*wit|noir\s*et\s*blanc|"
+                    r"svart\s*-?\s*hvit|svartvit|bianco\s*e\s*nero|blanco\s*y\s*negro|preto\s*e\s*branco|grayscale|greyscale",
+                    re.IGNORECASE)
+_COLOR_RE = re.compile(r"colou?r|farb|kleur|couleur|colorid|farge|f[aä]rg|colore", re.IGNORECASE)
+
+
+def black_and_white_from(color_note: str) -> str:
+    """ComicInfo's BlackAndWhite from GCD's free-text series colour note: about the interior when the note
+    says ("color cover; black and white interior" -> Yes). "" when unclear."""
+    note = color_note or ""
+    parts = [p for p in re.split(r"[;,]", note) if "interior" in p.casefold() or "innen" in p.casefold()]
+    text = parts[0] if parts else note
+    if _BW_RE.search(text):
+        return "Yes"
+    if _COLOR_RE.search(text):
+        return "No"
+    return ""
+
+
+# GCD's free-text rating -> ComicInfo's AgeRating list (decision page question 3, answer A, 2026-11-21). Only the
+# common texts in the dump are translated; anything else writes nothing. A Comics Code seal is not an age.
+_AGE_RATINGS = [
+    (re.compile(r"comics code|conforms to the|a\.\s*c\.\s*m\.\s*p", re.I), ""),
+    (re.compile(r"^adults? only\b", re.I), "Adults Only 18+"),
+    (re.compile(r"mature|^rated m\b|ages 17\+|parental advisory|^psr$", re.I), "Mature 17+"),
+    (re.compile(r"^(rated )?(t\+?|teen\+?|teen plus)\b|ages 13\+|^teen 13\+", re.I), "Teen"),
+    (re.compile(r"^all ages$|^rated a$", re.I), "Everyone"),
+]
+
+
+def age_rating_from(rating: str) -> str:
+    text = " ".join((rating or "").split())
+    if not text:
+        return ""
+    for pattern, value in _AGE_RATINGS:
+        if pattern.search(text):
+            return value
+    return ""
 
 
 def _split_credit_names(raw: str) -> list[str]:
@@ -531,6 +573,33 @@ def _split_key_date(key_date: str) -> tuple[str, str, str]:
         return "", "", ""
     year, month, day = match.groups()
     return year, ("" if month == "00" else str(int(month))), ("" if day == "00" else str(int(day)))
+
+
+def _series_info(series_url: str, fetch) -> dict:
+    """The issue's series record (end year, issue list, colour note): one more request, best effort -- a
+    failure only leaves Count and Black & White empty, never the whole lookup."""
+    if not series_url.startswith("http"):
+        return {}
+    url = series_url if "format=" in series_url else series_url + ("&format=json" if "?" in series_url else "?format=json")
+    try:
+        data = _get_json(url, fetch)
+    except Exception:  # noqa: BLE001 -- best effort, see above
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _distinct_issue_count(series: dict) -> int:
+    """How many issues a series has: its issue list has one entry per COVER ("1 (707) [Mike Del Mundo]",
+    "1 [Blank Cover]"...), so distinct numbers are counted. Thor (2018): 55 entries, 16 issues."""
+    descriptors = series.get("issue_descriptors") or []
+    if not descriptors:
+        return len(series.get("active_issues") or [])
+    numbers = set()
+    for descriptor in descriptors:
+        match = re.match(r"^\s*([^\s(\[]+)", str(descriptor or ""))
+        if match:
+            numbers.add(match.group(1))
+    return len(numbers)
 
 
 def fetch_issue_details(detail_url: str, fetch=None) -> GcdIssueDetails:
@@ -585,12 +654,21 @@ def fetch_issue_details(detail_url: str, fetch=None) -> GcdIssueDetails:
             cover_artists.extend(n for n in _split_credit_names(story.get("pencils", "") or "") if n not in cover_artists)
     number, legacy = split_legacy_number(data.get("number", "") or data.get("descriptor", "") or "")
     publisher = data.get("indicia_publisher", "") or ""
+    series_name = _clean_series_name(data.get("series_name", "") or "")
+    series = _series_info(data.get("series", "") or "", fetch)
+    # Count only for a series that has ended (question 1, answer A): a running series' count goes out of date.
+    count = str(_distinct_issue_count(series)) if series.get("year_ended") else ""
 
     return GcdIssueDetails(
         series_name=_clean_series_name(data.get("series_name", "") or ""),
         volume=_series_start_year(data.get("series_name", "") or ""),
         issue_number=number,
         alternate_number=legacy,
+        # The legacy number belongs to the same series' longer run (question 2, answer A): Thor, 707.
+        alternate_series=series_name if legacy else "",
+        count=count if count != "0" else "",
+        black_and_white=black_and_white_from(series.get("color", "") or ""),
+        age_rating=age_rating_from(data.get("rating", "") or ""),
         cover_artist=", ".join(cover_artists),
         translator=", ".join(translators),
         gtin=gtin_from(data.get("isbn", "") or "", data.get("barcode", "") or ""),

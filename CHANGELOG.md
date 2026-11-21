@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-11-21#06 -- GCD: Count, Alternate Series, Age Rating
+
+- **Count**, for a series that has ended: Preacher gives 66. A series still running gets no Count, because the number would be out of date next month. Variant covers are not counted as issues (Thor 2018 is 16 issues, not its 55 covers).
+- **Alternate Series** with a legacy number: Thor (2018) #1 gives Number 1, Alternate Series Thor, Alternate Number 707.
+- **Age Rating**, from GCD's rating text: Teen+ / T+ / Teen and the like give Teen; Mature Readers, Parental Advisory and PSR give Mature 17+; Adults Only gives Adults Only 18+; All Ages and Rated A give Everyone. A Comics Code seal or any other text writes nothing.
+- The online GCD lookup now also fills Black & White, like the local one.
+- Fix: the online lookup could give the publisher itself as Imprint ("Marvel" for Marvel Worldwide Inc.).
+
 ## 2026-11-21#05 -- Lookups fill more fields
 
 - **ComicRack Library** now gives back everything of yours it stores: Teams, Locations, Story Arc, Alternate Series / Number / Count, Count, Format, Age Rating, Manga, Black & White. Before, it stored them but read back only the Web link. Convert your library again (Settings > ComicRack Library) to also get Imprint, Series Group, Main Character or Team, Tags and Translator.

@@ -68,6 +68,8 @@ from core.gcd_lookup import (
     _split_key_date,
     _split_script_names,
     _split_semicolon_list,
+    age_rating_from,
+    black_and_white_from,
     gtin_from,
     imprint_from_brands,
     is_translation,
@@ -247,11 +249,15 @@ class GcdLocalDatabase(LocalDatabase):
         isbn_col = "i.isbn" if "isbn" in self._issue_cols else "''"
         barcode_col = "i.barcode" if "barcode" in self._issue_cols else "''"
         color_col = "s.color" if "color" in self._series_cols else "''"
+        rating_col = "i.rating" if "rating" in self._issue_cols else "''"
+        ended_col = "s.year_ended" if "year_ended" in self._series_cols else "null"
+        current_col = "s.is_current" if "is_current" in self._series_cols else "null"
+        count_col = "s.issue_count" if "issue_count" in self._series_cols else "null"
         credit_name_col = "sc.credit_name" if "credit_name" in self._credit_cols else "''"
         with self.lock:
             issue = self.query_one(
                 f"""select i.number, i.key_date, i.title, i.editing, s.name, p.name, l.code, s.year_began,
-                          {isbn_col}, {barcode_col}, {color_col}
+                          {isbn_col}, {barcode_col}, {color_col}, {rating_col}, {ended_col}, {current_col}, {count_col}
                    from gcd_issue i join gcd_series s on s.id = i.series_id
                    left join gcd_publisher p on p.id = s.publisher_id
                    left join stddata_language l on l.id = s.language_id
@@ -327,7 +333,11 @@ class GcdLocalDatabase(LocalDatabase):
                 cr_row = self.query_one(f"select * from cr_issue where issue_id = ?", (issue_id,))
 
         (number, key_date, issue_title, issue_editing, series_name, publisher, language, year_began,
-         isbn, barcode, color) = issue
+         isbn, barcode, color, rating, year_ended, is_current, issue_count) = issue
+        # Count only for a series that has ended (question 1, answer A). A ComicRack Library's series rows count
+        # the files in the library, not the series, so there only the user's own Count is used (cr_issue).
+        ended = bool(year_ended) and not is_current
+        count = str(issue_count) if ended and issue_count and not self.is_comicrack else ""
         credits = _collect_credits(stories, credit_rows)
         if not credits["editor"]:
             credits["editor"] = _dedupe([r[0] for r in issue_editors] or _split_credit_names(issue_editing or ""))
@@ -356,11 +366,14 @@ class GcdLocalDatabase(LocalDatabase):
             volume=str(year_began) if year_began else "",
             issue_number=main_number,
             alternate_number=legacy,
+            alternate_series=(series_name or "") if legacy else "",  # question 2, answer A: Thor, 707
+            count=count,
+            age_rating=age_rating_from(rating or ""),
             cover_artist=", ".join(_dedupe(cover_artists)),
             translator=", ".join(credits["translator"]),
             gtin=gtin_from(isbn or "", barcode or ""),
             imprint=imprint_from_brands([r[0] for r in brand_rows], [publisher or ""]),
-            black_and_white=_black_and_white(color or ""),
+            black_and_white=black_and_white_from(color or ""),
             title=issue_title or "; ".join(dict.fromkeys(titles)),
             year=year, month=month, day=day,
             summary=" ".join(s[4] for s in stories if s[4]),
@@ -438,25 +451,6 @@ def _collect_credits(stories, credit_rows) -> dict[str, list[str]]:
         for field, column in text_columns.items():
             fields[field].extend(_split_credit_names(story[column] or ""))
     return {field: _dedupe(names) for field, names in fields.items()}
-
-
-_BW_RE = re.compile(r"black\s*(and|&)\s*white|b\s*&\s*w|schwarz\s*-?\s*wei|zwart\s*-?\s*wit|noir\s*et\s*blanc|"
-                    r"svart\s*-?\s*hvit|svartvit|bianco\s*e\s*nero|blanco\s*y\s*negro|preto\s*e\s*branco|grayscale|greyscale",
-                    re.IGNORECASE)
-_COLOR_RE = re.compile(r"colou?r|farb|kleur|couleur|colorid|farge|f[aä]rg|colore", re.IGNORECASE)
-
-
-def _black_and_white(color_note: str) -> str:
-    """ComicInfo's BlackAndWhite from GCD's free-text series colour note: about the interior when the note
-    says ("color cover; black and white interior" -> Yes). "" when unclear."""
-    note = color_note or ""
-    parts = [p for p in re.split(r"[;,]", note) if "interior" in p.casefold() or "innen" in p.casefold()]
-    text = parts[0] if parts else note
-    if _BW_RE.search(text):
-        return "Yes"
-    if _COLOR_RE.search(text):
-        return "No"
-    return ""
 
 
 def _fields_for_role(role: str) -> list[str]:

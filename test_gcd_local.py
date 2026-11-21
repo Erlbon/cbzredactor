@@ -150,6 +150,9 @@ def _full_db(tmp_path):
         alter table gcd_issue add column isbn text default '';
         alter table gcd_issue add column barcode text default '';
         alter table gcd_series add column color text default '';
+        alter table gcd_series add column year_ended int;
+        alter table gcd_series add column is_current int default 0;
+        alter table gcd_issue add column rating text default '';
         alter table gcd_story_credit add column credit_name text default '';
         create table gcd_issue_brand_emblem (id integer primary key, issue_id int, brand_id int);
         create table gcd_brand_emblem_group (id integer primary key, brand_id int, brandgroup_id int);
@@ -157,9 +160,13 @@ def _full_db(tmp_path):
     """)
     con.execute("insert into gcd_publisher values (1, 'DC')")
     con.execute("insert into stddata_language values (25, 'en')")
-    con.execute("insert into gcd_series (id,name,year_began,issue_count,publisher_id,language_id,color) "
-                "values (5,'Preacher',1995,66,1,25,'color cover; black and white interior')")
-    con.execute("insert into gcd_issue (id,number,series_id,key_date,barcode) values (7,'1 (707)',5,'1995-04-00','76194120401700111')")
+    con.execute("insert into gcd_series (id,name,year_began,issue_count,publisher_id,language_id,color,year_ended,is_current) "
+                "values (5,'Preacher',1995,66,1,25,'color cover; black and white interior',2000,0)")
+    con.execute("insert into gcd_series (id,name,year_began,issue_count,publisher_id,language_id,year_ended,is_current) "
+                "values (6,'Saga',2012,72,1,25,null,1)")
+    con.execute("insert into gcd_issue (id,number,series_id,key_date,barcode,rating) "
+                "values (7,'1 (707)',5,'1995-04-00','76194120401700111','Suggested for Mature Readers')")
+    con.execute("insert into gcd_issue (id,number,series_id,key_date) values (8,'1',6,'2012-03-00')")
     con.executemany("insert into gcd_credit_type values (?,?)", [(1, "script"), (2, "pencils"), (9, "painting")])
     con.executemany("insert into gcd_creator_name_detail values (?,?)",
                     [(1, "Garth Ennis"), (2, "Steve Dillon"), (3, "Glenn Fabry"), (4, "Jan Jansen")])
@@ -185,6 +192,16 @@ def test_details_fill_the_new_fields_from_a_full_dump(tmp_path):
     assert fields["gtin"] == "761941204017"
     assert fields["imprint"] == "Vertigo"  # the brand group, minus the publisher itself
     assert fields["black_and_white"] == "Yes"  # the interior is black and white
+
+
+def test_count_alternate_series_and_age_rating(tmp_path):
+    db = _full_db(tmp_path)
+    ended = db.details(7).as_dict()
+    assert ended["count"] == "66"  # ended in 2000
+    assert (ended["alternate_series"], ended["alternate_number"]) == ("Preacher", "707")
+    assert ended["age_rating"] == "Mature 17+"
+    running = db.details(8).as_dict()
+    assert "count" not in running and "alternate_series" not in running  # Saga is still running; no legacy number
 
 
 def test_details_fall_back_to_free_text_credits(db):
