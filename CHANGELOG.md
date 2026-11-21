@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-11-21#01 -- Move to Folder
+
+- **Right-click one or more files > Move to Folder…** (also File > Move to Folder…, Ctrl+Shift+M) moves them, names unchanged, into a folder you pick. No pattern and no renamer needed. The folder dialog starts where you moved files last time.
+- A file whose name is already in the target folder is skipped and reported, never overwritten. A move to another drive copies, checks the copy, and sends the original to the Recycle Bin.
+- File > Undo Last Rename puts the whole batch back.
+
 ## 2026-11-19#04 -- redactor_common 2026-11-18-01
 
 - Moved to the family's newest shared code (from 2026-11-06-01), so this release is built on the same pin as its siblings. Brings the shared key store's latest fixes and the column-header menu's on/off switches. No other change to the app.

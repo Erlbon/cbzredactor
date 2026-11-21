@@ -146,3 +146,62 @@ def test_imprint_else_publisher_token_in_a_rename(window, tmp_path, monkeypatch)
     window.table.selectAll()
     window.open_rename_dialog()
     assert sorted(n for n in os.listdir(tmp_path) if n.endswith(".cbz")) == ["Saga (DC Comics).cbz", "Saga (Vertigo).cbz"]
+
+
+# --- File > Move to Folder... (right-click menu too): plain move, names kept ---
+
+def _pick_folder(monkeypatch, folder):
+    monkeypatch.setattr(QFileDialog, "getExistingDirectory", lambda *a, **k: folder)
+
+
+def test_move_to_folder_moves_the_selected_files_and_undo_puts_them_back(window, tmp_path, monkeypatch):
+    target = tmp_path / "Sorted"
+    target.mkdir()
+    a = _cbz(tmp_path / "one.cbz", "Saga", "1")
+    b = _cbz(tmp_path / "two.cbz", "Saga", "2")
+    c = _cbz(tmp_path / "three.cbz", "Saga", "3")
+    window._load_paths([a, b, c])
+    window._selected_rows = [0, 2]
+    _pick_folder(monkeypatch, str(target))
+    window.move_selected_to_folder()
+
+    assert (target / "one.cbz").exists() and (target / "three.cbz").exists()
+    assert os.path.exists(b) and not os.path.exists(a) and not os.path.exists(c)
+    assert window.books[0].path == str(target / "one.cbz")
+    assert app_settings.load_last_move_target() == str(target)
+
+    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.Yes)
+    window.undo_last_rename()
+    assert os.path.exists(a) and os.path.exists(c) and not (target / "one.cbz").exists()
+
+
+def test_move_to_folder_never_overwrites_a_file_of_the_same_name(window, tmp_path, monkeypatch):
+    target = tmp_path / "Sorted"
+    target.mkdir()
+    (target / "one.cbz").write_bytes(b"already here")
+    a = _cbz(tmp_path / "one.cbz", "Saga", "1")
+    window._load_paths([a])
+    window._selected_rows = [0]
+    _pick_folder(monkeypatch, str(target))
+    window.move_selected_to_folder()
+
+    assert os.path.exists(a) and (target / "one.cbz").read_bytes() == b"already here"
+    assert window.books[0].path == a
+
+
+def test_move_to_folder_does_nothing_when_the_folder_dialog_is_cancelled(window, tmp_path, monkeypatch):
+    a = _cbz(tmp_path / "one.cbz", "Saga", "1")
+    window._load_paths([a])
+    window._selected_rows = [0]
+    _pick_folder(monkeypatch, "")
+    window.move_selected_to_folder()
+    assert os.path.exists(a) and window.books[0].path == a
+
+
+def test_move_to_folder_is_on_the_right_click_menu_only_with_a_selection(window, tmp_path):
+    window._load_paths([_cbz(tmp_path / "one.cbz", "Saga", "1"), _cbz(tmp_path / "two.cbz", "Saga", "2")])
+    action = window.actions_["move_to_folder"]
+    window._selected_rows = [0, 1]
+    assert action in window._context_menu_items(window.books)
+    window._selected_rows = []
+    assert action not in window._context_menu_items(window.books)

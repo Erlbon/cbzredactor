@@ -39,6 +39,7 @@ GCD_SECRET = "gcd_password"
 # What the "no secure storage" question calls the secret being saved.
 SECRET_NOUN = "key or password"
 _LAST_DIR_KEY = "files/last_directory"
+_MOVE_TARGET_KEY = "files/last_move_target"
 
 _PATTERN_HISTORY_KEY = "patterns/history"
 _MAX_PATTERN_HISTORY = 15
@@ -311,6 +312,17 @@ def save_last_directory(path: str) -> None:
     """Remember the directory containing `path` (a file or folder that
     was just loaded) as the starting point for the next file dialog."""
     _STORE.remember_directory(path, _LAST_DIR_KEY)
+
+
+def load_last_move_target() -> str:
+    """The folder File > Move to Folder... last moved files into ("" if none
+    yet, or it no longer exists)."""
+    return _STORE.last_directory(_MOVE_TARGET_KEY)
+
+
+def save_last_move_target(folder: str) -> None:
+    """Remember `folder` itself as Move to Folder's next start."""
+    _STORE.remember_directory(folder, _MOVE_TARGET_KEY)
 
 
 _CLEANUP_KEYS = {

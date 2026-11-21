@@ -80,6 +80,7 @@ from redactor_common.core import labels
 from redactor_common.gui.menu_builder import MenuAction, Separator, Submenu
 from redactor_common.gui.overwrite_review_dialog import resolve_overwrite_conflicts
 from redactor_common.gui.parse_filename_dialog import ParseFilenameDialog
+from redactor_common.core.move_plan import PlannedMove
 from redactor_common.gui.move_runner import run_planned_moves
 from redactor_common.gui.folder_options import (
     add_include_subfolders_checkbox, attach_include_subfolders, include_subfolders_slot,
@@ -589,7 +590,10 @@ class MainWindow(QMainWindow):
             )],
             export_settings=self.export_settings,
             import_settings=self.import_settings,
-            extra_rename=[Submenu("Rename / Export / Move Macros", [
+            extra_rename=[MenuAction(
+                "move_to_folder", "Move &to Folder…", self.move_selected_to_folder, shortcut="Ctrl+Shift+M",
+                tooltip="Move the selected files into a folder you pick (File > Undo Last Rename puts them back)",
+            ), Submenu("Rename / Export / Move Macros", [
                 MenuAction(
                     f"rename_macro_{slot + 1}", f"{slot + 1}: (empty)",
                     lambda _checked=False, n=slot: self.run_rename_macro(n), shortcut=f"Ctrl+Shift+{slot + 1}",
@@ -946,7 +950,10 @@ class MainWindow(QMainWindow):
         if one:
             items.append(a["preview"])
         if one and not self.books[self._selected_rows[0]].load_error:
-            items.extend([a["rename_file"], Separator()])
+            items.append(a["rename_file"])
+        if self._selected_rows:
+            items.append(a["move_to_folder"])
+        items.append(Separator())
         # Every per-file lookup, so none of them needs a trip to the menu
         # bar. "Compare Library with GCD" is a whole-library report, not a
         # lookup on the selection, so it stays in the menu bar only.
@@ -2408,6 +2415,45 @@ class MainWindow(QMainWindow):
         for book, _old_path, new_path in summary.done:
             book.path = new_path
             self._refresh_table_row(self.books.index(book), book)
+        self._update_status()
+
+    def move_selected_to_folder(self) -> None:
+        """File > Move to Folder... (also on the right-click menu): moves the
+        selected files, names unchanged, into one folder the user picks. Runs
+        through the same runner as Rename / Export / Move's "Move into folders"
+        (progress, per-file errors, Recycle Bin for a cross-drive original) and
+        is one batch in the rename log, so Undo Last Rename puts it back. A file
+        whose name already exists in the target is skipped, never overwritten."""
+        self._commit_current_edits()
+        books = [self.books[r] for r in self._selected_rows if r < len(self.books)]
+        if not books:
+            self.statusBar().showMessage("Move to Folder: select one or more files first.", 6000)
+            return
+        start = app_settings.load_last_move_target() or os.path.dirname(books[0].path)
+        target = QFileDialog.getExistingDirectory(self, f"Move {len(books)} File(s) to Folder", start)
+        if not target:
+            return
+        app_settings.save_last_move_target(target)
+        planned: list[PlannedMove] = []
+        taken: set[str] = set()
+        for book in books:
+            new_path = os.path.join(target, os.path.basename(book.path))
+            key = os.path.normcase(os.path.abspath(new_path))
+            move = PlannedMove(item=book, old_path=book.path, new_path=new_path, root=target)
+            if not move.is_noop and (os.path.exists(new_path) or key in taken):
+                move.blocking = True
+                move.warning = "a file with this name is already in the target folder"
+            taken.add(key)
+            planned.append(move)
+        summary = run_planned_moves(
+            self, planned, copy=False, rename_log=_rename_log(), label="Move to Folder",
+            trash=_trash_retrying, ask_prune=False,
+        )
+        for book, _old_path, new_path in summary.done:
+            book.path = new_path
+            self._refresh_table_row(self.books.index(book), book)
+        if summary.done:
+            self.statusBar().showMessage(f"Moved {len(summary.done)} file(s) to {target}.", 8000)
         self._update_status()
 
     def open_parse_filename_dialog(self) -> None:
