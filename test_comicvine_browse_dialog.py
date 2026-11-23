@@ -310,17 +310,18 @@ def test_back_use_forward_are_one_spaced_group_and_stop_cancel_sit_apart(tmp_pat
     items = [layout.itemAt(i) for i in range(layout.count())]
     names = [it.widget().accessibleName() if it.widget() else ("gap" if it.spacerItem().sizeHint().width() else "stretch")
              for it in items]
-    assert names == ["stretch", "◀◀", "gap", "▶", "gap", "▶▶", "stretch", "■", "gap", "✕"]
+    assert names == ["stretch", "◀◀", "gap", "▶", "gap", "▶|", "gap", "▶▶", "stretch", "■", "gap", "✕"]
     assert not dialog.use_btn.icon().isNull() and dialog.use_btn.text() == ""
 
 
-def test_only_use_and_cancel_are_coloured(tmp_path, net):
-    def centre_colour(button):
+def test_only_use_auto_and_cancel_are_coloured(tmp_path, net):
+    def centre_colour(button, x=None):
         image = button.icon().pixmap(64, 64).toImage()
-        return image.pixelColor(image.width() // 2, image.height() // 2).name()
+        return image.pixelColor(x if x is not None else image.width() // 2, image.height() // 2).name()
 
     dialog = ComicVineBrowseDialog([_book(tmp_path)])
     assert centre_colour(dialog.use_btn) == dlg_mod.USE_COLOUR.name()
+    assert centre_colour(dialog.auto_btn, 20) == dlg_mod.USE_COLOUR.name()  # in the ▶ of ▶|
     assert centre_colour(dialog.cancel_btn) == dlg_mod.DISCARD_COLOUR.name()
     text = dialog.finish_btn.palette().color(dialog.finish_btn.palette().ColorRole.ButtonText).name()
     assert centre_colour(dialog.finish_btn) == text
@@ -398,6 +399,75 @@ def test_the_series_and_issue_tables_sort_by_header_numerically(tmp_path, net):
     dialog.issue_table.sortByColumn(0, Qt.SortOrder.DescendingOrder)
     assert [dialog.issue_table.item(r, 0).text() for r in range(4)] == ["5", "3", "2", "1"]
     assert dialog._selected_issue() is not None  # the file's issue stays selected through the sort
+
+
+def _batman_books(tmp_path, *numbers, year="2017"):
+    return [_book(tmp_path, f"Batman {int(n):03d} ({year}).cbz", number=n) for n in numbers]
+
+
+@pytest.fixture
+def auto_now(monkeypatch):
+    monkeypatch.setattr(dlg_mod, "AUTO_DELAY_MS", 0)
+
+
+def test_auto_uses_the_chosen_series_for_every_following_file(tmp_path, net, auto_now):
+    dialog = ComicVineBrowseDialog(_batman_books(tmp_path, "1", "2", "3", "5"))
+    _select_volume(dialog, "1")
+    assert dialog.auto_btn.isEnabled()
+    dialog.auto_btn.click()
+    assert dialog.result() == dialog.DialogCode.Accepted  # ran to the end by itself
+    assert sorted(dialog.accepted_metadata()) == [0, 1, 2, 3]
+    assert dialog.accepted_metadata()[3]["title"] == "details of https://x/issue/105/"
+    assert net["search"] == 1  # one series search for the whole run
+
+
+def test_auto_stops_at_a_number_the_series_does_not_have(tmp_path, net, auto_now):
+    dialog = ComicVineBrowseDialog(_batman_books(tmp_path, "1", "2", "4", "5"))
+    _select_volume(dialog, "1")
+    dialog.auto_btn.click()
+    assert dialog._index == 2 and not dialog._auto
+    assert "Auto stopped" in dialog.step_label.text() and "no issue #4" in dialog.step_label.text()
+    assert sorted(dialog.accepted_metadata()) == [0, 1]
+    dialog.skip_btn.click()  # by hand past it; Auto does not carry on unasked
+    assert dialog._index == 3 and sorted(dialog.accepted_metadata()) == [0, 1]
+    dialog.auto_btn.click()  # Auto again: here the last file, so not offered
+    assert not dialog.auto_btn.isEnabled()
+
+
+def test_auto_stops_at_a_file_of_another_series(tmp_path, net, auto_now):
+    books = _batman_books(tmp_path, "1", "2") + [_book(tmp_path, "Superman 001 (2017).cbz", series="Superman", number="1")]
+    dialog = ComicVineBrowseDialog(books)
+    _select_volume(dialog, "1")
+    dialog.auto_btn.click()
+    assert dialog._index == 2 and dialog.stack.currentIndex() == STEP_SERIES
+    assert "another series" in dialog.step_label.text()
+    assert sorted(dialog.accepted_metadata()) == [0, 1]
+
+
+def test_auto_stops_when_the_files_year_is_far_from_the_issues(tmp_path, net, auto_now):
+    books = _batman_books(tmp_path, "1", "2") + _batman_books(tmp_path, "3", year="1990")
+    dialog = ComicVineBrowseDialog(books)
+    _select_volume(dialog, "1")
+    dialog.auto_btn.click()
+    assert dialog._index == 2 and "the file says 1990" in dialog.step_label.text()
+
+
+def test_auto_waits_for_the_previous_details_and_can_be_paused(tmp_path, net, auto_now, monkeypatch):
+    later = _Later()
+    dialog = ComicVineBrowseDialog(_batman_books(tmp_path, "1", "2", "3"))
+    _select_volume(dialog, "1")
+    monkeypatch.setattr(dlg_mod, "start_background", later)
+    dialog.auto_btn.click()
+    assert dialog._index == 1 and dialog._auto  # file 1 used; file 2 waits for file 1's details
+    assert dialog.auto_btn.accessibleName() == "Pause Auto"
+    assert dialog.auto_btn.icon().cacheKey() == dialog._pause_icon.cacheKey()
+    later.run("issue_details")  # they arrive: file 2 goes
+    assert dialog._index == 2
+    dialog.auto_btn.click()  # pause
+    later.run_all()
+    assert dialog._index == 2 and not dialog._auto
+    assert sorted(dialog.accepted_metadata()) == [0, 1]
+    assert dialog.result() != dialog.DialogCode.Accepted
 
 
 def test_a_matching_publisher_ranks_a_volume_higher():

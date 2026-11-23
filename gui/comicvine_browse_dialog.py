@@ -100,6 +100,13 @@ SELECTION_DELAY_MS = 250
 
 LOADING = "Loading..."
 
+# Auto (2026-11-23): once the right series is found, the rest of the files run by themselves. One
+# file per this many ms at most, and never while the last file's details are still on their way, so
+# Comic Vine sees about one request a second (its velocity check blocks faster callers). Also long
+# enough to see each file go by.
+AUTO_DELAY_MS = 1000
+AUTO_LABEL = "▶|"  # the button's accessible name; "Pause Auto" while it runs
+
 
 def _series_key(series: str) -> str:
     return " ".join(_split_words(series))
@@ -139,6 +146,12 @@ def _media_icon(shape: str, color: QColor) -> QIcon:
 
     if shape == "play":
         triangle(16, 36, True)
+    elif shape == "end":  # ▶| play to the end (Auto)
+        triangle(10, 32, True)
+        painter.drawRect(46, 10, 8, 44)
+    elif shape == "pause":
+        painter.drawRect(18, 12, 10, 40)
+        painter.drawRect(36, 12, 10, 40)
     elif shape == "forward":
         triangle(6, 26, True)
         triangle(32, 26, True)
@@ -236,6 +249,15 @@ class ComicVineBrowseDialog(OwnedDialog):
         self._selection_timer.setSingleShot(True)
         self._selection_timer.timeout.connect(self._render_volume)
 
+        # Auto: the chosen series is used for each following file until one does not fit.
+        self._auto = False
+        self._auto_volume: Optional[ComicVineVolume] = None
+        self._auto_note = ""  # why Auto stopped, shown with the file it stopped on
+        self._applying = False  # inside _apply: an answer arriving now belongs to the file being left
+        self._auto_timer = QTimer(self)
+        self._auto_timer.setSingleShot(True)
+        self._auto_timer.timeout.connect(self._auto_go)
+
         self._build_ui()
         self._load_book()
 
@@ -267,11 +289,11 @@ class ComicVineBrowseDialog(OwnedDialog):
         self.key_btn = QPushButton("Change API Key…")
         query_row.addWidget(self.key_btn)
         root.addLayout(query_row)
-        self.series_edit.returnPressed.connect(self._search_volumes)
-        self.number_edit.returnPressed.connect(self._search_volumes)
-        self.year_edit.returnPressed.connect(self._search_volumes)
-        self.publisher_edit.returnPressed.connect(self._search_volumes)
-        self.search_btn.clicked.connect(self._search_volumes)
+        self.series_edit.returnPressed.connect(self._manual_search)
+        self.number_edit.returnPressed.connect(self._manual_search)
+        self.year_edit.returnPressed.connect(self._manual_search)
+        self.publisher_edit.returnPressed.connect(self._manual_search)
+        self.search_btn.clicked.connect(self._manual_search)
         self.key_btn.clicked.connect(self._change_key)
 
         step_row = QHBoxLayout()
@@ -324,6 +346,15 @@ class ComicVineBrowseDialog(OwnedDialog):
         self.use_btn.setDefault(True)
         self.skip_btn = QPushButton("▶▶")
         self.skip_btn.setToolTip("Next file, without using a match for this one")
+        # ▶| Auto (user's pick B, 2026-11-23): a sixth player button between ▶ and ▶▶, green like ▶; it
+        # turns into a pause button while Auto runs.
+        self.auto_btn = QPushButton(AUTO_LABEL)
+        self._auto_tip = (
+            "Auto: use this issue, then do the same for each following file -- the issue with that file's "
+            "number in this same series, one file a second. Stops by itself at a file with another series "
+            "name, a number the series does not have, or a year that does not fit."
+        )
+        self.auto_btn.setToolTip(self._auto_tip)
         self.finish_btn = QPushButton("■")
         self.finish_btn.setToolTip(
             "Stop here. Files you used an issue for (▶) keep it; this file and the rest are left alone."
@@ -335,11 +366,11 @@ class ComicVineBrowseDialog(OwnedDialog):
         # The text triangles came out tiny next to ■, and Qt's own media icons are black on the dark theme:
         # the shapes are drawn here, in the theme's text colour, all the same size. The glyph stays as the
         # accessible name (what tests and screen readers read).
-        shapes = {self.back_btn: "back", self.use_btn: "play", self.finish_btn: "stop",
+        shapes = {self.back_btn: "back", self.use_btn: "play", self.auto_btn: "end", self.finish_btn: "stop",
                   self.cancel_btn: "cross", self.skip_btn: "forward"}
-        # Colour on two only (user's choice, 2026-11-19): ▶ green, the one pressed most; ✕ red, the one
-        # that throws work away. The rest in the text colour. A disabled ▶ is greyed by Qt as usual.
-        colours = {self.use_btn: USE_COLOUR, self.cancel_btn: DISCARD_COLOUR}
+        # Colour (user's choice, 2026-11-19): ▶ green, the one pressed most; ✕ red, the one that throws
+        # work away. ▶| green too, as a kind of ▶ (mockup B, 2026-11-23). The rest in the text colour.
+        colours = {self.use_btn: USE_COLOUR, self.auto_btn: USE_COLOUR, self.cancel_btn: DISCARD_COLOUR}
         for button, shape in shapes.items():
             button.setAccessibleName(button.text())
             button.setText("")
@@ -347,12 +378,16 @@ class ComicVineBrowseDialog(OwnedDialog):
             button.setIcon(_media_icon(shape, colour))
             button.setIconSize(QSize(ICON_SIZE, ICON_SIZE))
             button.setMinimumSize(84, 46)
+        self._auto_icon = self.auto_btn.icon()
+        self._pause_icon = _media_icon("pause", self.auto_btn.palette().color(QPalette.ColorRole.ButtonText))
         # One group in the middle (user, 2026-11-19): apart enough to tell and hit each one, near enough to
         # work through a long list without moving the mouse. ■ and ✕ are rare: out of the way on the right.
         buttons.addStretch(1)
         buttons.addWidget(self.back_btn)
         buttons.addSpacing(GROUP_GAP)
         buttons.addWidget(self.use_btn)
+        buttons.addSpacing(GROUP_GAP)
+        buttons.addWidget(self.auto_btn)
         buttons.addSpacing(GROUP_GAP)
         buttons.addWidget(self.skip_btn)
         buttons.addStretch(1)
@@ -364,6 +399,7 @@ class ComicVineBrowseDialog(OwnedDialog):
         self.skip_btn.clicked.connect(self._next_book)
         self.use_btn.clicked.connect(self._use_current)
         self.browse_btn.clicked.connect(self._use_volume)
+        self.auto_btn.clicked.connect(self._toggle_auto)
         self.finish_btn.clicked.connect(self._stop)
         self.cancel_btn.clicked.connect(self.reject)
 
@@ -460,6 +496,7 @@ class ComicVineBrowseDialog(OwnedDialog):
     def done(self, result: int) -> None:  # QDialog.done: every way of closing ends here
         self._shut = True
         self._selection_timer.stop()
+        self._auto_timer.stop()
         super().done(result)
 
     def _warn(self, exc: Exception) -> None:
@@ -546,6 +583,7 @@ class ComicVineBrowseDialog(OwnedDialog):
         self._issues_wanted = None
         self._user_moved = False
         self._selection_timer.stop()
+        self._auto_note = ""
         book = self._book
         used = self._used.get(self._index)
         self.header.setText(
@@ -569,9 +607,10 @@ class ComicVineBrowseDialog(OwnedDialog):
         self.info_label.setText("")
 
         if self._last_volume is not None and series and _series_key(series) == self._last_series_key:
-            self._show_issues(self._last_volume)
+            self._show_issues(self._last_volume)  # ticks Auto on once the issue list is here
         else:
             self._search_volumes()
+            self._auto_tick()  # another series: Auto stops here
 
     def _next_book(self) -> None:
         if self._finishing:
@@ -581,6 +620,75 @@ class ComicVineBrowseDialog(OwnedDialog):
             self._finish()
         else:
             self._load_book()
+
+    # ------------------------------------------------------------------
+    # Auto: the rest of the files with the chosen series
+
+    def _toggle_auto(self) -> None:
+        if self._auto:
+            self._auto_stop("")  # paused by the user
+            return
+        if not self.use_btn.isEnabled():
+            return
+        volume = self._selected_volume() if self.stack.currentIndex() == STEP_SERIES else self._current_volume
+        if volume is None:
+            return
+        self._auto, self._auto_volume, self._auto_note = True, volume, ""
+        self._update_buttons()
+        self._use_current()  # this file, then _load_book of the next one ticks on
+
+    def _auto_tick(self) -> None:
+        """Asks for the next Auto step, after AUTO_DELAY_MS. Safe to call from anywhere: _auto_go looks
+        at what is on screen then and waits when something is still loading."""
+        if not self._auto or self._finishing or self._shut or self._applying:
+            return
+        if not AUTO_DELAY_MS:
+            self._auto_go()
+        elif not self._auto_timer.isActive():
+            self._auto_timer.start(AUTO_DELAY_MS)
+
+    def _auto_go(self) -> None:
+        if not self._auto or self._finishing or self._shut or self._applying:
+            return
+        if self._pending:
+            return  # the previous file's details first; their arrival ticks again
+        volume = self._auto_volume
+        if self.stack.currentIndex() == STEP_SERIES or self._current_volume is not volume:
+            self._auto_stop(f'the file name gives another series ("{self.series_edit.text().strip()}").')
+            return
+        if self._issues_wanted is not None:
+            return  # the issue list is loading; _show_issues ticks again when it is here
+        issues = self._issue_cache.get(volume.volume_id)
+        if issues is None:
+            self._auto_stop("Comic Vine did not send the issue list.")
+            return
+        number = self.number_edit.text().strip()
+        if not number:
+            self._auto_stop("no issue number in the file name.")
+            return
+        issue = find_issue_by_number(issues, number)
+        if issue is None:
+            self._auto_stop(f"{volume.name} ({volume.start_year}) has no issue #{number}.")
+            return
+        year, cover_year = self.year_edit.text().strip(), (issue.cover_date or "")[:4]
+        if year.isdigit() and cover_year.isdigit() and abs(int(year) - int(cover_year)) > 1:
+            self._auto_stop(f"the file says {year}, but #{issue.number} of this series is from {cover_year}.")
+            return
+        self._apply(volume, issue)
+
+    def _auto_stop(self, reason: str) -> None:
+        """Ends Auto and leaves the file on screen to be done by hand. reason "" = paused by the user."""
+        self._auto = False
+        self._auto_timer.stop()
+        self._auto_note = (f"Auto stopped at this file: {reason} Choose by hand; {AUTO_LABEL} carries on."
+                           if reason else "")
+        if not self._finishing:
+            self._set_step(self.stack.currentIndex())
+
+    def _manual_search(self) -> None:
+        if self._auto:
+            self._auto_stop("")
+        self._search_volumes()
 
     # ------------------------------------------------------------------
     # Step 1: the series
@@ -814,6 +922,8 @@ class ComicVineBrowseDialog(OwnedDialog):
                 else f"Could not fetch the issue list: {self._issue_failed.get(volume.volume_id, '')}"
             )
             self._update_buttons()
+            if not waiting:
+                self._auto_tick()  # the list failed: Auto stops here
             return
         self._issues_wanted = None
 
@@ -843,6 +953,7 @@ class ComicVineBrowseDialog(OwnedDialog):
             self._selecting -= 1
         self._render_issue()
         self.issue_table.setFocus()
+        self._auto_tick()
 
     def _selected_issue(self) -> Optional[ComicVineIssue]:
         rows = self.issue_table.selectionModel().selectedRows()
@@ -892,6 +1003,8 @@ class ComicVineBrowseDialog(OwnedDialog):
         """◀◀: from the issue list back to the series list; from the series list back to the previous file."""
         if self._finishing:
             return
+        if self._auto:
+            self._auto_stop("")  # going back is taking over by hand
         if self.stack.currentIndex() == STEP_ISSUES:
             self._back_to_series()
         elif self._index > 0:
@@ -939,11 +1052,16 @@ class ComicVineBrowseDialog(OwnedDialog):
                     details.volume = str(volume.year_number())
                 self._results[index] = details.as_dict()
             self._finish_if_done()
+            self._auto_tick()  # Auto waits for these details before the next file
 
         self._prior_volume_ids.add(volume.volume_id)  # the chosen series is remembered for the next file
         self._last_volume = volume
         self._last_series_key = _series_key(self.series_edit.text())
-        self._request(("details", token), fetch_issue_details, self._api_key, candidate.detail_url, then=then)
+        self._applying = True
+        try:
+            self._request(("details", token), fetch_issue_details, self._api_key, candidate.detail_url, then=then)
+        finally:
+            self._applying = False
         self._next_book()
 
     def _use_current(self) -> None:
@@ -963,9 +1081,11 @@ class ComicVineBrowseDialog(OwnedDialog):
     def _finish(self) -> None:
         """Closes once every Yes has its details. Cancel stays live meanwhile (and discards all)."""
         self._finishing = True
+        self._auto = False
         self._selection_timer.stop()
+        self._auto_timer.stop()
         for widget in (self.stack, self.search_btn, self.key_btn, self.back_btn, self.browse_btn, self.use_btn,
-                       self.skip_btn, self.finish_btn):
+                       self.auto_btn, self.skip_btn, self.finish_btn):
             widget.setEnabled(False)
         self._finish_if_done()
 
@@ -995,12 +1115,19 @@ class ComicVineBrowseDialog(OwnedDialog):
         in_issues = step == STEP_ISSUES
         self.browse_btn.setVisible(not in_issues)
         self.back_btn.setToolTip("Back to the series list" if in_issues else "Back to the previous file")
-        self.step_label.setText(
-            "Choose the issue (the covers are side by side), then ▶ to use it. ◀◀ goes back to the series list."
-            if in_issues
-            else "Is this the right issue? ▶ uses it. Pick another series in the list, or Show Issues to choose "
-                 "a different issue. ▶▶ goes on without one."
-        )
+        if self._auto and self._auto_volume is not None:
+            volume = self._auto_volume
+            text = (f"Auto: {volume.name} ({volume.start_year}) for each file, file {self._index + 1} of "
+                    f"{len(self._books)}. The pause button (where ▶| was) stops it.")
+        elif self._auto_note:
+            text = self._auto_note
+        elif in_issues:
+            text = "Choose the issue (the covers are side by side), then ▶ to use it. ◀◀ goes back to the series list."
+        else:
+            text = ("Is this the right issue? ▶ uses it. Pick another series in the list, or Show Issues to choose "
+                    "a different issue. ▶▶ goes on without one.")
+        self.step_label.setText(text)
+        self.step_label.setStyleSheet("font-weight: bold;" if self._auto or self._auto_note else "")
         if not in_issues:
             self.match_label.setText("")
         self._update_buttons()
@@ -1014,6 +1141,10 @@ class ComicVineBrowseDialog(OwnedDialog):
         else:
             self.use_btn.setEnabled(self._series_issue is not None)
             self.browse_btn.setEnabled(self._selected_volume() is not None)
+        self.auto_btn.setAccessibleName("Pause Auto" if self._auto else AUTO_LABEL)
+        self.auto_btn.setIcon(self._pause_icon if self._auto else self._auto_icon)
+        self.auto_btn.setToolTip("Pause Auto: stay on this file and carry on by hand" if self._auto else self._auto_tip)
+        self.auto_btn.setEnabled(self._auto or (self.use_btn.isEnabled() and self._index < len(self._books) - 1))
 
     # ------------------------------------------------------------------
     # Result, read by main_window._run_lookup_dialog

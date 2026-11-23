@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-11-23#01 -- Comic Vine: Auto for the rest of the series
+
+- **▶| Auto**, a new green player button between ▶ and ▶▶ in Look Up via Comic Vine. Once you have found the right series, it uses the shown issue and then does the same for each following file: the issue with that file's number in the same series. No more pressing ▶ for every issue of a long run.
+- It stops by itself, and leaves that file on screen to do by hand, when a file has another series name, a number the series does not have, no number, or a year more than one year from the issue's cover date. While it runs, ▶| becomes a pause button; pause, ◀◀ or Search takes over at any time.
+- One file a second at most, and only after the previous file's details are back, to stay under Comic Vine's speed limit.
+- Everything still goes through the usual overwrite review before anything is written.
+
 ## 2026-11-21#06 -- GCD: Count, Alternate Series, Age Rating
 
 - **Count**, for a series that has ended: Preacher gives 66. A series still running gets no Count, because the number would be out of date next month. Variant covers are not counted as issues (Thor 2018 is 16 issues, not its 55 covers).
