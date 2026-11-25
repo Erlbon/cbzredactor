@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-11-25#01 -- Auto-Number opens on Number
+
+- **Edit > Auto-Number...** now opens with **Number** chosen as the field, instead of Title. The other fields are still in the list.
+
 ## 2026-11-23#01 -- Comic Vine: Auto for the rest of the series
 
 - **▶| Auto**, a new green player button between ▶ and ▶▶ in Look Up via Comic Vine. Once you have found the right series, it uses the shown issue and then does the same for each following file: the issue with that file's number in the same series. No more pressing ▶ for every issue of a long run.

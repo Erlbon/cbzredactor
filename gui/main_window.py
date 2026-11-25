@@ -2742,7 +2742,10 @@ class MainWindow(QMainWindow):
         def get_value(book: CbzBook, field_key: str) -> str:
             return getattr(book.metadata, field_key, "")
 
-        fields = [(key, label, key in _AUTO_NUMBER_NUMERIC_FIELDS) for key, label in _FIELD_LABELS.items()]
+        # Number (the issue number, the comic's "track") comes first so the
+        # dialog opens on it; Title first was a bewildering default.
+        order = ["number", *(key for key in _FIELD_LABELS if key != "number")]
+        fields = [(key, _FIELD_LABELS[key], key in _AUTO_NUMBER_NUMERIC_FIELDS) for key in order]
         dialog = AutoNumberingDialog(
             target_books, fields, get_value,
             lambda book: os.path.basename(book.path),
