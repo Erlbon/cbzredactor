@@ -120,8 +120,10 @@ def test_no_build_is_packed_with_upx():
 def test_build_exe_builds_both_programs_and_the_installer_with_this_repos_venv():
     bat = read("build_exe.bat")
     commands = [line for line in bat.splitlines() if not line.lstrip().upper().startswith(("REM", "ECHO"))]
-    assert "venv_sync.py" in bat and not any("pip install" in line for line in commands)
-    assert bat.count(".venv\\Scripts\\python -m PyInstaller cbzredactor.spec --noconfirm") == 2
+    assert "venv_sync.py --build ." in bat and not any("pip install" in line for line in commands)
+    # the clean build venv (no shared packages): the test .venv let PyInstaller bundle what was installed on the PC
+    assert bat.count(".venv-build\\Scripts\\python -m PyInstaller cbzredactor.spec --noconfirm") == 2
+    assert not any(".venv\\Scripts" in line for line in commands)
     assert bat.index('set "CBZREDACTOR_BUILD="') < bat.index('set "CBZREDACTOR_BUILD=folder"')
     assert "installer\\cbzredactor.iss" in bat and "--no-pause" in bat
     for built in ("dist\\cbzredactor.exe", "dist\\cbzredactor\\cbzredactor.exe", "dist\\cbzredactor-setup.exe"):
