@@ -90,7 +90,7 @@ def test_one_file_selected_offers_every_selection_command(window):
                       "Number Issues…", "Credit Pages…"]),
         ("Bulk Edit", BULK),
         ("Repair", REPAIR),
-        "---", "Redact",
+        "---", "Redact", "---", "Delete Files (Recycle Bin)…",
     ]
 
 
@@ -101,7 +101,7 @@ def test_several_files_selected_drops_the_single_file_entries(window):
     assert "Credit Pages…" not in organize[1]
     assert "Number Issues…" in organize[1]
     assert ("Repair", REPAIR) in layout and ("Bulk Edit", BULK) in layout
-    assert "Remove from List" not in layout and layout[-1] == "Redact"
+    assert "Remove from List" not in layout and layout[-1] == "Delete Files (Recycle Bin)…"
 
 
 def test_nothing_selected_still_offers_the_all_files_commands(window):
@@ -156,7 +156,7 @@ def test_book_needing_conversion_gets_convert_and_no_editing_entries(tmp_path):
     assert layout == [
         "---", "Preview…", "Rename File…", "Move to Folder…", "---",
         ("Organize", ["Rename / Export / Move…"]),
-        "---", "Redact", "Convert 1 File(s) to CBZ",
+        "---", "Redact", "Convert 1 File(s) to CBZ", "---", "Delete Files (Recycle Bin)…",
     ]
 
 

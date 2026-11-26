@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-11-26#02 -- Delete Files (Recycle Bin), and the Delete key asks what you mean
+
+- **New: File > Delete Files (Recycle Bin)...** (Shift+Delete, also in the right-click menu). It asks first, then sends the selected files to the Recycle Bin and takes them off the list. A file with unsaved changes is not deleted: it stays in the list and the warning says so. The status bar tells you how many went.
+- **The Delete key asks: Remove from List, Delete Files (Recycle Bin) or Cancel.** Before, Delete only took the comic off the list and left the file on disk, which is not what most people expect. Remove from List is the default button, so Delete then Enter never deletes a file. Choosing Delete Files sends the files to the Recycle Bin at once (no second question). File > Remove from List and File > Delete Files still act at once from the menu, and Remove from List has no shortcut now.
+- The question comes from redactor_common 2026-11-26-02. The previous release already moved this app from 2026-11-21-02 to that tag, so the pin does not change here.
+
 ## 2026-11-26#01 -- Check for Updates installs the new version itself; a Windows installer -- redactor_common 2026-11-26-02
 
 - **Help > Check for Updates installs the update** instead of only opening the download page. The app is on the

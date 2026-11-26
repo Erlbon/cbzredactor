@@ -50,7 +50,9 @@ command is also searchable in the **Command Palette** (Ctrl+K).
   Rename File... (F2), Undo
   Last Rename, Rename / Export / Move... (Ctrl+E), Rename / Export / Move
   Macros (slots 1-5 on **Ctrl+Shift+1** to **Ctrl+Shift+5**), Export /
-  Import Settings..., Remove from List (Del), Clear List, Exit.
+  Import Settings..., Remove from List, Delete Files (Recycle Bin)
+  (Shift+Del), Clear List, Exit. The **Delete key** asks which of the two
+  you mean.
 - **Edit**: Undo (Ctrl+Z), Redo (Ctrl+Y), Apply to Selected
   (Ctrl+Enter), **Redact** (Ctrl+Shift+E), Edit Redact Recipe..., Search
   and Replace... (Ctrl+H), Change Case..., Auto-Number....
@@ -101,7 +103,15 @@ selection.
   filename itself, actually renaming the file on accept) -- both show
   a before/after preview with a per-row Apply checkbox before anything
   is written.
-- **Remove from List** (Del), **Refresh List** (F5, View menu), and **Clear
+- **Delete Files (Recycle Bin)** (File menu, right-click, Shift+Del) sends
+  the selected files to the Recycle Bin (recoverable, not a permanent
+  delete), asks first, and takes them off the list. A file with unsaved
+  changes is refused and stays; the status bar says how many went.
+- **The Delete key** asks what you mean: **Remove from List** (the default;
+  the files stay on disk), **Delete Files (Recycle Bin)** or **Cancel**.
+  The two File menu items act at once without this question (Delete Files
+  still confirms).
+- **Remove from List**, **Refresh List** (F5, View menu), and **Clear
   List** (File menu) manage the loaded list itself -- Remove/Clear only
   ever touch the in-memory list, never disk (both ask first when a
   removed file has unsaved edits); Refresh re-scans the

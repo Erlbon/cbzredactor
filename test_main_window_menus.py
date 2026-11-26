@@ -51,7 +51,7 @@ def test_file_menu_structure():
         "Save As…", "Save All", "---",
         "Rename File…", "Undo Last Rename", "Rename / Export / Move…", "Move to Folder…", "Rename / Export / Move Macros", "---",
         "Export Settings…", "Import Settings…", "---",
-        "Remove from List", "Clear List", "---",
+        "Remove from List", "Clear List", "Delete Files (Recycle Bin)…", "---",
         "Exit",
     ]
 
@@ -306,7 +306,7 @@ def test_right_click_menu_is_the_short_core_plus_submenus(monkeypatch):
     items = _context_items(window, monkeypatch)
     actions = [i for i in items if isinstance(i, QAction)]
     assert window.actions_["redact"] in actions
-    assert window.actions_["remove_from_list"] not in actions  # File menu (Delete key) only
+    assert window.actions_["remove_from_list"] not in actions  # File menu only (the Delete key asks which)
     organize = next(i for i in items if isinstance(i, mw.Submenu) and "Organize" in i.text)
     assert window.actions_["rename_export_move"] in organize.items
     assert actions[-1] is window.actions_["redact"]  # Redact is the last plain entry

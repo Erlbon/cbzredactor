@@ -103,6 +103,7 @@ from redactor_common.gui.standard_menus import (
     StandardMenuSpec,
     build_standard_menu_bar,
     get_action_registry,
+    remove_or_delete_action,
     look_up_submenu,
     set_apply_count,
     standard_edit_items,
@@ -131,6 +132,7 @@ from core.cbz_file import CbzBook, CbzError, ResizeCancelled, path_needs_convers
 from core import crash_log, history
 from core.comicinfo_check import SCAN_ISSUES, check_book, scan_status
 from core.foreign_archive_convert import relabel_mislabeled_cbz
+from redactor_common.gui.remove_or_delete import DELETE, REMOVE, ask_remove_or_delete
 from redactor_common.core.trash import TrashError, move_to_trash, trash_with_retries
 from core.image_resize import ResizeOptions
 from core.page_dimensions import SIZE_LOW, SIZE_OK, SIZE_OVERSIZED, PageSizeStats
@@ -580,6 +582,7 @@ class MainWindow(QMainWindow):
             undo_last_rename=self.undo_last_rename,
             rename_export_move=self.open_rename_dialog,
             remove_from_list=self.remove_selected,
+            delete_files=self.delete_files,
             clear_list=self.clear_list,
             # No explicit shortcut -- Alt+F4 already closes this (or any)
             # plain QMainWindow at the OS level, independent of anything bound here.
@@ -688,9 +691,14 @@ class MainWindow(QMainWindow):
             file=file_items, edit=edit_items, view=view_items,
             app_menus=[AppMenu(labels.MENU_METADATA, metadata_items), AppMenu(labels.MENU_REPAIR, repair_items)],
             tools=tools_items, help=help_items,
+            # The Delete key asks Remove from List or Delete Files (Erlend, 2026-11-26): Remove from
+            # List alone left the file on disk, which is not what most people expect from Delete.
+            hidden=[remove_or_delete_action(self.on_delete_key)],
         )
         build_standard_menu_bar(self, spec)
         registry = get_action_registry(self)
+        registry["delete_files"].setText("&Delete Files (Recycle Bin)…")
+        registry["delete_files"].setToolTip("Send the selected comics' files to the Recycle Bin (Shift+Delete)")
         attach_include_subfolders(
             registry["include_subfolders"], load=app_settings.load_include_subfolders, save=app_settings.save_include_subfolders,
         )
@@ -992,7 +1000,10 @@ class MainWindow(QMainWindow):
                 "convert_selected", f"Convert {len(selected_unconverted)} File(s) to CBZ",
                 lambda: self.convert_books_to_cbz(selected_unconverted),
             ))
-        return items  # Remove from List: File menu (Delete key) only
+        if self._selected_rows:
+            items.append(Separator())
+            items.append(a["delete_files"])
+        return items  # Remove from List: File menu only (the Delete key asks which)
 
     def _context_menu_books(self) -> list[CbzBook]:
         """What the right-click menu is about: the selected files -- including
@@ -1909,8 +1920,7 @@ class MainWindow(QMainWindow):
 
     def remove_selected(self) -> None:
         """Removes the selected files from this list only -- never
-        touches anything on disk (see Delete Files, if this app grows
-        one, for that; not offered here yet). Excludes by row index,
+        touches anything on disk (Delete Files does that). Excludes by row index,
         not object identity -- CbzBook is a plain @dataclass, so it has
         a value-based __eq__ (and is therefore unhashable), making a
         set-of-books membership check both wrong (two files with
@@ -1933,6 +1943,87 @@ class MainWindow(QMainWindow):
         self._rebuild_table()
         self._show_idle_panel()
         self._update_status()
+
+    def on_delete_key(self) -> None:
+        """The Delete key: asks whether the selected comics are to be removed from the list (the files
+        stay) or sent to the Recycle Bin. Remove from List is the default button, so Delete then Enter
+        never deletes a file. The menu items act at once; this question is only for the key."""
+        rows = [r for r in self._selected_rows if r < len(self.books)]
+        if not rows:
+            self.statusBar().showMessage("Delete: select the comics first.", 6000)
+            return
+        choice = ask_remove_or_delete(
+            self, len(rows), names=[os.path.basename(self.books[r].path) for r in rows], noun="comic",
+        )
+        if choice == REMOVE:
+            self.remove_selected()
+        elif choice == DELETE:
+            self.delete_files(confirm=False)  # the question above already asked
+
+    def delete_files(self, confirm: bool = True) -> None:
+        """Sends the selected comics' files to the Recycle Bin (recoverable, not a permanent delete) and
+        removes them from the list. `confirm=False` skips the Yes/No question (the Delete key's own
+        question already asked). A comic with unsaved changes is never trashed: it would silently throw
+        the edits away, so it is reported as failed and stays in the list."""
+        self._commit_current_edits()  # a pending panel edit counts as an unsaved change
+        to_delete = [self.books[r] for r in self._selected_rows if r < len(self.books)]
+        if not to_delete:
+            QMessageBox.information(self, "No comics selected", "Select at least one comic to delete.")
+            return
+        if confirm:
+            preview = "\n".join(f"- {os.path.basename(b.path)}" for b in to_delete[:10])
+            if len(to_delete) > 10:
+                preview += f"\n...and {len(to_delete) - 10} more"
+            reply = QMessageBox.question(
+                self,
+                "Delete Files (Recycle Bin)?",
+                f"Send {len(to_delete)} file(s) to the Recycle Bin?\n\n{preview}\n\n"
+                "This removes them from disk (recoverable from the Recycle Bin) "
+                "and from this list.",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if reply != QMessageBox.StandardButton.Yes:
+                return
+
+        deleted: list[CbzBook] = []
+        errors: list[tuple[str, str]] = []
+
+        def _trash(book: CbzBook, _i: int) -> None:
+            try:
+                if book.dirty:
+                    raise TrashError("has unsaved changes -- save or discard them first (File > Save All)")
+                _trash_retrying(book.path)
+                deleted.append(book)
+            except TrashError as exc:
+                errors.append((book.path, str(exc)))
+
+        # Cancellable: each file is trashed independently, so stopping partway leaves the rest
+        # untouched and in the list.
+        run_with_progress(
+            self, to_delete, _trash, "Deleting files…", threshold=LOAD_PROGRESS_THRESHOLD,
+            label_for=lambda book: f"Deleting: {os.path.basename(book.path)}",
+        )
+
+        trashed_ids = {id(b) for b in deleted}
+        self.books = [b for b in self.books if id(b) not in trashed_ids]
+        self._selected_rows = []
+        self.undo_manager.clear()  # its entries would reference book objects just discarded
+        self._update_undo_action()
+        self._update_redo_action()
+        self._rebuild_table()
+        self._show_idle_panel()
+        self._update_status()
+
+        if errors:
+            details = "\n".join(f"- {os.path.basename(p)}: {err}" for p, err in errors)
+            QMessageBox.warning(
+                self, "Some files failed to delete",
+                f"{len(deleted)} of {len(to_delete)} sent to the Recycle Bin.\n\nFailed:\n{details}",
+            )
+        else:
+            # Success needs no extra click: the rows are already gone from the list.
+            self.statusBar().showMessage(f"Sent {len(deleted)} file(s) to the Recycle Bin.", 8000)
 
     def clear_list(self) -> None:
         if not self.books:

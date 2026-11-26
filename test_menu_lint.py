@@ -73,7 +73,7 @@ def test_shortcuts_are_the_family_keys():
     expected = {
         "open_files": ["Ctrl+O"], "open_folder": ["Ctrl+Shift+O"], "save_as": ["Ctrl+Shift+S"],
         "save_all": ["Ctrl+S", "Ctrl+Shift+A"], "rename_file": ["F2"], "rename_export_move": ["Ctrl+E"],
-        "remove_from_list": ["Del"], "refresh_list": ["F5", "Ctrl+R"], "undo": ["Ctrl+Z"], "redo": ["Ctrl+Y"],
+        "remove_or_delete": ["Del"], "delete_files": ["Shift+Del"], "refresh_list": ["F5", "Ctrl+R"], "undo": ["Ctrl+Z"], "redo": ["Ctrl+Y"],
         "search_replace": ["Ctrl+H"], "parse_filename": ["Ctrl+I"], "redact": ["Ctrl+Shift+E"],
         "command_palette": ["Ctrl+K"],
     }
