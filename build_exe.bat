@@ -1,11 +1,20 @@
 @echo off
-REM Builds a standalone Windows .exe using PyInstaller.
-REM Run this from a Windows machine with Python 3.10+ installed.
+REM Builds everything a release publishes, with this repo's own .venv:
+REM   dist\cbzredactor.exe        the one-file program (the portable download; update channel windows-exe)
+REM   dist\cbzredactor-setup.exe  the per-user installer around the one-folder build (channel windows-installer)
+REM Run this from a Windows machine with Python 3.11+ and Inno Setup 6 (https://jrsoftware.org/isdl.php; a per-user
+REM install is enough).
+REM
+REM Checks the result of every step and stops with a clear message on
+REM failure, instead of continuing to a false "Done" message.
 REM
 REM Does NOT bump the version number -- run bump_version.py yourself
-REM first if this build should carry a new version.
+REM first if this build should carry a new version. Does not publish anything either: a release is made with
+REM .venv\Scripts\python -m redactor_common.release publish (pyproject.toml), which runs this with --no-pause.
 
 cd /d "%~dp0"
+set "PAUSE=pause"
+if "%~1"=="--no-pause" set "PAUSE="
 echo Working directory: %cd%
 echo.
 
@@ -14,12 +23,25 @@ python --version
 if errorlevel 1 (
     echo.
     echo ERROR: "python" was not found on your PATH.
-    echo Install Python 3.10+ from python.org and make sure to check
+    echo Install Python 3.11+ from python.org and make sure to check
     echo "Add python.exe to PATH" during installation, then try again.
-    pause
+    %PAUSE%
     exit /b 1
 )
 echo.
+
+set "ISCC="
+for %%P in ("%LOCALAPPDATA%\Programs\Inno Setup 6\ISCC.exe" "%ProgramFiles(x86)%\Inno Setup 6\ISCC.exe" "%ProgramFiles%\Inno Setup 6\ISCC.exe") do (
+    if exist %%P set "ISCC=%%~P"
+)
+if not defined ISCC (
+    where iscc >nul 2>nul && set "ISCC=iscc"
+)
+if not defined ISCC (
+    echo ERROR: Inno Setup 6 was not found. Install it from https://jrsoftware.org/isdl.php
+    %PAUSE%
+    exit /b 1
+)
 
 echo Making this repo's own .venv at the redactor_common pin ^(a minute the first time^)...
 REM Never "pip install -r requirements.txt" into the shared Python: one repo's pin then breaks the others (2026-11-04).
@@ -28,38 +50,83 @@ if errorlevel 1 (
     echo.
     echo ERROR: venv_sync failed. It lives in ..\redactor-build-tools\devenv\ next to this repo;
     echo common causes: that folder is missing, no internet connection, or a proxy/firewall blocking pip.
-    pause
+    %PAUSE%
     exit /b 1
 )
 echo.
 
-echo Building cbzredactor.exe ...
 REM "python -m PyInstaller" with the .venv's python: the pyinstaller console script is often not on PATH.
-REM
-REM No UPX (2026-10-30): the spec has upx=False, because Defender
-REM flagged the UPX-packed release exe as a trojan (false positive).
+REM No UPX: the spec has upx=False (Defender flagged a UPX-packed sibling exe, a false positive).
+echo Building dist\cbzredactor.exe ...
+set "CBZREDACTOR_BUILD="
 .venv\Scripts\python -m PyInstaller cbzredactor.spec --noconfirm
 if errorlevel 1 (
     echo.
     echo ERROR: PyInstaller failed. See the error output above for details.
-    echo Common causes: missing Python dependencies or a PyQt6 install
-    echo problem.
-    pause
+    %PAUSE%
     exit /b 1
 )
-echo.
-
 if not exist "dist\cbzredactor.exe" (
     echo.
-    echo ERROR: PyInstaller reported success but dist\cbzredactor.exe
-    echo was not found. Please copy the full output above and report it.
-    pause
+    echo ERROR: PyInstaller reported success but dist\cbzredactor.exe was not found.
+    %PAUSE%
+    exit /b 1
+)
+echo.
+
+echo Building the one-folder program dist\cbzredactor\ for the installer ...
+set "CBZREDACTOR_BUILD=folder"
+.venv\Scripts\python -m PyInstaller cbzredactor.spec --noconfirm
+if errorlevel 1 (
+    echo.
+    echo ERROR: PyInstaller failed on the one-folder build. See above.
+    %PAUSE%
+    exit /b 1
+)
+set "CBZREDACTOR_BUILD="
+if not exist "dist\cbzredactor\cbzredactor.exe" (
+    echo.
+    echo ERROR: PyInstaller reported success but dist\cbzredactor\cbzredactor.exe was not found.
+    %PAUSE%
+    exit /b 1
+)
+echo.
+
+REM The family's installer contract (relaunch, update-channel, waiting for the program to stop) ships with redactor_common.
+set "CONTRACT="
+for /f "delims=" %%p in ('.venv\Scripts\python -m redactor_common.release contract-path') do set "CONTRACT=%%p"
+if not defined CONTRACT (
+    echo ERROR: redactor_common's installer contract was not found ^(python -m redactor_common.release contract-path^).
+    %PAUSE%
+    exit /b 1
+)
+set "APPBUILD="
+for /f "usebackq delims=" %%L in (`.venv\Scripts\python -c "from core.version import APP_VERSION; print(APP_VERSION)"`) do set "APPBUILD=%%L"
+if not defined APPBUILD (
+    echo ERROR: could not read APP_VERSION from core\version.py.
+    %PAUSE%
+    exit /b 1
+)
+
+echo Building dist\cbzredactor-setup.exe ...
+"%ISCC%" /Q "/DAppBuild=%APPBUILD%" "/DUpdateContract=%CONTRACT%" installer\cbzredactor.iss
+if errorlevel 1 (
+    echo.
+    echo ERROR: the installer build failed. See above.
+    %PAUSE%
+    exit /b 1
+)
+if not exist "dist\cbzredactor-setup.exe" (
+    echo.
+    echo ERROR: Inno Setup reported success but dist\cbzredactor-setup.exe was not found.
+    %PAUSE%
     exit /b 1
 )
 
 echo.
 echo ================================================================
-echo  SUCCESS. Your app is at: %cd%\dist\cbzredactor.exe
-echo  That one file can be copied anywhere and run with no Python
-echo  install needed.
+echo  SUCCESS. Built with this repo's .venv:
+echo    %cd%\dist\cbzredactor.exe        ^(one file, can be copied anywhere and run^)
+echo    %cd%\dist\cbzredactor-setup.exe  ^(per-user installer^)
 echo ================================================================
+%PAUSE%

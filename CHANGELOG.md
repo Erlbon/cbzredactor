@@ -1,5 +1,29 @@
 # Changelog
 
+## 2026-11-26#01 -- Check for Updates installs the new version itself; a Windows installer -- redactor_common 2026-11-26-02
+
+- **Help > Check for Updates installs the update** instead of only opening the download page. The app is on the
+  Redactor family's update framework (redactor_common docs/update-framework.md): every release carries an
+  `update-manifest.json` naming each download with its size and checksum, and every copy says how it was put on the
+  PC. The portable `cbzredactor.exe` replaces itself (the old one is kept as `cbzredactor.exe.old` until the next
+  start) and starts again; an installed copy runs the new installer silently and starts again. When it cannot update,
+  it says why, with a Copy details button, and still offers the download page.
+- **A Windows installer**, `cbzredactor-setup.exe`: per user, no administrator rights, into
+  `%LOCALAPPDATA%\Programs\The CBZ Redactor`, with a Start menu entry. The one-file `cbzredactor.exe` stays the
+  portable download.
+- **A copy on an older version must be updated by hand once**: download this release from the release page. Its
+  Check for Updates cannot read the new releases' manifest (decided for the whole family: no bridge for old copies).
+- The command line has `cbzredactor --check-update [--release-tag vX]` (prints what this copy would do, as JSON;
+  changes nothing) and `--update` (does it without a window), for the release gate.
+- Releases are now made with redactor_common's release tool (`pyproject.toml`), which builds the exe, the installer
+  and the manifest, publishes a pre-release, checks the update from the previous release, and only then makes it
+  Latest. The GitHub workflow no longer builds the Windows exe (its upload would replace the file the manifest
+  pins); it adds only the Linux download, when the release is published. The Linux build cannot replace itself: it
+  says so and opens the release page.
+- Shared code moved from redactor_common 2026-11-21-02 to 2026-11-26-02. For this app: `%dummy%` in a Parse Filename
+  pattern skips a piece of text (and may be used more than once). The rest is MusicBrainz and Discogs lookups, which
+  this app does not use, and the Delete key's new question, which applies only to apps with Delete Files.
+
 ## 2026-11-25#01 -- Auto-Number opens on Number
 
 - **Edit > Auto-Number...** now opens with **Number** chosen as the field, instead of Title. The other fields are still in the list.
