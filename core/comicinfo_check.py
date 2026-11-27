@@ -109,15 +109,15 @@ def check_metadata(meta, actual_pages: Optional[int] = None, today: Optional[dat
         add("page_count", f"says {meta.page_count} pages, the archive has {actual_pages}", str(actual_pages))
 
     year, month, day = trimmed.get("year") or meta.year, meta.month, meta.day
-    year_ok = year.isdigit() and 1800 <= int(year) <= today.year + 1
+    year_ok = year.isdecimal() and 1800 <= int(year) <= today.year + 1
     if year and not year_ok:
         add("year", f"{year!r} isn't a plausible year", "")
-    month_ok = month.isdigit() and 1 <= int(month) <= 12
+    month_ok = month.isdecimal() and 1 <= int(month) <= 12
     if month and not month_ok:
         add("month", f"{month!r} isn't a month (1-12)", "")
     if day:
         limit = calendar.monthrange(int(year), int(month))[1] if year_ok and month_ok else 31
-        if not (day.isdigit() and 1 <= int(day) <= limit):
+        if not (day.isdecimal() and 1 <= int(day) <= limit):
             add("day", f"{day!r} isn't a day of that month", "")
 
     for field in ("series", "title"):
@@ -134,7 +134,7 @@ def check_metadata(meta, actual_pages: Optional[int] = None, today: Optional[dat
         elif fix is not None:
             add("number", f"{number!r} -- written without a # or leading zeros", fix)
     count = trimmed["count"]
-    if number.isdigit() and count.isdigit() and int(count) and int(count) < int(number):
+    if number.isdecimal() and count.isdecimal() and int(count) and int(count) < int(number):
         add("count", f"Count {count} is lower than Number {number}")
 
     language = trimmed["language_iso"]

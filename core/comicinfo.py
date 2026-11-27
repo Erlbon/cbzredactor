@@ -206,7 +206,10 @@ def parse_comicinfo_xml(data: bytes) -> ComicInfoMetadata:
     as a load error for that one file, not a crash). Namespaces are
     ignored for tag comparison (some writers declare them on the root)."""
     root = shared.parse_comicinfo(data)
+    if _depth(root) > MAX_ELEMENT_DEPTH:
+        raise ComicInfoError(f"ComicInfo.xml nests elements more than {MAX_ELEMENT_DEPTH} levels deep")
     metadata = ComicInfoMetadata(root_attributes=dict(root.attrib))
+    seen = set()
     for child in root:
         tag = shared.local_name(child.tag)
         if not tag:
@@ -215,10 +218,38 @@ def parse_comicinfo_xml(data: bytes) -> ComicInfoMetadata:
         if tag == SCAN_STAMP_TAG:
             metadata.scan_stamp = (child.text or "").strip()
         elif attr and len(child) == 0:
-            setattr(metadata, attr, child.text or "")
+            if tag not in seen:  # a repeated field: the first copy wins, as in redactor_common's reader
+                seen.add(tag)
+                setattr(metadata, attr, child.text or "")
         else:
+            _strip_namespaces(child)
             metadata.extra_elements.append(child)
     return metadata
+
+
+# Deeper than this is a crafted file: writing or copying it would overflow Python's recursion limit.
+MAX_ELEMENT_DEPTH = 50
+
+
+def _depth(root: ET.Element) -> int:
+    """How many levels of elements `root` holds (1 for a root without children). Iterative."""
+    deepest = 1
+    stack = [(root, 1)]
+    while stack:
+        element, level = stack.pop()
+        deepest = max(deepest, level)
+        stack.extend((child, level + 1) for child in element)
+    return deepest
+
+
+def _strip_namespaces(element: ET.Element) -> None:
+    """Removes the namespace from this element, everything inside it and their attribute names, so a kept
+    <Pages> written under a default namespace is not saved as <ns0:Pages>."""
+    for node in element.iter():
+        if isinstance(node.tag, str):
+            node.tag = shared.local_name(node.tag)
+        for key in [k for k in node.attrib if k.startswith("{")]:
+            node.attrib[shared.local_name(key)] = node.attrib.pop(key)
 
 
 def serialize_comicinfo_xml(metadata: ComicInfoMetadata) -> bytes:

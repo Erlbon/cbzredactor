@@ -132,7 +132,7 @@ class _Entry:
 
 
 def _year(text: str) -> int:
-    return int(text) if text.isdigit() else 0
+    return int(text) if text.isdecimal() else 0
 
 
 def _describe_key(entry: _Entry) -> str:
@@ -626,7 +626,7 @@ def _months_apart(name: FileName, row: ScanRow) -> int:
     """Months between the date in the name and in ComicInfo (a year apart
     at most when either has no month)."""
     def valid(month: str) -> bool:
-        return month.isdigit() and 1 <= int(month) <= 12
+        return month.isdecimal() and 1 <= int(month) <= 12
     if not (valid(name.month) and valid(row.month)):  # only years to go by: a year's grace
         return max(0, abs(_year(name.year) - _year(row.year)) - 1) * 12
     return abs(_year(name.year) * 12 + int(name.month) - _year(row.year) * 12 - int(row.month))
@@ -677,7 +677,7 @@ def _find_mismatches(report, by_key) -> None:
                         number_key(row.number) not in {number_key(n) for n in re.findall(r"\b\d+\b", name.title)}:
                     found["Number"].append(Mismatch(row.path, "Number", name.number, row.number))
             volume = entry.key[1]
-            if volume.isdigit() and not name.is_tpb and row.volume.isdigit() and int(row.volume) < 1000:
+            if volume.isdecimal() and not name.is_tpb and row.volume.isdecimal() and int(row.volume) < 1000:
                 checked["Volume"] += 1
                 if int(row.volume) != int(volume):
                     found["Volume"].append(Mismatch(row.path, "Volume", f"v{volume}", row.volume))
@@ -687,7 +687,7 @@ def _find_mismatches(report, by_key) -> None:
                 checked["Year"] += 1
                 if _months_apart(name, row) > 2 and _year(name.year) != _year(row.year):
                     found["Year"].append(Mismatch(row.path, "Year", name.year, row.year))
-            if name.month and row.month and name.month.isdigit() and row.month.isdigit():
+            if name.month and row.month and name.month.isdecimal() and row.month.isdecimal():
                 checked["Month"] += 1
                 if _year(name.year) == _year(row.year) and _months_apart(name, row) > 2:
                     found["Month"].append(Mismatch(row.path, "Month", name.month, row.month))
@@ -716,7 +716,7 @@ def _find_format_issues(report, info: ScanInfo, rows: list[ScanRow]) -> None:
             problems.append(f"ComicInfo.xml can't be read: {row.error}")
         if row.pages == "0":
             problems.append("no pages")
-        elif row.pages and row.page_count.isdigit() and int(row.page_count) != int(row.pages):
+        elif row.pages and row.page_count.isdecimal() and int(row.page_count) != int(row.pages):
             problems.append(f"PageCount says {row.page_count}, the archive has {row.pages} pages")
         length = len(root) + 1 + len(row.path)
         if length >= WINDOWS_PATH_LIMIT:

@@ -1,5 +1,21 @@
 # Changelog
 
+## 2026-11-27#04 -- Save and archive fixes
+
+- **Saving keeps the page list of a ComicInfo.xml that declares a namespace.** The Pages block is no longer
+  rewritten as `ns0:Pages`, which other readers could not find.
+- **AVIF, JXL, HEIC and TIFF pages count as pages.** Such comics no longer load with 0 pages, and a save no longer
+  writes PageCount 0.
+- **A repeated field keeps its first copy,** as the other Redactor tools read it, instead of the last.
+- **Resize no longer leaves the old page sizes in ComicInfo.xml.** The width, height and size of each page entry
+  are dropped, since they no longer match.
+- **Odd digits (superscripts, circled numbers) no longer crash page names, Validate and Fix, or the Collection
+  Report.**
+- **A ComicInfo.xml with thousands of nested elements is refused on load** with a message, instead of loading and
+  then crashing every save.
+- **Save As onto the comic's own file is treated as a normal save,** so the row is no longer left marked Modified.
+- **A huge ComicInfo.xml or first page is no longer unpacked into memory before its size is checked.**
+
 ## 2026-11-27#03 -- Save and scan fixes -- redactor_common 2026-11-27-07
 
 - **A stray control character no longer crashes Save.** Text pasted into a field with a hidden character (a form

@@ -48,7 +48,7 @@ from dataclasses import asdict, dataclass, fields
 from typing import Callable, Iterator, Optional
 
 from core.archive_sniff import CONTAINER_ZIP, detect_container, extension_label
-from core.cbz_file import _is_image, page_sort_key
+from core.cbz_file import MAX_PREVIEW_PAGE_BYTES, _is_image, _read_comicinfo_limited, page_sort_key
 from core.comicinfo import ComicInfoError, parse_comicinfo_xml
 from core.comicinfo_locate import find_comicinfo_entry
 from core.cover_stamp import make_stamp, read_stamp, write_comment
@@ -191,6 +191,8 @@ def cover_fingerprint(archive: zipfile.ZipFile, names: list[str],
         return stamp[0], key
     if known and key in known:
         return known[key], key
+    if info.file_size > MAX_PREVIEW_PAGE_BYTES:
+        return "", key  # a hostile giant page is not unpacked for a fingerprint
     try:
         image = open_page_image(archive.read(pages[0]))
         return ("" if is_plain(image) else f"{dhash(image):016x}"), key
@@ -242,8 +244,8 @@ def _read_comic(root: str, listed: Listed, cover: bool = False,
             if info_name is None:
                 row.comicinfo = "no"
                 return row
-            data = archive.read(info_name)
-    except (zipfile.BadZipFile, OSError, RuntimeError, ValueError, EOFError, zlib.error) as exc:
+            data = _read_comicinfo_limited(archive, info_name)
+    except (zipfile.BadZipFile, OSError, RuntimeError, ValueError, EOFError, zlib.error, ComicInfoError) as exc:
         # zlib.error / EOFError: a damaged or cut-off ComicInfo.xml entry.
         # Raised here, it ended the whole collection scan.
         row.error = f"can't be opened: {exc}"

@@ -34,14 +34,14 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from typing import Callable, Optional
 
-from redactor_common.core.comicinfo_write import comicinfo_rewrite_plan
+from redactor_common.core.comicinfo_write import MAX_COMICINFO_BYTES, comicinfo_rewrite_plan
 from redactor_common.core.scan_stamp import ScanStamp, make_stamp, parse_stamp
 
 from core.cbz_fingerprint import cbz_fingerprint
 from core.archive_sniff import CONTAINER_UNKNOWN, CONTAINER_ZIP, detect_container
 from core.comicinfo import ComicInfoError, ComicInfoMetadata, parse_comicinfo_xml, serialize_comicinfo_xml
 from core.image_resize import OUTPUT_FORMAT_EXTENSIONS, ResizeOptions, resize_page
-from core.comicinfo_locate import locate_comicinfo
+from core.comicinfo_locate import find_comicinfo_entry, locate_comicinfo
 from core import history
 from core.history import KIND_SAVE, diff_fields, fields_text
 from core.zip_names import open_zip
@@ -66,7 +66,10 @@ _FORMAT_EXTENSION_FAMILY = {"JPEG": (".jpg", ".jpeg"), "WEBP": (".webp",)}
 # rule) -- anything else (ComicInfo.xml itself, a stray Thumbs.db, an
 # NFO file some scan groups include) is preserved on save but not
 # counted as a page.
-IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp"}
+IMAGE_EXTENSIONS = {
+    ".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp",
+    ".avif", ".jxl", ".heic", ".heif", ".tif", ".tiff", ".jfif", ".jpe", ".jp2",
+}
 COMICINFO_NAME = "ComicInfo.xml"
 
 # Page formats that are already compressed: deflating them again costs a lot
@@ -82,6 +85,18 @@ _ZIP_ERRORS = ZIP_ERRORS  # see core/zip_rewrite.py
 
 # The page turner never reads a single page entry bigger than this into memory.
 MAX_PREVIEW_PAGE_BYTES = 64 * 1024 * 1024
+
+
+def _read_comicinfo_limited(zf, name: str) -> bytes:
+    """The ComicInfo.xml entry's bytes, never more than MAX_COMICINFO_BYTES in memory: the declared size
+    is checked before unpacking, and the read itself is capped in case the header understates it."""
+    if zf.getinfo(name).file_size > MAX_COMICINFO_BYTES:
+        raise ComicInfoError(f"ComicInfo.xml is {zf.getinfo(name).file_size:,} bytes, too large to read safely")
+    with zf.open(name) as entry:
+        data = entry.read(MAX_COMICINFO_BYTES + 1)
+    if len(data) > MAX_COMICINFO_BYTES:
+        raise ComicInfoError("ComicInfo.xml is too large to read safely")
+    return data
 
 
 class ResizeCancelled(RewriteCancelled):
@@ -113,7 +128,8 @@ def page_sort_key(name: str) -> list:
     ("2.webp" before "10.webp"), case ignored -- as comic readers do.
     Plain text sorting put "10" before "2", and real archives number
     pages unpadded (seen 2026-09-29: "1.webp", "2.webp", "10.webp")."""
-    return [int(part) if part.isdigit() else part.casefold() for part in _DIGITS_RE.split(name)]
+    # isdecimal, not isdigit: "²" and "①" are digits to isdigit but int() refuses them.
+    return [int(part) if part.isdecimal() else part.casefold() for part in _DIGITS_RE.split(name)]
 
 
 def _is_image(name: str) -> bool:
@@ -246,6 +262,34 @@ class PageResizer:
         self.summary.new_bytes += size
 
 
+_PAGE_SIZE_ATTRIBUTES = ("ImageWidth", "ImageHeight", "ImageSize")
+
+
+def _without_page_sizes(data: bytes) -> Optional[bytes]:
+    """ComicInfo.xml bytes with ImageWidth, ImageHeight and ImageSize dropped from every <Page> (a resize
+    makes them wrong), or None when there is nothing to drop or the file cannot be read (it is then copied as
+    it is)."""
+    try:
+        metadata = parse_comicinfo_xml(data)
+    except ComicInfoError:
+        return None
+    changed = False
+    for element in metadata.extra_elements:
+        for node in element.iter():
+            if not isinstance(node.tag, str) or node.tag != "Page":
+                continue
+            for name in _PAGE_SIZE_ATTRIBUTES:
+                if name in node.attrib:
+                    del node.attrib[name]
+                    changed = True
+    if not changed:
+        return None
+    try:
+        return serialize_comicinfo_xml(metadata)
+    except ComicInfoError:
+        return None
+
+
 def resize_zip(
     src_path: str,
     dst_path: str,
@@ -269,11 +313,20 @@ def resize_zip(
     resizer: Optional[PageResizer] = None
     workers = workers or default_resize_workers()
 
+    info_name: Optional[str] = None
+
     def begin(entries) -> None:
-        nonlocal resizer
+        nonlocal resizer, info_name
         resizer = PageResizer(options, [entry.name for entry in entries if _is_image(entry.name)], workers)
+        info_name = find_comicinfo_entry([entry.name for entry in entries])
 
     def decide(entry, read):
+        if entry.name == info_name and entry.info.file_size <= MAX_COMICINFO_BYTES:
+            fresh = _without_page_sizes(read())
+            if fresh is not None:
+                resizer.summary.original_bytes += entry.info.file_size
+                resizer.summary.new_bytes += len(fresh)
+                return Action(data=fresh, date_time=now_date_time())
         if not _is_image(entry.name):
             resizer.passed_through(entry.info.file_size)
             return None  # copied untouched
@@ -389,7 +442,7 @@ class CbzBook:
                         f"(also: {', '.join(found.others)})"
                     )
                 if self.comicinfo_name:
-                    self.metadata = parse_comicinfo_xml(zf.read(self.comicinfo_name))
+                    self.metadata = parse_comicinfo_xml(_read_comicinfo_limited(zf, self.comicinfo_name))
                 else:
                     self.metadata = ComicInfoMetadata()
         except _ZIP_ERRORS as exc:
@@ -488,6 +541,8 @@ class CbzBook:
             return None
         try:
             with open_zip(self.path) as zf:
+                if zf.getinfo(self.first_page_name).file_size > MAX_PREVIEW_PAGE_BYTES:
+                    return None
                 return zf.read(self.first_page_name)
         except _ZIP_ERRORS:
             return None
@@ -522,7 +577,8 @@ class CbzBook:
         added/removed by something other than this tool since the
         metadata was last written."""
         stored = (self.metadata.page_count or "").strip()
-        return bool(stored) and stored.lstrip("-").isdigit() and int(stored) != self.actual_page_count
+        digits = stored.lstrip("-")
+        return bool(stored) and digits.isascii() and digits.isdigit() and int(stored) != self.actual_page_count
 
     # ------------------------------------------------------------------
     # Saving
@@ -562,7 +618,11 @@ class CbzBook:
             new_xml_bytes = serialize_comicinfo_xml(self.metadata)
         except ComicInfoError as exc:  # e.g. a control character pasted into a field: say so, don't crash
             raise CbzError(f"Cannot save, a field holds text ComicInfo.xml cannot store: {exc}") from exc
-        target = output_path or self.path
+        # Save As onto this very file (the dialog hands back forward slashes or another letter case) is an
+        # ordinary in-place save, not a copy.
+        own_file = not output_path or os.path.normcase(os.path.abspath(output_path)) == os.path.normcase(
+            os.path.abspath(self.path))
+        target = self.path if own_file else output_path
         # Preserve the original entry's name/case if it was at the archive root;
         # otherwise (none, or a nested one) write the spec-correct name at the
         # root. A nested source is dropped, so there are never two. A nested
@@ -575,7 +635,6 @@ class CbzBook:
         # target, so a path-too-long error can hit here even when the final,
         # shorter path would have just fit (describe_save_error() words that case).
         plan, write_name = comicinfo_rewrite_plan(self.comicinfo_name, new_xml_bytes)
-        own_file = output_path is None or output_path == self.path
         new_fields = fields_text(self.metadata)
         entry_id = None
         if journal_kind and history.history_enabled():  # opt-in: off records nothing
