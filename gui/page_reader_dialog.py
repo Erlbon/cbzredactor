@@ -100,16 +100,20 @@ class PageReaderDialog(OwnedDialog):
     # ------------------------------------------------------------ navigation
 
     def go_first(self) -> None:
-        self._moved(self.nav.first())
+        self._go("first")
 
     def go_previous(self) -> None:
-        self._moved(self.nav.previous())
+        self._go("previous")
 
     def go_next(self) -> None:
-        self._moved(self.nav.next())
+        self._go("next")
 
     def go_last(self) -> None:
-        self._moved(self.nav.last())
+        self._go("last")
+
+    def _go(self, move: str) -> None:
+        resynced = self._sync_with_book()  # the page list may have changed since the last step
+        self._moved(getattr(self.nav, move)() or resynced)
 
     def _moved(self, changed: bool) -> None:
         if changed:
@@ -156,7 +160,23 @@ class PageReaderDialog(OwnedDialog):
         self.image_label.setText(text)
         self.image_label.resize(self._viewport_size())
 
+    def _sync_with_book(self) -> bool:
+        """The pictures are read from the live book by position, so when the book's page list changes
+        while the reader is open (Remove Pages, Clean Up, rename, resize), the names and the cache here
+        must follow it: otherwise the page shown and the name displayed come from different lists."""
+        book = self._book
+        names = [] if book.load_error else list(book.page_names)
+        if names == self.nav.names:
+            return False
+        current = self.nav.current_name
+        self._loader.cancel()
+        self._prefetch.cancel()
+        self._cache = LruCache(CACHE_SIZE)
+        self.nav = PageNavigator(names, names.index(current) if current in names else self.nav.index)
+        return True
+
     def _show_current(self) -> None:
+        self._sync_with_book()
         self._update_chrome()
         if not self.nav.has_pages:
             self._loader.cancel()

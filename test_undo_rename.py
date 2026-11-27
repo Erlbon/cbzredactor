@@ -65,8 +65,18 @@ def test_multi_save_and_export_run_under_progress(tmp_path, monkeypatch):
     window.table.selectAll()
     for book in window.books:
         book.dirty = True
+    from redactor_common.gui import work_progress
+
+    counted = []
+    real_counted = work_progress.run_work_with_progress
+
+    def counted_spy(parent, total, label, work, cancellable=True, **kwargs):
+        counted.append((label, total, cancellable))
+        return real_counted(parent, total, label, work, cancellable, **kwargs)
+
+    monkeypatch.setattr(work_progress, "run_work_with_progress", counted_spy)
     window.save_all_changed()
-    assert ("Saving files...", 2, True) in calls
+    assert ("Saving files...", 2, True) in counted  # Save All: a worker thread under a counted, cancellable dialog
 
     def export(dialog):
         dialog.pattern_edit.setText("copy %series% %number%")

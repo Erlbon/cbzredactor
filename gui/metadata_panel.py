@@ -682,18 +682,30 @@ class ComicInfoPanel(QWidget):
             self.page_count_label.setText(page_count_text)
         finally:
             self._loading = False
+        self._loaded_values = self._widget_values()
+
+    def _widget_values(self) -> dict[str, str]:
+        """What each field's widget shows right now, as the text apply_to_metadata would write."""
+        values: dict[str, str] = {}
+        for attr, widget in self._line_edits.items():
+            values[attr] = (widget.toPlainText() if isinstance(widget, QPlainTextEdit) else widget.text()).strip()
+        values["age_rating"] = self.age_rating_combo.currentText().strip()
+        values["manga"] = self.manga_combo.currentText().strip()
+        values["black_and_white"] = self.black_and_white_combo.currentText().strip()
+        rating = self.community_rating_spin.value()
+        values["community_rating"] = f"{rating:.1f}" if rating > 0 else ""
+        return values
 
     def apply_to_metadata(self, metadata: ComicInfoMetadata) -> None:
-        """Writes every widget's current value back into `metadata` in
-        place. PageCount is deliberately not touched here -- see
-        core/cbz_file.py, which always recomputes it from the archive
-        itself at save time."""
-        for attr, widget in self._line_edits.items():
-            value = widget.toPlainText() if isinstance(widget, QPlainTextEdit) else widget.text()
-            setattr(metadata, attr, value.strip())
-
-        metadata.age_rating = self.age_rating_combo.currentText().strip()
-        metadata.manga = self.manga_combo.currentText().strip()
-        metadata.black_and_white = self.black_and_white_combo.currentText().strip()
-        rating = self.community_rating_spin.value()
-        metadata.community_rating = f"{rating:.1f}" if rating > 0 else ""
+        """Writes the fields the user changed back into `metadata` in place. A field whose widget still
+        shows what load_metadata() put there is left alone: the widgets trim text and round the rating,
+        and merely selecting a comic must not rewrite its Summary or Community Rating. PageCount is
+        deliberately not touched here -- see core/cbz_file.py, which always recomputes it from the
+        archive itself at save time."""
+        loaded = getattr(self, "_loaded_values", None) or {}
+        current = self._widget_values()
+        for attr, value in current.items():
+            if loaded.get(attr) == value:
+                continue
+            setattr(metadata, attr, value)
+        self._loaded_values = current

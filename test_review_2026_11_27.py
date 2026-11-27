@@ -403,3 +403,229 @@ def test_card4_a_page_missing_after_unpacking_refuses_the_conversion(tmp_path, m
         fac.convert_to_cbz(str(source), str(out))
     assert not out.exists()
     assert not os.path.exists(str(out) + ".tmp_convert")
+
+
+# ---------------------------------------------------------------------------
+# Batch 5: main window and panel (cards 3, 5, 10, 14, 18, 26, 41, 61)
+# ---------------------------------------------------------------------------
+
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+
+
+def _qapp():
+    import sys
+
+    from PyQt6.QtWidgets import QApplication
+
+    return QApplication.instance() or QApplication(sys.argv)
+
+
+_APP = _qapp()  # at import, as the other Qt test files do: conftest fixtures build Qt objects before any test runs
+
+
+@pytest.fixture
+def gui_env(tmp_path, monkeypatch):
+    """Offscreen app with settings and crash log redirected into tmp_path."""
+    from core import crash_log
+    from gui import app_settings
+    from redactor_common.gui import crash_dialog
+
+    _qapp()
+    monkeypatch.setattr(app_settings, "_settings_ini_path", lambda: str(tmp_path / "settings.ini"))
+    monkeypatch.setattr(crash_log, "log_path", lambda: str(tmp_path / "logs" / "cbzredactor_crash.log"))
+    monkeypatch.setattr(crash_dialog, "_reporter", None)
+    return tmp_path
+
+
+def _real_cbz(path, title="T") -> str:
+    with zipfile.ZipFile(path, "w") as zf:
+        zf.writestr("ComicInfo.xml", f"<ComicInfo><Title>{title}</Title></ComicInfo>")
+        zf.writestr("001.jpg", b"x")
+    return str(path)
+
+
+def _fake_book(name="a", **metadata_kwargs):
+    from core import history
+    from core.comicinfo import ComicInfoMetadata
+
+    book = CbzBook.__new__(CbzBook)  # bypass __post_init__'s real zip load
+    book.path = os.path.join(os.sep, "x", f"{name}.cbz")  # never touched on disk
+    book.metadata = ComicInfoMetadata(**metadata_kwargs)
+    book.page_names = []
+    book.comicinfo_name = None
+    book.load_error = ""
+    book.save_error = ""
+    book.dirty = False
+    book.baseline = history.fields_text(book.metadata)
+    return book
+
+
+def _fake_window(count, **metadata_kwargs):
+    from gui.main_window import MainWindow
+
+    window = MainWindow()
+    for i in range(count):
+        book = _fake_book(f"f{i}", **metadata_kwargs)
+        window.books.append(book)
+        window._add_table_row(book)
+    window._show_idle_panel()
+    return window
+
+
+def test_card3_undo_after_save_keeps_the_book_dirty(gui_env):
+    window = _fake_window(2)
+    books = list(window.books)
+    window._push_undo("Bulk edit", books)
+    for book in books:
+        book.metadata.genre = "Horror"
+        book.dirty = True
+    for book in books:  # what a Save does: the file now holds Horror
+        from core import history
+
+        book.baseline = history.fields_text(book.metadata)
+        book.dirty = False
+    window.undo_last_action()
+    for book in books:
+        assert book.metadata.genre == ""
+        assert book.dirty  # the file still says Horror, so this is an unsaved change
+    window.redo_last_action()
+    for book in books:
+        assert book.metadata.genre == "Horror"
+        assert not book.dirty  # back to what is on disk
+
+
+def test_card5_selecting_a_comic_does_not_rewrite_untouched_fields(gui_env):
+    window = _fake_window(1)
+    summary = "Line one" + chr(13) + chr(10) + "line two   "
+    book = window.books[0]
+    book.metadata.summary = summary
+    book.metadata.community_rating = "3.75"
+    book.metadata.title = "  padded  "
+    window.panel.load_metadata(book.metadata, None, "0 page(s)")
+    window.panel.apply_to_metadata(book.metadata)
+    assert book.metadata.summary == summary
+    assert book.metadata.community_rating == "3.75"
+    assert book.metadata.title == "  padded  "
+    window.panel._line_edits["title"].setText("  new  ")  # a real edit is still written (trimmed)
+    window.panel.apply_to_metadata(book.metadata)
+    assert book.metadata.title == "new"
+    assert book.metadata.summary == summary
+
+
+def test_card10_restore_from_history_asks_before_dropping_unsaved_edits(gui_env, monkeypatch):
+    from PyQt6.QtWidgets import QMessageBox
+
+    from gui.main_window import MainWindow
+
+    path = _real_cbz(gui_env / "one.cbz", "Disk")
+    window = MainWindow()
+    window._load_paths([path])
+    book = window.books[0]
+    book.metadata.title = "Unsaved"
+    book.dirty = True
+    asked = []
+    answer = [QMessageBox.StandardButton.No]
+    monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **k: asked.append(a) or answer[0]))
+    window._reload_restored([os.path.normcase(os.path.abspath(path))])
+    assert asked and book.metadata.title == "Unsaved" and book.dirty  # No: the edit survives
+    answer[0] = QMessageBox.StandardButton.Yes
+    window._reload_restored([os.path.normcase(os.path.abspath(path))])
+    assert book.metadata.title == "Disk" and not book.dirty
+
+
+def test_card14_undo_keeps_text_typed_in_the_panel(gui_env):
+    window = _fake_window(2)
+    books = list(window.books)
+    window._push_undo("Bulk edit", books)
+    for book in books:
+        book.metadata.genre = "Horror"
+        book.dirty = True
+    window.table.selectRow(0)
+    _qapp().processEvents()
+    assert window._selected_rows == [0]
+    window.panel._line_edits["title"].setText("Typed title")
+    window.undo_last_action()
+    assert books[0].metadata.genre == ""  # the step was undone
+    assert books[0].metadata.title == "Typed title"  # the typed text survived
+    assert books[0].dirty
+    assert window.panel._line_edits["title"].text() == "Typed title"
+    assert books[1].metadata.genre == ""
+
+
+def test_card18_the_same_file_is_not_listed_twice(gui_env):
+    from gui.main_window import MainWindow
+
+    first = _real_cbz(gui_env / "a.cbz")
+    second = _real_cbz(gui_env / "b.cbz")
+    window = MainWindow()
+    window._load_paths([first, second])
+    window._load_paths([first, second, first])
+    assert len(window.books) == 2 and window.table.rowCount() == 2
+    assert "already loaded" in window.statusBar().currentMessage()
+    # two loads of one file are two objects: never equal, found by identity
+    twin_a, twin_b = CbzBook(first), CbzBook(first)
+    assert twin_a != twin_b
+    assert [twin_a, twin_b].index(twin_b) == 1
+
+
+def test_card26_every_row_unticked_is_a_cancel_and_keeps_the_typed_fields(gui_env, monkeypatch):
+    from PyQt6.QtWidgets import QMessageBox
+
+    window = _fake_window(2)
+    monkeypatch.setattr(QMessageBox, "information", staticmethod(lambda *a, **k: None))
+    window.table.selectAll()
+    _qapp().processEvents()
+    window.panel._line_edits["genre"].setText("Horror")
+    monkeypatch.setattr(window, "_resolve_overwrite_conflicts", lambda books, changes: {i: {} for i in changes})
+    window._apply_bulk_edit()
+    assert not window.undo_manager.can_undo()
+    assert all(not book.dirty and book.metadata.genre == "" for book in window.books)
+    assert window.panel._line_edits["genre"].text() == "Horror"
+    assert not window.statusBar().currentMessage().startswith("Applied")
+
+
+def test_card41_save_all_rewrites_run_off_the_gui_thread(gui_env, monkeypatch):
+    import threading
+
+    from PyQt6.QtWidgets import QMessageBox
+
+    from gui.main_window import MainWindow
+
+    monkeypatch.setattr(QMessageBox, "warning", staticmethod(lambda *a, **k: None))
+    paths = [_real_cbz(gui_env / f"{n}.cbz") for n in ("A", "B", "C")]
+    window = MainWindow()
+    window._load_paths(paths)
+    threads = []
+    real_save = CbzBook.save
+
+    def spying_save(self, *a, **k):
+        threads.append(threading.current_thread())
+        return real_save(self, *a, **k)
+
+    monkeypatch.setattr(CbzBook, "save", spying_save)
+    for i, book in enumerate(window.books):
+        book.metadata.title = f"New {i}"
+        book.dirty = True
+    window.save_all_changed()
+    assert len(threads) == 3
+    assert all(t is not threading.main_thread() for t in threads)
+    assert window.statusBar().currentMessage() == "Saved 3 file(s)"
+    assert [CbzBook(p).metadata.title for p in paths] == ["New 0", "New 1", "New 2"]
+    assert not any(book.dirty for book in window.books)
+
+
+def test_card61_page_reader_follows_a_changed_page_list(gui_env):
+    from gui.page_reader_dialog import PageReaderDialog
+
+    path = _cbz_with_pages(gui_env / "r.cbz", {f"00{i}.png": _png(8, 8) for i in (1, 2, 3)})
+    book = CbzBook(path)
+    reader = PageReaderDialog(book)
+    assert reader.nav.names == ["001.png", "002.png", "003.png"]
+    book.page_names = ["002.png", "003.png"]  # what Remove Pages / Clean Up do to the open book
+    reader.go_next()
+    assert reader.nav.names == book.page_names
+    assert reader.name_label.text() == book.page_names[reader.nav.index]
+    assert reader.nav.count == 2
+    reader._loader.shutdown()
+    reader._prefetch.shutdown()
+    reader.close()

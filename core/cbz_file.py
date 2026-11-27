@@ -364,7 +364,7 @@ def path_needs_conversion(path: str) -> bool:
     return _needs_conversion(path, detect_container(path))
 
 
-@dataclass
+@dataclass(eq=False)  # a book is one loaded file: compared (list.index, ==) and hashed by identity, never by value
 class CbzBook:
     """One loaded CBZ file. Construct directly (`CbzBook(path)`) --
     loading happens immediately in __post_init__, same pattern as the

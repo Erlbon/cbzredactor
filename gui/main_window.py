@@ -129,6 +129,7 @@ from redactor_common.core.conversion_policy import (
 from core.archive_sniff import extension_label
 from core.page_cache import LruCache
 from core.cbz_file import CbzBook, CbzError, ResizeCancelled, path_needs_conversion
+from core.comicinfo import TAG_TO_ATTR
 from core import crash_log, history
 from core.comicinfo_check import SCAN_ISSUES, check_book, scan_status
 from core.foreign_archive_convert import relabel_mislabeled_cbz
@@ -1260,6 +1261,19 @@ class MainWindow(QMainWindow):
                 self._conversion_run = None
 
     def _load_paths(self, paths: list[str]) -> None:
+        # A file already in the list (or named twice in this batch) is not listed again: two rows for one
+        # file would let an edit on one copy show up on the wrong row.
+        seen = {os.path.normcase(os.path.abspath(b.path)) for b in self.books}
+        fresh: list[str] = []
+        already_loaded = 0
+        for path in paths:
+            key = os.path.normcase(os.path.abspath(path))
+            if key in seen:
+                already_loaded += 1
+                continue
+            seen.add(key)
+            fresh.append(path)
+        paths = fresh
         errors: list[str] = []
         choice, should_delete = self._resolve_foreign_choice(paths)
         foreign_count = sum(1 for p in paths if path_needs_conversion(p))
@@ -1333,7 +1347,9 @@ class MainWindow(QMainWindow):
 
         self._show_idle_panel()
         self._update_status()
-        if recent_skipped:
+        if already_loaded:
+            self.statusBar().showMessage(f"{already_loaded} file(s) were already loaded and were not added again.", 12000)
+        elif recent_skipped:
             self.statusBar().showMessage(
                 f"{len(recent_skipped)} file(s) were modified in the last {recent_minutes} minute(s), so they were "
                 "listed unconverted (right-click > Convert to CBZ converts them).", 12000,
@@ -1716,8 +1732,8 @@ class MainWindow(QMainWindow):
         changed_fields = self.panel.bulk_changed_fields()
         metadata_changes = {i: dict(changed_fields) for i in range(len(target_books))}
         metadata_changes = self._resolve_overwrite_conflicts(target_books, metadata_changes)
-        if metadata_changes is None:
-            return False
+        if metadata_changes is None or not any(metadata_changes.values()):
+            return False  # cancelled, or every row unticked: nothing to write, keep what was typed
 
         self._push_undo("Bulk edit", target_books)
         for i, fields in metadata_changes.items():
@@ -1766,8 +1782,12 @@ class MainWindow(QMainWindow):
         scan_stamp = book.metadata.scan_stamp
         book.metadata = snapshot["metadata"]
         book.metadata.scan_stamp = scan_stamp
-        book.dirty = snapshot["dirty"] or stamp_changed
-        book.stamp_only_dirty = stamp_changed and not snapshot["dirty"]
+        # Values that differ from what is on disk (a Save came after the edit being undone) are unsaved
+        # changes whatever the snapshot's flag says: the file still holds the newer values.
+        baseline = getattr(book, "baseline", None)
+        differs_from_disk = bool(baseline) and history.fields_text(book.metadata) != baseline
+        book.dirty = snapshot["dirty"] or stamp_changed or differs_from_disk
+        book.stamp_only_dirty = stamp_changed and not snapshot["dirty"] and not differs_from_disk
 
     def _push_undo(self, label: str, books: list[CbzBook]) -> None:
         """Call BEFORE mutating `books`, to capture their pre-change
@@ -1806,11 +1826,33 @@ class MainWindow(QMainWindow):
         # snapshot_fn passed too (not just restore_fn) so the state
         # being overwritten is captured onto the redo stack first --
         # see redactor_common.core.undo's own docstring.
-        affected = self.undo_manager.undo(self._restore_book, self._snapshot_book)
-        self._apply_undo_affected(affected)
+        self._undo_or_redo(lambda: self.undo_manager.undo(self._restore_book, self._snapshot_book))
 
     def redo_last_action(self) -> None:
-        affected = self.undo_manager.redo(self._restore_book, self._snapshot_book)
+        self._undo_or_redo(lambda: self.undo_manager.redo(self._restore_book, self._snapshot_book))
+
+    def _undo_or_redo(self, step) -> None:
+        """Runs undo/redo `step` without losing text typed in the panel but not yet committed: it is
+        committed first (a later edit than the step), and put back over the restored book afterwards."""
+        book, typed = None, {}
+        if len(self._selected_rows) == 1 and self._selected_rows[0] < len(self.books):
+            book = self.books[self._selected_rows[0]]
+            if book.needs_conversion:
+                book = None
+        if book is not None:
+            before = copy.deepcopy(book.metadata)
+            self._commit_current_edits()
+            for attr in TAG_TO_ATTR.values():
+                if getattr(book.metadata, attr, None) != getattr(before, attr, None):
+                    typed[attr] = getattr(book.metadata, attr)
+        else:
+            self._commit_current_edits()
+        affected = step()
+        if typed and book is not None and any(b is book for b in affected):
+            for attr, value in typed.items():
+                setattr(book.metadata, attr, value)
+            book.dirty = True
+            book.stamp_only_dirty = False
         self._apply_undo_affected(affected)
 
     # ------------------------------------------------------------------
@@ -2329,21 +2371,30 @@ class MainWindow(QMainWindow):
         def _fail(book, reason: str) -> None:
             report.failed.append((os.path.basename(book.path), reason))
 
-        def _step(row: int, _index: int) -> None:
-            book = self.books[row]
-            try:
-                book.save()
-            except CbzError as exc:
-                _fail(book, str(exc))
-            else:
-                report.saved += 1
-            self._refresh_table_row(row, book)
-
         def _on_error(row: int, exc: Exception) -> None:
             book = self.books[row]
             _fail(book, f"unexpected error: {exc}")
             crash_dialog.report_exception(exc, "Save All hit an unexpected error")
             self._refresh_table_row(row, book)
+
+        def _save_all_off_thread(progress) -> list[tuple[int, str, object]]:
+            """Worker thread: no widgets here. Saves each row in turn and notes the outcome."""
+            outcomes: list[tuple[int, str, object]] = []
+            for index, row in enumerate(rows):
+                if progress.should_cancel():
+                    break
+                book = books[index]
+                progress.set_label(f"Saving: {os.path.basename(book.path)}")
+                try:
+                    book.save()
+                except CbzError as exc:
+                    outcomes.append((row, "failed", str(exc)))
+                except Exception as exc:  # noqa: BLE001 - one bad file must not stop the batch
+                    outcomes.append((row, "error", exc))
+                else:
+                    outcomes.append((row, "saved", None))
+                progress.set_value(index + 1)
+            return outcomes
 
         if len(rows) == 1:
             # One file: the busy dialog (shown only if the rewrite takes a moment),
@@ -2359,11 +2410,21 @@ class MainWindow(QMainWindow):
                 report.saved += 1
             self._refresh_table_row(rows[0], book)
         else:
-            run_with_progress(
-                self, rows, _step, "Saving files...", threshold=2, cancellable=True,  # 2+: always a dialog
-                label_for=lambda row: f"Saving: {os.path.basename(self.books[row].path)}",
-                on_error=_on_error,
-            )
+            # Several files: every rewrite runs on a worker thread, so the dialog keeps painting and Cancel
+            # clicks register at once (the file in progress still finishes); rows refresh here afterwards.
+            from redactor_common.gui.work_progress import run_work_with_progress as run_counted_work
+
+            outcomes, _cancelled = run_counted_work(
+                self, len(rows), "Saving files...", _save_all_off_thread, cancellable=True, show_after_ms=0)
+            for row, kind, detail in outcomes:
+                book = self.books[row]
+                if kind == "saved":
+                    report.saved += 1
+                elif kind == "failed":
+                    _fail(book, str(detail))
+                else:
+                    _on_error(row, detail)  # type: ignore[arg-type]
+                self._refresh_table_row(row, book)
 
         report.not_attempted = len(rows) - report.saved - len(report.failed)
         failed_names = {name for name, _reason in report.failed}
@@ -2588,8 +2649,8 @@ class MainWindow(QMainWindow):
             return
 
         changes = self._resolve_overwrite_conflicts(target_books, changes)
-        if changes is None:
-            return
+        if not changes or not any(changes.values()):
+            return  # cancelled, or every row unticked in the review
 
         self._push_undo("Parse Filename", target_books)
         for index, fields in changes.items():
@@ -2633,7 +2694,7 @@ class MainWindow(QMainWindow):
             QMessageBox.information(self, "Read Filename Tags", "Nothing new to take from these filenames.")
             return
         changes = self._resolve_overwrite_conflicts(target_books, changes)
-        if not changes:
+        if not changes or not any(changes.values()):
             return
 
         self._push_undo("Read Filename Tags", target_books)
@@ -3848,6 +3909,15 @@ class MainWindow(QMainWindow):
         if not books:
             self._update_status()
             return
+        dirty = [b for b in books if b.dirty]
+        if dirty:
+            # Reloading throws unsaved edits away: ask, like Refresh and Remove do. No keeps those files
+            # as they are in the list (the restored values stay on disk; the clean files still reload).
+            if not self._confirm_discard(f"reload {len(dirty)} restored file(s) that have unsaved edits from disk"):
+                books = [b for b in books if not b.dirty]
+                if not books:
+                    self._update_status()
+                    return
         selected = [self.books[row] for row in self._selected_rows if row < len(self.books)]
         for book in books:
             reload_book(book, book.path)
@@ -4113,7 +4183,7 @@ class MainWindow(QMainWindow):
             metadata_changes = self._resolve_overwrite_conflicts(target_books, metadata_changes)
             if metadata_changes is None:
                 return  # user cancelled outright
-            if not metadata_changes:
+            if not any(metadata_changes.values()):
                 return  # every field was unticked
 
         self._push_undo(label, target_books)

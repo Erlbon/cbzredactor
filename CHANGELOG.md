@@ -1,5 +1,22 @@
 # Changelog
 
+## 2026-11-27#07 -- Main window and panel fixes
+
+- **Undo after Save no longer hides unsaved changes.** If a Save came after the edit you undo, the file still holds
+  the newer values, so the comic is now marked Modified and Save All writes the undone values.
+- **Selecting a comic no longer rewrites its Summary or Community Rating.** Only fields you changed in the panel
+  are written back, so a rating of 3.75 or a Summary with trailing spaces stays as it was.
+- **Restore from History asks before reloading a comic with unsaved edits.** Answering No keeps those edits.
+- **Undo and Redo keep text you typed in the panel but have not committed yet.**
+- **Opening a file that is already in the list no longer adds a second row.** The status bar says how many were
+  already loaded, and edits and Delete now always act on the right row.
+- **Apply with every row unticked in the overwrite review now counts as Cancel.** Nothing is written and what you
+  typed stays in the panel (also for Parse Filename and Read Filename Tags).
+- **Save All no longer freezes the window.** Each file is written in the background, the progress dialog keeps
+  moving and Cancel responds at once (the file in progress finishes first).
+- **The Preview reader follows a changed page list.** After Remove Pages, Clean Up or a rename, the page shown
+  and the name displayed stay in step.
+
 ## 2026-11-27#06 -- Conversion and resize fixes
 
 - **Converting a CBR, CB7 or CBT no longer loses a page to a name clash.** Two pages whose names differ only in
