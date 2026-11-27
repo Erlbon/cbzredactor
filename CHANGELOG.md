@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-11-27#05 -- Find Duplicates fixes
+
+- **Find Duplicates no longer groups a whole manga series.** Comics sharing a series page as their Web link (the
+  manga lookup writes one for every volume) are no longer treated as copies of one comic and ticked for the Recycle
+  Bin. Only a link to a single Comic Vine, GCD or Bedetheque issue still groups by link.
+- **Find Duplicates is faster on large collections and shows a progress dialog.** Only comics with similar pages are
+  compared, and the comparison runs in the background with a Cancel button.
+
 ## 2026-11-27#04 -- Save and archive fixes
 
 - **Saving keeps the page list of a ComicInfo.xml that declares a namespace.** The Pages block is no longer

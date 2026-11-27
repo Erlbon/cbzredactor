@@ -3747,7 +3747,9 @@ class MainWindow(QMainWindow):
                 web=meta.web or "",
             ))
 
-        groups = find_duplicates(facts)
+        groups = run_busy(self, "Comparing comics...", find_duplicates, facts, cancellable=True, on_cancel=None)
+        if groups is None:
+            return  # cancelled
         if not groups:
             QMessageBox.information(self, "Find Duplicates", f"No duplicates among {len(kept_books)} file(s).")
             return

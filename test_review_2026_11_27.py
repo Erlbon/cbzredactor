@@ -202,3 +202,83 @@ def test_card44_first_page_over_the_cap_is_not_read(tmp_path, monkeypatch):
     assert book.read_first_page_bytes() is not None
     monkeypatch.setattr(cbz_file, "MAX_PREVIEW_PAGE_BYTES", 10)
     assert book.read_first_page_bytes() is None
+
+
+def test_card01_shared_series_link_does_not_group_different_volumes():
+    import random
+
+    rng = random.Random(3)
+    h1 = {n: rng.getrandbits(64) for n in range(1, 13)}
+    h2 = {n: rng.getrandbits(64) for n in range(1, 13)}
+
+    def volume(n):
+        fp = duplicates.BookFingerprint(page_count=20, cover=n, samples={1 / 3: [h1[n]], 2 / 3: [h2[n]]})
+        return duplicates.BookFacts(fingerprint=fp, web="https://anilist.co/manga/30013")
+
+    assert duplicates.find_duplicates([volume(n) for n in range(1, 13)]) == []
+    series = duplicates.BookFacts(
+        fingerprint=duplicates.BookFingerprint(page_count=20), web="https://mangaupdates.com/series/abc")
+    assert duplicates.find_duplicates([series, series]) == []
+
+
+def test_card01_issue_links_still_group():
+    for web in ("https://comicvine.gamespot.com/x/4000-12/", "https://www.comics.org/issue/55/",
+                "https://www.bedetheque.com/BD-Titel-12.html"):
+        fp = duplicates.BookFingerprint(page_count=20, cover=1, samples={1 / 3: [1], 2 / 3: [2]})
+        fp2 = duplicates.BookFingerprint(page_count=20, cover=1 << 40, samples={1 / 3: [1 << 41], 2 / 3: [1 << 50]})
+        groups = duplicates.find_duplicates([duplicates.BookFacts(fingerprint=fp, web=web),
+                                             duplicates.BookFacts(fingerprint=fp2, web=web)])
+        assert len(groups) == 1 and groups[0].by_link, web
+
+
+def test_card40_bucketed_comparison_gives_the_same_groups_as_all_pairs():
+    import random
+
+    rng = random.Random(7)
+
+    def flip(value, bits):
+        for bit in rng.sample(range(64), bits):
+            value ^= 1 << bit
+        return value
+
+    books = []
+    for _ in range(60):
+        base = [rng.getrandbits(64), rng.getrandbits(64)]
+        for copy in range(rng.choice([1, 2, 3])):
+            distance = rng.choice([0, 3, 8, 8, 9, 12])  # on both sides of MATCH_DISTANCE
+            samples = {1 / 3: [flip(base[0], distance)], 2 / 3: [flip(base[1], rng.choice([0, 8]))]}
+            books.append(duplicates.BookFacts(fingerprint=duplicates.BookFingerprint(page_count=20, samples=samples)))
+
+    def brute_groups():
+        parent = list(range(len(books)))
+
+        def find(i):
+            while parent[i] != i:
+                i = parent[i]
+            return i
+
+        for i in range(len(books)):
+            for j in range(i + 1, len(books)):
+                if duplicates.same_story(books[i].fingerprint, books[j].fingerprint):
+                    parent[find(i)] = find(j)
+        out = {}
+        for i in range(len(books)):
+            out.setdefault(find(i), []).append(i)
+        return sorted(m for m in out.values() if len(m) > 1)
+
+    expected = brute_groups()
+    assert expected  # the data does contain duplicates
+    assert sorted(g.members for g in duplicates.find_duplicates(books)) == expected
+
+
+def test_card40_unrelated_comics_are_not_compared_pairwise():
+    import random
+
+    rng = random.Random(11)
+    books = [
+        duplicates.BookFacts(fingerprint=duplicates.BookFingerprint(
+            page_count=20, samples={1 / 3: [rng.getrandbits(64)], 2 / 3: [rng.getrandbits(64)]}))
+        for _ in range(400)
+    ]
+    assert len(duplicates._candidate_pairs(books)) < 400 * 399 // 2 // 4
+    assert duplicates.find_duplicates(books) == []

@@ -16,7 +16,8 @@ of the other book's pages.
 
 - same story pages, same cover        -> duplicate
 - same story pages, different cover   -> duplicate, "different cover" (a variant)
-- same Web link (a Comic Vine or GCD issue page) -> duplicate, whatever the pixels say
+- same Web link (a Comic Vine, GCD or Bedetheque ISSUE page; a series page does not count) -> duplicate,
+  whatever the pixels say
 - same cover only                     -> NOT a duplicate
 
 Keeping the best copy: higher page resolution first (the Size column's
@@ -26,6 +27,7 @@ pages), then the richer ComicInfo, then the bigger file.
 
 from __future__ import annotations
 
+import re
 import zipfile
 import zlib
 from dataclasses import dataclass, field
@@ -127,6 +129,48 @@ class BookFacts:
     web: str = ""
 
 
+_ISSUE_LINK_RE = re.compile(
+    r"comicvine\.gamespot\.com/.*/4000-\d+$"  # a Comic Vine issue page
+    r"|comics\.org/issue/\d+$"  # a GCD issue page
+    r"|bedetheque\.com/bd-[^/]*\.html$",  # a Bedetheque album page
+    re.IGNORECASE,
+)
+
+
+def is_issue_link(web: str) -> bool:
+    """True for a Web link that names ONE issue or album. A series page (the manga lookup writes the AniList or
+    MangaUpdates series page into every volume) is shared by many different books, so it must not group them."""
+    return bool(_ISSUE_LINK_RE.search(web.strip().rstrip("/")))
+
+
+_BAND_COUNT = MATCH_DISTANCE + 1  # pigeonhole: hashes within MATCH_DISTANCE bits share one whole band
+_BAND_EDGES = [round(k * 64 / _BAND_COUNT) for k in range(_BAND_COUNT + 1)]
+
+
+def _candidate_pairs(books: list[BookFacts]) -> list[tuple[int, int]]:
+    """Pairs of books (i < j) that can possibly be the same story: two hashes at most MATCH_DISTANCE bits apart
+    must agree exactly on at least one of MATCH_DISTANCE + 1 slices of the 64 bits, so only books sharing a
+    (slice, value) are compared with same_story. Gives the same answer as comparing every pair, without the
+    quadratic cost on a big collection."""
+    buckets: dict[tuple[int, int], set[int]] = {}
+    for index, facts in enumerate(books):
+        hashes = [h for window in facts.fingerprint.samples.values() for h in window if h is not None]
+        for value in hashes:
+            for band in range(_BAND_COUNT):
+                low, high = _BAND_EDGES[band], _BAND_EDGES[band + 1]
+                key = (band, (value >> low) & ((1 << (high - low)) - 1))
+                buckets.setdefault(key, set()).add(index)
+    pairs: set[tuple[int, int]] = set()
+    for members in buckets.values():
+        if len(members) < 2:
+            continue
+        ordered = sorted(members)
+        for a in range(len(ordered)):
+            for b in range(a + 1, len(ordered)):
+                pairs.add((ordered[a], ordered[b]))
+    return sorted(pairs)
+
+
 def find_duplicates(books: list[BookFacts]) -> list[DuplicateGroup]:
     parent = list(range(len(books)))
 
@@ -140,16 +184,15 @@ def find_duplicates(books: list[BookFacts]) -> list[DuplicateGroup]:
     by_web: dict[str, int] = {}
     for i, facts in enumerate(books):
         web = facts.web.strip().rstrip("/").casefold()
-        if web:
+        if web and is_issue_link(web):
             if web in by_web:
                 parent[find(i)] = find(by_web[web])
                 linked.update((i, by_web[web]))
             else:
                 by_web[web] = i
-    for i in range(len(books)):
-        for j in range(i + 1, len(books)):
-            if find(i) != find(j) and same_story(books[i].fingerprint, books[j].fingerprint):
-                parent[find(i)] = find(j)
+    for i, j in _candidate_pairs(books):
+        if find(i) != find(j) and same_story(books[i].fingerprint, books[j].fingerprint):
+            parent[find(i)] = find(j)
 
     groups: dict[int, list[int]] = {}
     for i in range(len(books)):
