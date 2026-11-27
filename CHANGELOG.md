@@ -1,5 +1,16 @@
 # Changelog
 
+## 2026-11-27#06 -- Conversion and resize fixes
+
+- **Converting a CBR, CB7 or CBT no longer loses a page to a name clash.** Two pages whose names differ only in
+  capitals (`A.jpg`, `a.jpg`) overwrite each other when unpacked on Windows. The page count is now taken from the
+  archive's own list, so the conversion is refused with a clear message and the original is kept.
+- **Resize keeps the colour profile and the rotation of a page.** A page with an embedded colour profile keeps it,
+  and a page that relied on its EXIF rotation is turned for real instead of showing sideways.
+- **Resize settings stay within the Resize dialog's limits.** An imported settings file or hand-edited ini can no
+  longer set a width of 1 pixel (or a quality or height outside the dialog's range) for conversions, the command
+  line and Redact.
+
 ## 2026-11-27#05 -- Find Duplicates fixes
 
 - **Find Duplicates no longer groups a whole manga series.** Comics sharing a series page as their Web link (the

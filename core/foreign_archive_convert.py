@@ -218,6 +218,10 @@ def convert_to_cbz(
         return output_path
 
     tmp_output = output_path + ".tmp_convert"
+    # The page count the new CBZ must reach comes from the archive's own member list, not from the
+    # extracted folder: two names that differ only in case ("A.jpg", "a.jpg") land on one file on
+    # Windows and macOS, and a count taken afterwards would never notice the lost page.
+    member_pages = _member_page_count(container, source_path)
     with tempfile.TemporaryDirectory(prefix="cbzredactor_convert_") as tmp_dir:
         # Extracted exactly once, straight to disk; the pages are then
         # streamed from there into the zip (see _write_zip).
@@ -227,6 +231,12 @@ def convert_to_cbz(
         extracted_pages = sum(
             1 for _root, _dirs, files in os.walk(tmp_dir) for name in files if _is_page_name(name)
         )
+        if member_pages is not None and member_pages != extracted_pages:
+            raise ForeignArchiveConversionError(
+                f"Not converted: the archive lists {member_pages} page(s) but only {extracted_pages} could be "
+                "unpacked (two pages whose names differ only in capitals, or an unsafe name, overwrite each "
+                "other on this system). The original is untouched."
+            )
 
         try:
             summary = _write_zip(tmp_dir, tmp_output, report, resize)
@@ -450,6 +460,35 @@ def _verify_cbz(
         raise ForeignArchiveConversionError(
             f"Converted CBZ failed its check: {pages} page(s) written, {expected_pages} extracted"
         )
+
+
+def _escapes_folder(name: str) -> bool:
+    parts = name.replace("\\", "/").split("/")
+    return name.startswith(("/", "\\")) or ".." in parts or (len(name) > 1 and name[1] == ":")
+
+
+def _member_page_count(container: str, path: str) -> Optional[int]:
+    """Page images the archive itself lists (files only), or None when the list cannot be read here
+    (the extraction then reports the real problem)."""
+    try:
+        if container == CONTAINER_RAR:
+            import rarfile
+
+            with rarfile.RarFile(path) as rf:
+                return sum(1 for i in rf.infolist() if not i.is_dir() and _is_page_name(i.filename))
+        if container == CONTAINER_TAR:
+            with tarfile.open(path, "r:*") as tf:
+                # Names outside the folder ("../x.jpg", absolute) are never unpacked, on purpose.
+                return sum(
+                    1 for m in tf
+                    if m.isfile() and _is_page_name(m.name) and not _escapes_folder(m.name)
+                )
+        import py7zr
+
+        with py7zr.SevenZipFile(path, "r") as zf:
+            return sum(1 for f in zf.list() if not f.is_directory and _is_page_name(f.filename))
+    except Exception:
+        return None
 
 
 def _describe(exc: BaseException) -> str:

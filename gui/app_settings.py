@@ -25,7 +25,13 @@ import os
 from core.app_paths import base_dir
 from core.comic_genres import COMMON_COMIC_GENRES
 from core.comic_languages import DEFAULT_LANGUAGES
-from core.image_resize import DEFAULT_MAX_WIDTH, ResizeOptions
+from core.image_resize import (
+    DEFAULT_MAX_WIDTH,
+    JPEG_QUALITY_RANGE,
+    MAX_HEIGHT_RANGE,
+    MAX_WIDTH_RANGE,
+    ResizeOptions,
+)
 from redactor_common.core import secret_store
 from redactor_common.gui.qsettings_store import ColumnSettingsStore, ManagedListStore, PatternHistoryStore, QSettingsStore
 
@@ -446,10 +452,15 @@ def save_resize_output_format(output_format: str) -> None:
 def load_resize_options() -> ResizeOptions:
     """The saved Resize choices as one object: what the Resize dialog starts
     with, and what a conversion resizes with when it resizes in the same step."""
+    def clamp(value: int, limits: tuple[int, int]) -> int:
+        return max(limits[0], min(limits[1], value))
+
+    # A hand-edited ini or an imported bundle can hold values the dialog would never allow.
+    max_height = load_resize_max_height()
     return ResizeOptions(
-        max_width=load_resize_max_width(),
-        jpeg_quality=load_resize_jpeg_quality(),
-        max_height=load_resize_max_height() or None,
+        max_width=clamp(load_resize_max_width(), MAX_WIDTH_RANGE),
+        jpeg_quality=clamp(load_resize_jpeg_quality(), JPEG_QUALITY_RANGE),
+        max_height=clamp(max_height, MAX_HEIGHT_RANGE) if max_height > 0 else None,
         output_format=load_resize_output_format() or None,
     )
 

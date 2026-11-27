@@ -39,7 +39,7 @@ import io
 from dataclasses import dataclass
 from typing import Optional
 
-from PIL import Image, UnidentifiedImageError
+from PIL import Image, ImageOps, UnidentifiedImageError
 
 # Output formats the Resize dialog offers, and the entry extension each
 # one gets. Both are already in core/cbz_file.py's IMAGE_EXTENSIONS, so
@@ -49,6 +49,12 @@ OUTPUT_FORMAT_EXTENSIONS = {"JPEG": ".jpg", "WEBP": ".webp"}
 # The Resize dialog's default target width (and Redact's): 1440 lands a resized
 # book inside the Size column's "Acceptable" band (1000-1599 px, core/page_dimensions.py).
 DEFAULT_MAX_WIDTH = 1440
+
+# The limits the Resize dialog's boxes allow; a saved or imported value outside them is brought
+# back inside (a width of 1 would shrink every page to a pixel).
+MAX_WIDTH_RANGE = (200, 10000)
+MAX_HEIGHT_RANGE = (200, 30000)
+JPEG_QUALITY_RANGE = (50, 100)
 
 
 @dataclass(frozen=True)
@@ -121,6 +127,15 @@ def resize_page(
         image = Image.open(io.BytesIO(data))
         width, height = image.size
         source_format = image.format or "JPEG"
+        # EXIF orientation 5-8 turns the page a quarter turn when shown: the size that
+        # counts is the turned one, and the pixels are turned for real before re-encoding
+        # (the re-encoded file carries no EXIF, so the tag would be lost).
+        orientation = image.getexif().get(0x0112, 1)
+        if orientation not in (2, 3, 4, 5, 6, 7, 8):
+            orientation = 1
+        if orientation in (5, 6, 7, 8):
+            width, height = height, width
+        icc_profile = image.info.get("icc_profile")
     except (UnidentifiedImageError, OSError, ValueError, Image.DecompressionBombError) as exc:
         return ResizeResult(data=data, resized=False, error=str(exc))
     except Exception as exc:  # a decoder bug on one page must not sink the batch
@@ -145,8 +160,10 @@ def resize_page(
         if new_size != (width, height) and source_format == "JPEG":
             # Let the JPEG decoder shrink by 1/2, 1/4 or 1/8 while it decodes (never below
             # the target size): far less to decode and to resample, same result to the eye.
-            image.draft(image.mode, new_size)
+            image.draft(image.mode, new_size[::-1] if orientation in (5, 6, 7, 8) else new_size)
         image.load()  # force the full decode now, not lazily at save time
+        if orientation > 1:
+            image = ImageOps.exif_transpose(image)
     except (UnidentifiedImageError, OSError, ValueError, Image.DecompressionBombError) as exc:
         return ResizeResult(data=data, resized=False, error=str(exc))
     except Exception as exc:
@@ -160,6 +177,8 @@ def resize_page(
     save_format = output_format if converting else source_format
 
     save_kwargs: dict = {}
+    if icc_profile:
+        save_kwargs["icc_profile"] = icc_profile  # Pillow drops the colour profile unless it is passed
     if save_format == "JPEG":
         # Pillow refuses to save an RGBA/palette image as JPEG (no
         # alpha channel in that format) -- flatten explicitly first

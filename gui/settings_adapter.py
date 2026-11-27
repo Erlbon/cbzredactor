@@ -143,12 +143,18 @@ class CbzSettingsAdapter(sb.SettingsAdapter):
                 ),
             },
             "resize": {
-                "max_width": (app_settings.load_resize_max_width, app_settings.save_resize_max_width, _int(1, 20000)),
+                "max_width": (
+                    app_settings.load_resize_max_width, app_settings.save_resize_max_width,
+                    _int(*app_settings.MAX_WIDTH_RANGE),
+                ),
                 "max_height": (
-                    app_settings.load_resize_max_height, app_settings.save_resize_max_height, _int(0, 20000),
+                    # 0 is "no height limit"; anything else must be one the dialog allows.
+                    app_settings.load_resize_max_height, app_settings.save_resize_max_height,
+                    lambda value: _int(0, 0)(value) if value == 0 else _int(*app_settings.MAX_HEIGHT_RANGE)(value),
                 ),
                 "jpeg_quality": (
-                    app_settings.load_resize_jpeg_quality, app_settings.save_resize_jpeg_quality, _int(1, 100),
+                    app_settings.load_resize_jpeg_quality, app_settings.save_resize_jpeg_quality,
+                    _int(*app_settings.JPEG_QUALITY_RANGE),
                 ),
                 "output_format": (
                     app_settings.load_resize_output_format, app_settings.save_resize_output_format,

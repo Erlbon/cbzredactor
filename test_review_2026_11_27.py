@@ -282,3 +282,124 @@ def test_card40_unrelated_comics_are_not_compared_pairwise():
     ]
     assert len(duplicates._candidate_pairs(books)) < 400 * 399 // 2 // 4
     assert duplicates.find_duplicates(books) == []
+
+
+# ---------------------------------------------------------------------------
+# Batch 4: conversion and resize
+# ---------------------------------------------------------------------------
+
+
+def _jpeg_with_profile_and_orientation(width: int, height: int, orientation: int, profile: bytes) -> bytes:
+    image = Image.effect_noise((width, height), 60).convert("RGB")
+    exif = Image.Exif()
+    exif[0x0112] = orientation
+    out = io.BytesIO()
+    image.save(out, "JPEG", icc_profile=profile, exif=exif.tobytes())
+    return out.getvalue()
+
+
+def test_card9_resize_keeps_the_colour_profile_and_turns_an_exif_rotated_page():
+    from core.image_resize import resize_page
+
+    profile = b"fake-icc-profile-bytes" * 8
+    source = _jpeg_with_profile_and_orientation(400, 600, 6, profile)
+    result = resize_page(source, max_width=200)
+    assert result.resized
+    out = Image.open(io.BytesIO(result.data))
+    assert out.info.get("icc_profile") == profile
+    assert out.getexif().get(0x0112, 1) == 1  # the rotation is in the pixels, not a lost tag
+    assert out.width > out.height  # turned to landscape, as a viewer showed the original
+    assert result.original_size == (600, 400)
+    assert result.new_size == out.size
+
+
+def test_card9_png_profile_survives_a_resize():
+    from core.image_resize import resize_page
+
+    profile = b"another-fake-profile" * 8
+    out_png = io.BytesIO()
+    Image.effect_noise((300, 500), 60).convert("RGB").save(out_png, "PNG", icc_profile=profile)
+    result = resize_page(out_png.getvalue(), max_width=100)
+    assert result.resized
+    assert Image.open(io.BytesIO(result.data)).info.get("icc_profile") == profile
+
+
+@pytest.fixture
+def temp_ini(tmp_path, monkeypatch):
+    from gui import app_settings
+
+    monkeypatch.setattr(app_settings, "_settings_ini_path", lambda: str(tmp_path / "settings.ini"))
+
+
+def test_card13_imported_resize_values_outside_the_dialog_limits_are_refused(temp_ini):
+    from gui import app_settings
+    from gui.settings_adapter import CbzSettingsAdapter
+
+    adapter = CbzSettingsAdapter("x")
+    adapter.write_section("resize", {"max_width": 1, "jpeg_quality": 1, "max_height": 5})
+    assert app_settings.load_resize_max_width() == app_settings._DEFAULT_RESIZE_MAX_WIDTH
+    assert app_settings.load_resize_jpeg_quality() == 90
+    assert app_settings.load_resize_max_height() == 0
+    adapter.write_section("resize", {"max_width": 1200, "jpeg_quality": 70, "max_height": 0})
+    assert app_settings.load_resize_max_width() == 1200
+    assert app_settings.load_resize_jpeg_quality() == 70
+
+
+def test_card13_load_resize_options_clamps_a_hand_edited_ini(temp_ini):
+    from gui import app_settings
+
+    app_settings.save_resize_max_width(1)
+    app_settings.save_resize_jpeg_quality(1)
+    app_settings.save_resize_max_height(3)
+    options = app_settings.load_resize_options()
+    assert (options.max_width, options.jpeg_quality, options.max_height) == (200, 50, 200)
+    app_settings.save_resize_max_width(99999)
+    app_settings.save_resize_jpeg_quality(500)
+    app_settings.save_resize_max_height(0)
+    options = app_settings.load_resize_options()
+    assert (options.max_width, options.jpeg_quality, options.max_height) == (10000, 100, None)
+
+
+def _make_cbt_files(path, files):
+    import tarfile
+
+    with tarfile.open(path, "w") as tf:
+        for name, data in files:
+            info = tarfile.TarInfo(name=name)
+            info.size = len(data)
+            tf.addfile(info, io.BytesIO(data))
+
+
+def test_card4_case_clashing_pages_are_not_silently_lost(tmp_path):
+    from core.foreign_archive_convert import ForeignArchiveConversionError, convert_to_cbz
+
+    source = tmp_path / "clash.cbt"
+    _make_cbt_files(source, [("A.jpg", b"one"), ("a.jpg", b"two"), ("b.jpg", b"three")])
+    out = tmp_path / "clash.cbz"
+    if os.path.normcase("A") == "a":  # Windows: the two names are one file once unpacked
+        with pytest.raises(ForeignArchiveConversionError):
+            convert_to_cbz(str(source), str(out))
+        assert not out.exists()
+        assert source.exists()
+    else:
+        convert_to_cbz(str(source), str(out))
+        assert sum(1 for n in zipfile.ZipFile(out).namelist() if n.endswith(".jpg")) == 3
+
+
+def test_card4_a_page_missing_after_unpacking_refuses_the_conversion(tmp_path, monkeypatch):
+    from core import foreign_archive_convert as fac
+
+    source = tmp_path / "book.cbt"
+    _make_cbt_files(source, [("1.jpg", b"one"), ("2.jpg", b"two"), ("3.jpg", b"three")])
+
+    def lossy_extract(path, dest_dir, report=None):
+        for name in ("1.jpg", "2.jpg"):  # drops 3.jpg, as a name clash would
+            with open(os.path.join(dest_dir, name), "wb") as handle:
+                handle.write(b"x")
+
+    monkeypatch.setattr(fac, "_extract_cbt", lossy_extract)
+    out = tmp_path / "book.cbz"
+    with pytest.raises(fac.ForeignArchiveConversionError):
+        fac.convert_to_cbz(str(source), str(out))
+    assert not out.exists()
+    assert not os.path.exists(str(out) + ".tmp_convert")
