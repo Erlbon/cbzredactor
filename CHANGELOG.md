@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-11-27#02 -- Shared-code update -- redactor_common 2026-11-27-06
+
+- **A file name is never just a Windows device name.** The shared code's filename tidy-up now puts "_" in front of
+  CON, AUX, NUL, COM1 and the like, as the rename pattern already did, so such a name can no longer reach the disk.
+- Also in the shared update, not used by this app: the folder-cover finder no longer takes Windows Media Player's
+  small thumbnail (`albumartsmall.jpg`) as an album's cover.
+
 ## 2026-11-27#01 -- Safer saving, deleting and renaming -- redactor_common 2026-11-27-04
 
 - **Save As over an existing file still works**, after you confirm the replace in the file dialog. The shared
