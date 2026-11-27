@@ -221,6 +221,8 @@ def test_api_keys_dialog_remove_account(fake_keyring):
     app_settings.save_gcd_account("me", "pw")
     dialog = ApiKeysDialog()
     dialog._remove_account()
+    assert app_settings.load_gcd_account() == ("me", "pw")  # waits for Save, like the rest of the dialog
+    dialog.accept()
     assert app_settings.load_gcd_account() == ("", "")
 
 

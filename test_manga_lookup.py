@@ -189,7 +189,8 @@ def test_details_merge_the_best_of_both():
     net = FakeNet()
     found = client(net).search("Berserk")[0]
     fields = client(net).details(found).as_dict()
-    assert fields["series"] == "Berserk" and fields["year"] == "1989" and fields["month"] == "8" and fields["day"] == "25"
+    assert fields["series"] == "Berserk"
+    assert "year" not in fields and "month" not in fields and "day" not in fields  # series start, not a volume's date
     assert fields["writer"] == "Kentaro Miura, Kouji Mori" and fields["penciller"] == "Kentaro Miura, Studio Gaga"
     assert fields["publisher"] == "Dark Horse"  # the English one
     assert fields["genre"] == "Action, Adventure, Drama, Seinen" and fields["tags"] == "Tragedy, Seinen"

@@ -56,11 +56,21 @@ import json
 import re
 import urllib.request
 from dataclasses import dataclass
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit
 
-from redactor_common.core.lookup_client import fetch_bytes, fetch_json, make_default_fetch
+from redactor_common.core.lookup_client import (
+    as_text,
+    dict_items,
+    fetch_bytes,
+    fetch_json,
+    json_object,
+    make_default_fetch,
+)
 
 API_BASE = "https://www.comics.org/api"
+# The only origin that ever gets the user's GCD login. Answers name other hosts (the cover host files1.comics.org,
+# or whatever a bad answer says); those are fetched anonymously.
+LOGIN_ORIGINS = (("https", "www.comics.org"),)
 USER_AGENT = "cbzredactor (+https://github.com/Erlbon/cbzredactor)"
 
 # Only these story types count as the issue's actual attributable
@@ -201,8 +211,23 @@ class GcdIssueDetails:
         return {k: v for k, v in raw.items() if v}
 
 
-def make_gcd_fetch(username: str = "", password: str = "", timeout: float = 30.0):
-    """A fetch(url) -> bytes for GCD's API, optionally logged in.
+def _origin_of(url: str) -> tuple[str, str]:
+    try:
+        parts = urlsplit(url)
+        return parts.scheme.lower(), (parts.hostname or "").lower()
+    except ValueError:
+        return "", ""
+
+
+def _is_gcd_link(url: str) -> bool:
+    """True for an https link on comics.org: the only place a next-page or series link from an answer may lead."""
+    scheme, host = _origin_of(url)
+    return scheme == "https" and host in ("www.comics.org", "comics.org")
+
+
+def make_gcd_fetch(username: str = "", password: str = "", timeout: float = 30.0, login_origins=LOGIN_ORIGINS):
+    """A fetch(url) -> bytes for GCD's API, optionally logged in. The login goes only to `login_origins`
+    (https, www.comics.org): never to the cover host or any host an answer names.
 
     GCD's API wiki: anonymous access is limited per hour, a logged-in
     account gets larger limits, and anonymous access "will likely be
@@ -224,7 +249,7 @@ def make_gcd_fetch(username: str = "", password: str = "", timeout: float = 30.0
 
     def _fetch(url) -> bytes:
         request = url if isinstance(url, urllib.request.Request) else urllib.request.Request(url)
-        if auth_header:
+        if auth_header and _origin_of(request.full_url) in login_origins:
             request.add_header("Authorization", auth_header)
         return base_fetch(request)
 
@@ -263,7 +288,8 @@ _SOURCE_NAME = "the Grand Comics Database"
 
 
 def _get_json(url: str, fetch) -> dict:
-    return fetch_json(url, fetch, error_cls=GcdLookupError, source_name=_SOURCE_NAME, **_gcd_status(fetch))
+    data = fetch_json(url, fetch, error_cls=GcdLookupError, source_name=_SOURCE_NAME, **_gcd_status(fetch))
+    return json_object(data, GcdLookupError, _SOURCE_NAME)
 
 
 _SERIES_YEAR_SUFFIX_RE = re.compile(r"\s*\(\d{4}(?:-\d{4})?\s*series\)\s*$")
@@ -296,28 +322,30 @@ def build_search_url(series: str, number: str, year: str = "") -> str:
             "Both a series name and an issue number are required to search the "
             "Grand Comics Database (unlike Comic Vine, GCD has no free-text search)."
         )
-    year_part = f"year/{quote(year)}/" if re.fullmatch(r"\d{4}", year) else ""
-    return f"{API_BASE}/series/name/{quote(series)}/issue/{quote(number)}/{year_part}?format=json"
+    # safe="": a "/" in a series or number ("Batman/Superman", issue "1/2") is text, not another URL part
+    year_part = f"year/{quote(year, safe='')}/" if re.fullmatch(r"\d{4}", year) else ""
+    return f"{API_BASE}/series/name/{quote(series, safe='')}/issue/{quote(number, safe='')}/{year_part}?format=json"
 
 
 def parse_search_response(raw: bytes) -> list[GcdCandidate]:
     try:
         data = json.loads(raw)
-    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+    except (json.JSONDecodeError, UnicodeDecodeError, RecursionError) as exc:
         raise GcdLookupError("Received an unreadable response from the Grand Comics Database.") from exc
 
     return _candidates_from_page(data)
 
 
-def _candidates_from_page(data: dict) -> list[GcdCandidate]:
+def _candidates_from_page(data) -> list[GcdCandidate]:
+    data = json_object(data, GcdLookupError, _SOURCE_NAME)
     candidates = []
-    for result in data.get("results", []) or []:
+    for result in dict_items(data.get("results")):
         candidates.append(
             GcdCandidate(
-                series_name=_clean_series_name(result.get("series_name", "") or ""),
-                issue_number=result.get("descriptor", "") or "",
-                publication_date=result.get("publication_date", "") or "",
-                detail_url=result.get("api_url", "") or "",
+                series_name=_clean_series_name(as_text(result.get("series_name"))),
+                issue_number=as_text(result.get("descriptor")),
+                publication_date=as_text(result.get("publication_date")),
+                detail_url=as_text(result.get("api_url")),
             )
         )
     return candidates
@@ -373,7 +401,9 @@ def search_gcd(
     # hold ("G.I. Joe - A Real ..." -> "G.I. Joe: A Real ..."), since
     # GCD's name search is a plain "contains".
     for name in series_name_variants(series):
-        for year_filter in ([year, ""] if year else [""]):
+        # The year pass only exists for a four-digit year: for "86" or "1986-87" the URL would be the same
+        # as the one without it, so the same request would go out twice.
+        for year_filter in ([year, ""] if re.fullmatch(r"\d{4}", (year or "").strip()) else [""]):
             candidates = _search_pages(name, number, year_filter, fetch)
             if candidates:
                 return _rank_candidates(candidates, name)[:max_results]
@@ -404,9 +434,9 @@ def _search_pages(series: str, number: str, year: str, fetch) -> list[GcdCandida
         all_candidates.extend(page_candidates)
         if any(_comparable(c.series_name) == query for c in page_candidates):
             break
-        next_url = data.get("next")
-        if not next_url:
-            break
+        next_url = as_text(data.get("next"))
+        if not next_url or not _is_gcd_link(next_url):
+            break  # no more pages, or a link that leads off comics.org: not followed
         url = next_url
     return all_candidates
 
@@ -578,8 +608,8 @@ def _split_key_date(key_date: str) -> tuple[str, str, str]:
 def _series_info(series_url: str, fetch) -> dict:
     """The issue's series record (end year, issue list, colour note): one more request, best effort -- a
     failure only leaves Count and Black & White empty, never the whole lookup."""
-    if not series_url.startswith("http"):
-        return {}
+    if not _is_gcd_link(series_url):
+        return {}  # a series link that leads off comics.org is not followed
     url = series_url if "format=" in series_url else series_url + ("&format=json" if "?" in series_url else "?format=json")
     try:
         data = _get_json(url, fetch)
@@ -591,12 +621,14 @@ def _series_info(series_url: str, fetch) -> dict:
 def _distinct_issue_count(series: dict) -> int:
     """How many issues a series has: its issue list has one entry per COVER ("1 (707) [Mike Del Mundo]",
     "1 [Blank Cover]"...), so distinct numbers are counted. Thor (2018): 55 entries, 16 issues."""
-    descriptors = series.get("issue_descriptors") or []
+    descriptors = series.get("issue_descriptors")
+    descriptors = descriptors if isinstance(descriptors, list) else []
     if not descriptors:
-        return len(series.get("active_issues") or [])
+        active = series.get("active_issues")
+        return len(active) if isinstance(active, list) else 0
     numbers = set()
     for descriptor in descriptors:
-        match = re.match(r"^\s*([^\s(\[]+)", str(descriptor or ""))
+        match = re.match(r"^\s*([^\s(\[]+)", as_text(descriptor))
         if match:
             numbers.add(match.group(1))
     return len(numbers)
@@ -607,15 +639,14 @@ def fetch_issue_details(detail_url: str, fetch=None) -> GcdIssueDetails:
     url = detail_url if "format=" in detail_url else detail_url + ("&format=json" if "?" in detail_url else "?format=json")
     data = _get_json(url, fetch)
 
-    year, month, day = _split_key_date(data.get("key_date", "") or "")
-    content_stories = [
-        story for story in (data.get("story_set") or []) if story.get("type") in CONTENT_STORY_TYPES
-    ]
+    year, month, day = _split_key_date(as_text(data.get("key_date")))
+    story_set = dict_items(data.get("story_set"))
+    content_stories = [story for story in story_set if story.get("type") in CONTENT_STORY_TYPES]
 
     def _aggregate_credits(field_name: str) -> str:
         names: list[str] = []
         for story in content_stories:
-            for name in _split_credit_names(story.get(field_name, "") or ""):
+            for name in _split_credit_names(as_text(story.get(field_name))):
                 if name not in names:
                     names.append(name)
         return ", ".join(names)
@@ -623,7 +654,7 @@ def fetch_issue_details(detail_url: str, fetch=None) -> GcdIssueDetails:
     def _aggregate_list_field(field_name: str) -> str:
         values: list[str] = []
         for story in content_stories:
-            for value in _split_semicolon_list(story.get(field_name, "") or ""):
+            for value in _split_semicolon_list(as_text(story.get(field_name))):
                 if value not in values:
                     values.append(value)
         return ", ".join(values)
@@ -635,44 +666,44 @@ def fetch_issue_details(detail_url: str, fetch=None) -> GcdIssueDetails:
         # exactly the shape seen on real issues (Watchmen #1: the lead
         # story's own "editing" is blank, but the issue-level one has
         # Len Wein credited as editor).
-        editor = ", ".join(_split_credit_names(data.get("editing", "") or ""))
+        editor = ", ".join(_split_credit_names(as_text(data.get("editing"))))
 
-    titles = [story.get("title", "") for story in content_stories if story.get("title")]
-    title = "; ".join(dict.fromkeys(titles)) or (data.get("title", "") or "")
+    titles = [as_text(story.get("title")) for story in content_stories if as_text(story.get("title"))]
+    title = "; ".join(dict.fromkeys(titles)) or as_text(data.get("title"))
 
-    summaries = [story.get("synopsis", "") for story in content_stories if story.get("synopsis")]
+    summaries = [as_text(story.get("synopsis")) for story in content_stories if as_text(story.get("synopsis"))]
 
     writers: list[str] = []
     translators: list[str] = []
     for story in content_stories:
-        story_writers, story_translators = _split_script_names(story.get("script", "") or "")
+        story_writers, story_translators = _split_script_names(as_text(story.get("script")))
         writers.extend(n for n in story_writers if n not in writers)
         translators.extend(n for n in story_translators if n not in translators)
     cover_artists: list[str] = []
-    for story in data.get("story_set") or []:
+    for story in story_set:
         if story.get("type") == "cover":
-            cover_artists.extend(n for n in _split_credit_names(story.get("pencils", "") or "") if n not in cover_artists)
-    number, legacy = split_legacy_number(data.get("number", "") or data.get("descriptor", "") or "")
-    publisher = data.get("indicia_publisher", "") or ""
-    series_name = _clean_series_name(data.get("series_name", "") or "")
-    series = _series_info(data.get("series", "") or "", fetch)
+            cover_artists.extend(n for n in _split_credit_names(as_text(story.get("pencils"))) if n not in cover_artists)
+    number, legacy = split_legacy_number(as_text(data.get("number")) or as_text(data.get("descriptor")))
+    publisher = as_text(data.get("indicia_publisher"))
+    series_name = _clean_series_name(as_text(data.get("series_name")))
+    series = _series_info(as_text(data.get("series")), fetch)
     # Count only for a series that has ended (question 1, answer A): a running series' count goes out of date.
     count = str(_distinct_issue_count(series)) if series.get("year_ended") else ""
 
     return GcdIssueDetails(
-        series_name=_clean_series_name(data.get("series_name", "") or ""),
-        volume=_series_start_year(data.get("series_name", "") or ""),
+        series_name=_clean_series_name(as_text(data.get("series_name"))),
+        volume=_series_start_year(as_text(data.get("series_name"))),
         issue_number=number,
         alternate_number=legacy,
         # The legacy number belongs to the same series' longer run (question 2, answer A): Thor, 707.
         alternate_series=series_name if legacy else "",
         count=count if count != "0" else "",
-        black_and_white=black_and_white_from(series.get("color", "") or ""),
-        age_rating=age_rating_from(data.get("rating", "") or ""),
+        black_and_white=black_and_white_from(as_text(series.get("color"))),
+        age_rating=age_rating_from(as_text(data.get("rating"))),
         cover_artist=", ".join(cover_artists),
         translator=", ".join(translators),
-        gtin=gtin_from(data.get("isbn", "") or "", data.get("barcode", "") or ""),
-        imprint=imprint_from_brands((data.get("brand_emblem", "") or "").split(";"), [publisher]),
+        gtin=gtin_from(as_text(data.get("isbn")), as_text(data.get("barcode"))),
+        imprint=imprint_from_brands(as_text(data.get("brand_emblem")).split(";"), [publisher]),
         title=title,
         year=year,
         month=month,
@@ -687,7 +718,7 @@ def fetch_issue_details(detail_url: str, fetch=None) -> GcdIssueDetails:
         genre=_aggregate_list_field("genre"),
         characters=_aggregate_list_field("characters"),
         publisher=publisher,
-        cover_image_url=data.get("cover", "") or "",
+        cover_image_url=as_text(data.get("cover")),
         web=issue_page_url(detail_url),
     )
 

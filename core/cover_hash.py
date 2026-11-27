@@ -31,28 +31,73 @@ MATCH_THRESHOLD = 0.85
 _WRAPAROUND_RATIO = 1.2
 
 
-def cover_hash(data: Optional[bytes]) -> Optional[int]:
-    """The 64-bit hash of an image's bytes, or None if they aren't a readable image."""
-    if not data:
-        return None
+# A page with more pixels than this is not decoded at all (Pillow itself refuses about 179 million).
+MAX_HASH_PIXELS = 150_000_000
+# A JPEG is decoded at a reduced scale (1/2, 1/4, 1/8) while it stays at least this big: the hash only needs a 9x8 picture.
+_DRAFT_SIZE = (1280, 1280)
+PREVIEW_MAX_SIDE = 640
+
+
+def _load_reduced(data: bytes) -> Image.Image:
+    """The image, decoded as cheaply as it allows. Raises OSError/ValueError/Image.DecompressionBombError/
+    SyntaxError for anything unreadable or too big."""
+    image = Image.open(io.BytesIO(data))
     try:
-        with Image.open(io.BytesIO(data)) as image:
-            image.load()
-            image = image.convert("L")
-            width, height = image.size
-            if width <= 0 or height <= 0:
-                return None
-            if width > height * _WRAPAROUND_RATIO:
-                image = image.crop((width // 2, 0, width, height))
-            small = image.resize((9, 8), Image.Resampling.LANCZOS)
-            pixels = small.tobytes()  # one byte per pixel in mode "L"
-    except (OSError, ValueError, Image.DecompressionBombError):
+        if image.width * image.height > MAX_HASH_PIXELS:
+            raise ValueError("the picture is too large to hash")
+        image.draft(None, _DRAFT_SIZE)  # JPEG only; other formats ignore it
+        image.load()
+    except BaseException:
+        image.close()
+        raise
+    return image
+
+
+def _difference_hash(image: Image.Image) -> Optional[int]:
+    image = image.convert("L")
+    width, height = image.size
+    if width <= 0 or height <= 0:
         return None
+    if width > height * _WRAPAROUND_RATIO:
+        image = image.crop((width // 2, 0, width, height))
+    small = image.resize((9, 8), Image.Resampling.LANCZOS)
+    pixels = small.tobytes()  # one byte per pixel in mode "L"
     bits = 0
     for row in range(8):
         for col in range(8):
             bits = (bits << 1) | (1 if pixels[row * 9 + col] > pixels[row * 9 + col + 1] else 0)
     return bits
+
+
+_READ_ERRORS = (OSError, ValueError, SyntaxError, MemoryError, Image.DecompressionBombError)
+
+
+def cover_hash(data: Optional[bytes]) -> Optional[int]:
+    """The 64-bit hash of an image's bytes, or None if they aren't a readable image."""
+    if not data:
+        return None
+    try:
+        with _load_reduced(data) as image:
+            return _difference_hash(image)
+    except _READ_ERRORS:
+        return None
+
+
+def preview_and_hash(data: Optional[bytes], max_side: int = PREVIEW_MAX_SIDE) -> tuple[Optional[bytes], Optional[int]]:
+    """(a small JPEG of the picture to show, its hash) from one decode: for a page that may be huge, so a window
+    never has to decode the original. (None, None) when the bytes aren't a readable image."""
+    if not data:
+        return None, None
+    try:
+        with _load_reduced(data) as image:
+            digest = _difference_hash(image)
+            preview = image.convert("RGB")
+            preview.thumbnail((max_side, max_side))
+            out = io.BytesIO()
+            preview.save(out, "JPEG", quality=90)
+            return out.getvalue(), digest
+    except _READ_ERRORS:
+        return None, None
 
 
 def similarity(a: Optional[int], b: Optional[int]) -> float:

@@ -43,7 +43,16 @@ import re
 from dataclasses import dataclass
 from urllib.parse import quote, urlencode
 
-from redactor_common.core.lookup_client import fetch_bytes, fetch_json, make_default_fetch
+from core.manga_lookup import plain_text
+from redactor_common.core.lookup_client import (
+    as_dict,
+    as_text,
+    dict_items,
+    fetch_bytes,
+    fetch_json,
+    json_object,
+    make_default_fetch,
+)
 
 API_BASE = "https://comicvine.gamespot.com/api"
 # Comic Vine rejects requests with a generic/default User-Agent (e.g.
@@ -203,18 +212,25 @@ def _split_cover_date(cover_date: str) -> tuple[str, str, str]:
     if not match:
         return "", "", ""
     year, month, day = match.groups()
-    return year, str(int(month)), str(int(day))
+    # Comic Vine writes "00" for a part it does not know ("1985-00-00"): that part stays empty, never "0".
+    # A year of 0000 is no year at all, so the month and day go with it.
+    if int(year) == 0:
+        return "", "", ""
+    return year, str(int(month)) if int(month) else "", str(int(day)) if int(day) else ""
 
 
-def _check_status(data: dict) -> None:
+def _check_status(data) -> None:
     """Comic Vine's application-level status_code (status_code != 1,
     e.g. an invalid API key or an unrecognized issue id) rides inside
     an HTTP 200 body -- lookup_client.fetch_json() only handles the
     HTTP/network/JSON-decode layer, so this is checked separately,
-    right after every fetch_json() call this module makes."""
+    right after every fetch_json() call this module makes. An answer that is not a JSON object is an
+    unreadable response (a ComicVineLookupError), not a crash."""
+    data = json_object(data, ComicVineLookupError, "Comic Vine")
     status_code = data.get("status_code")
     if status_code != STATUS_OK:
-        message = STATUS_MESSAGES.get(status_code, data.get("error", "Unknown error"))
+        known = STATUS_MESSAGES.get(status_code) if isinstance(status_code, int) else None
+        message = known or as_text(data.get("error")) or "Unknown error"
         raise ComicVineLookupError(
             f"Comic Vine error: {message}", status_code=status_code if isinstance(status_code, int) else None
         )
@@ -223,7 +239,7 @@ def _check_status(data: dict) -> None:
 def _get_json(url: str, fetch) -> dict:
     data = fetch_json(url, fetch, error_cls=ComicVineLookupError, source_name="Comic Vine")
     _check_status(data)
-    return data
+    return json_object(data, ComicVineLookupError, "Comic Vine")
 
 
 def build_search_url(api_key: str, series: str, number: str = "", max_results: int = 8) -> str:
@@ -244,43 +260,40 @@ def build_search_url(api_key: str, series: str, number: str = "", max_results: i
 
 
 def _candidate_from_result(result: dict) -> ComicVineCandidate:
-    volume = result.get("volume") or {}
-    image = result.get("image") or {}
-    summary = result.get("deck") or _strip_html(result.get("description") or "")
+    volume = as_dict(result.get("volume"))
+    image = as_dict(result.get("image"))
+    summary = as_text(result.get("deck")) or _strip_html(as_text(result.get("description")))
     return ComicVineCandidate(
-        issue_id=str(result.get("id", "")),
-        volume_name=volume.get("name", "") or "",
-        volume_detail_url=volume.get("api_detail_url", "") or "",
-        issue_number=result.get("issue_number", "") or "",
-        name=result.get("name", "") or "",
-        cover_date=result.get("cover_date", "") or "",
+        issue_id=as_text(result.get("id")),
+        volume_name=as_text(volume.get("name")),
+        volume_detail_url=as_text(volume.get("api_detail_url")),
+        issue_number=as_text(result.get("issue_number")),
+        name=as_text(result.get("name")),
+        cover_date=as_text(result.get("cover_date")),
         summary=summary,
-        image_url=image.get("small_url", "") or image.get("thumb_url", "") or "",
-        detail_url=result.get("api_detail_url", "") or "",
+        image_url=as_text(image.get("small_url")) or as_text(image.get("thumb_url")),
+        detail_url=as_text(result.get("api_detail_url")),
     )
-
-
-_TAG_RE = re.compile(r"<[^>]+>")
 
 
 def _strip_html(text: str) -> str:
     """Comic Vine's "description" field is full HTML; "deck" (a short
     plain-text blurb) is preferred when present, but description is
-    the only fallback for issues that only have the long form. Good
-    enough for a Summary field -- not trying to preserve any of the
-    markup, just the readable text."""
-    return _TAG_RE.sub("", text).strip()
+    the only fallback for issues that only have the long form. Same
+    plain-text rules as the manga lookup: tags dropped, entities
+    decoded, paragraphs and list items kept apart."""
+    return plain_text(text)
 
 
 def _candidates_from_data(data: dict) -> list[ComicVineCandidate]:
     _check_status(data)
-    return [_candidate_from_result(result) for result in data.get("results", []) or []]
+    return [_candidate_from_result(result) for result in dict_items(json_object(data).get("results"))]
 
 
 def parse_search_response(raw: bytes) -> list[ComicVineCandidate]:
     try:
         data = json.loads(raw)
-    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+    except (json.JSONDecodeError, UnicodeDecodeError, RecursionError) as exc:
         raise ComicVineLookupError("Received an unreadable response from Comic Vine.") from exc
 
     return _candidates_from_data(data)
@@ -402,15 +415,15 @@ def search_comicvine(
     fetch = fetch or _default_fetch
     url = build_search_url(api_key, series, number, max_results)
     data = fetch_json(url, fetch, error_cls=ComicVineLookupError, source_name="Comic Vine")
-    candidates = _candidates_from_data(data)
+    candidates = _candidates_from_data(data)  # also rejects an answer that is not a JSON object
     return _rank_candidates(candidates, series, number, year_hint)
 
 
 def _credits_by_role(person_credits: list) -> dict[str, list[str]]:
     by_role: dict[str, list[str]] = {}
-    for person in person_credits or []:
-        name = (person.get("name") or "").strip()
-        role_text = (person.get("role") or "").lower()
+    for person in dict_items(person_credits):
+        name = as_text(person.get("name")).strip()
+        role_text = as_text(person.get("role")).lower()
         if not name or not role_text:
             continue
         matched_fields: set[str] = set()
@@ -429,8 +442,8 @@ def _credits_by_role(person_credits: list) -> dict[str, list[str]]:
 
 def _names(credits_list: list) -> str:
     seen: list[str] = []
-    for item in credits_list or []:
-        name = (item.get("name") or "").strip()
+    for item in dict_items(credits_list):
+        name = as_text(item.get("name")).strip()
         if name and name not in seen:
             seen.append(name)
     return ", ".join(seen)
@@ -447,17 +460,17 @@ def fetch_issue_details(api_key: str, detail_url: str, fetch=None) -> ComicVineI
     )
     url = f"{detail_url}?{urlencode({'api_key': api_key, 'format': 'json', 'field_list': field_list}, quote_via=quote)}"
     data = _get_json(url, fetch)
-    result = data.get("results") or {}
+    result = as_dict(data.get("results"))
 
-    volume = result.get("volume") or {}
+    volume = as_dict(result.get("volume"))
     roles = _credits_by_role(result.get("person_credits"))
-    summary = result.get("deck") or _strip_html(result.get("description") or "")
+    summary = as_text(result.get("deck")) or _strip_html(as_text(result.get("description")))
 
     return ComicVineIssueDetails(
-        volume_name=volume.get("name", "") or "",
-        issue_number=result.get("issue_number", "") or "",
-        name=result.get("name", "") or "",
-        cover_date=result.get("cover_date", "") or "",
+        volume_name=as_text(volume.get("name")),
+        issue_number=as_text(result.get("issue_number")),
+        name=as_text(result.get("name")),
+        cover_date=as_text(result.get("cover_date")),
         summary=summary,
         writer=", ".join(roles.get("writer", [])),
         penciller=", ".join(roles.get("penciller", [])),
@@ -470,7 +483,7 @@ def fetch_issue_details(api_key: str, detail_url: str, fetch=None) -> ComicVineI
         teams=_names(result.get("team_credits")),
         locations=_names(result.get("location_credits")),
         story_arc=_names(result.get("story_arc_credits")),
-        web=result.get("site_detail_url", "") or "",
+        web=as_text(result.get("site_detail_url")),
     )
 
 
@@ -489,9 +502,9 @@ def fetch_volume_info(api_key: str, volume_detail_url: str, fetch=None) -> tuple
     try:
         url = f"{volume_detail_url}?{urlencode({'api_key': api_key, 'format': 'json', 'field_list': 'publisher,start_year'}, quote_via=quote)}"
         data = _get_json(url, fetch)
-        results = data.get("results") or {}
-        publisher = (results.get("publisher") or {}).get("name", "") or ""
-        start_year = str(results.get("start_year") or "").strip()
+        results = as_dict(data.get("results"))
+        publisher = as_text(as_dict(results.get("publisher")).get("name"))
+        start_year = as_text(results.get("start_year")).strip()
         return publisher, start_year
     except ComicVineLookupError:
         return "", ""

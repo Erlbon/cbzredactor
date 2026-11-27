@@ -731,3 +731,253 @@ def test_card50_unreadable_credit_file_is_not_overwritten_by_add(tmp_path, monke
     state["fail"] = False
     held.add(0x7777777777777777, b"t4", "d.png")
     assert len(credit_pages.KnownCreditPages(str(path)).pages) == 4
+
+
+# --- Batch 7: lookups ---------------------------------------------------------------------------------------------
+
+
+import json
+import urllib.error
+
+
+def _answer(data):
+    return lambda url: json.dumps(data).encode("utf-8")
+
+
+def test_card17_odd_shaped_answers_are_lookup_errors_or_empty_not_crashes():
+    from core import bedetheque_lookup as bl
+    from core import comicvine_browse as cvb
+    from core import comicvine_lookup as cv
+    from core import gcd_lookup as gl
+
+    # Comic Vine: a list instead of an object is an error of its own; odd members are skipped.
+    with pytest.raises(cv.ComicVineLookupError):
+        cv.search_comicvine("KEY", "Saga", fetch=_answer([]))
+    assert cv.search_comicvine("KEY", "Saga", fetch=_answer({"status_code": 1, "results": "x"})) == []
+    odd = {"status_code": 1, "results": [5, None, {"volume": 7, "name": ["x"], "id": None, "image": "i"}]}
+    candidates = cv.search_comicvine("KEY", "Saga", fetch=_answer(odd))
+    assert len(candidates) == 1 and candidates[0].name == "" and candidates[0].volume_name == ""
+    details = cv.fetch_issue_details(
+        "KEY", "https://x/issue/1/", fetch=_answer({"status_code": 1, "results": {"person_credits": ["a", {"name": 5, "role": 6}]}})
+    )
+    assert details.writer == ""
+    with pytest.raises(cv.ComicVineLookupError):
+        cv.fetch_issue_details("KEY", "https://x/issue/1/", fetch=_answer([1]))
+    assert cv.fetch_volume_info("KEY", "https://x/volume/1/", fetch=_answer({"status_code": 1, "results": "x"})) == ("", "")
+    # the browser's volume and issue lists
+    assert cvb.search_volumes("KEY", "Saga", fetch=_answer({"status_code": 1, "results": "x"})) == []
+    volumes = cvb.search_volumes("KEY", "Saga", fetch=_answer({"status_code": 1, "results": [3, {"count_of_issues": "x", "name": 4}]}))
+    assert volumes[0].issue_count == 0
+    assert cvb.fetch_volume_issues("KEY", "1", fetch=_answer({"status_code": 1, "results": "x", "number_of_total_results": "n"})) == []
+    with pytest.raises(cv.ComicVineLookupError):
+        cvb.search_volumes("KEY", "Saga", fetch=_answer([]))
+
+    # GCD
+    with pytest.raises(gl.GcdLookupError):
+        gl.search_gcd("Saga", "1", fetch=_answer([]))
+    assert gl.search_gcd("Saga", "1", fetch=_answer({"results": "x", "next": 5})) == []
+    story = {"type": "comic story", "script": 5, "pencils": ["a"], "title": 7, "synopsis": {"a": 1}}
+    gcd = gl.fetch_issue_details(
+        "https://www.comics.org/api/issue/1/", fetch=_answer({"story_set": [story, 3, None], "key_date": 5, "series": 9})
+    )
+    assert gcd.summary == "" and gcd.penciller == ""
+    with pytest.raises(gl.GcdLookupError):
+        gl.fetch_issue_details("https://www.comics.org/api/issue/1/", fetch=_answer([]))
+    assert gl._distinct_issue_count({"active_issues": 5}) == 0
+
+    # Bedetheque
+    assert bl._parse_series_entries({"category": "Séries"}) == []
+    assert bl._parse_series_entries([1, {"category": "Séries", "id": 5}, {"category": "Séries", "id": "S9", "label": 3}]) == [("9", "3")]
+
+
+def test_card20_comicvine_summary_decodes_entities_and_keeps_paragraphs_apart():
+    from core import comicvine_lookup as cv
+
+    html_text = "<p>Batman &amp; Robin fight.</p><p>It&#39;s dark.&nbsp;Very.</p><ul><li>One</li><li>Two</li></ul>"
+    summary = cv._candidate_from_result({"description": html_text}).summary
+    assert "Batman & Robin fight." in summary and "It's dark." in summary
+    assert "fight.It" not in summary and "&amp;" not in summary and "&#39;" not in summary and "&nbsp;" not in summary
+    assert "One\nTwo" in summary
+    data = {"status_code": 1, "results": {"description": html_text}}
+    assert cv.fetch_issue_details("KEY", "https://x/issue/1/", fetch=_answer(data)).summary == summary
+
+
+def test_card21_slash_in_series_or_number_is_escaped_in_the_gcd_search_url():
+    from core.gcd_lookup import API_BASE, build_search_url
+
+    url = build_search_url("Batman/Superman", "1/2", "1986")
+    assert url == f"{API_BASE}/series/name/Batman%2FSuperman/issue/1%2F2/year/1986/?format=json"
+
+
+def test_card22_manga_lookup_does_not_write_the_series_start_date():
+    from core import manga_lookup as ml
+
+    ani = ml.AniListSeries(series_id="1", english="Series", year="1998", month="3", day="7")
+    fields = ml.build_details(ml.MangaMatch(anilist=ani)).as_dict()
+    assert fields["series"] == "Series"
+    assert "year" not in fields and "month" not in fields and "day" not in fields
+
+
+def test_card29_comicrack_month_stops_at_12():
+    import xml.etree.ElementTree as ET
+
+    from core.comicrack_import import _key_date
+
+    def book(month, day):
+        return ET.fromstring(f"<Book><Year>2000</Year><Month>{month}</Month><Day>{day}</Day></Book>")
+
+    assert _key_date(book(20, 5)) == "2000-00-05"
+    assert _key_date(book(12, 31)) == "2000-12-31"
+    assert _key_date(book(13, 32)) == "2000-00-00"
+
+
+def test_card30_gcd_year_pass_only_for_a_four_digit_year():
+    from core.gcd_lookup import search_gcd
+
+    def count_requests(year):
+        calls = []
+
+        def fetch(url):
+            calls.append(url)
+            raise urllib.error.HTTPError(url, 404, "Not Found", None, None)
+
+        assert search_gcd("Saga", "1", fetch=fetch, year=year) == []
+        return len(calls), len(set(calls))
+
+    assert count_requests("86") == (1, 1)
+    assert count_requests("1986-87") == (1, 1)
+    assert count_requests("1986") == (2, 2)
+
+
+def test_card31_manga_initials_are_not_swapped_to_the_end():
+    from core.manga_lookup import person_name
+
+    assert person_name("J.K. Rowling") == "J.K. Rowling"
+    assert person_name("H.P. Lovecraft") == "H.P. Lovecraft"
+    assert person_name("MIURA Kentaro") == "Kentaro Miura"
+
+
+def test_card32_manga_description_keeps_underscores_and_asterisks_inside_words():
+    from core.manga_lookup import plain_text
+
+    assert plain_text("Uses file_name_here and 2*3*4") == "Uses file_name_here and 2*3*4"
+    assert plain_text("A *bold* and **very** _quiet_ day") == "A bold and very quiet day"
+
+
+def test_card33_remove_account_waits_for_save_and_cancel_keeps_it(fake_keyring):
+    from gui import app_settings
+    from gui.api_keys_dialog import ApiKeysDialog
+
+    app_settings.save_gcd_account("me", "pw")
+    cancelled = ApiKeysDialog()
+    cancelled._remove_account()
+    assert cancelled.username_edit.text() == ""
+    cancelled.reject()
+    assert app_settings.load_gcd_account() == ("me", "pw")
+    saved = ApiKeysDialog()
+    saved._remove_account()
+    saved.accept()
+    assert app_settings.load_gcd_account() == ("", "")
+
+
+def test_card42_comicvine_browser_reads_the_first_page_off_the_gui_thread(tmp_path, monkeypatch):
+    import test_comicvine_browse_dialog as td
+    from gui import comicvine_browse_dialog as dlg
+
+    later = td._Later()
+    monkeypatch.setattr(dlg, "start_background", later)
+    reads = []
+    real = CbzBook.read_first_page_bytes
+
+    def spy(self):
+        reads.append(1)
+        return real(self)
+
+    monkeypatch.setattr(CbzBook, "read_first_page_bytes", spy)
+    monkeypatch.setattr("gui.app_settings.load_comicvine_api_key", lambda: "KEY")
+    monkeypatch.setattr(dlg, "SELECTION_DELAY_MS", 0)
+
+    def search_volumes(*args, **kwargs):
+        return list(td.VOLUMES)
+
+    monkeypatch.setattr(dlg, "search_volumes", search_volumes)
+    monkeypatch.setattr(dlg, "download_image", lambda url, fetch=None: td.IMAGES[url])
+    dialog = dlg.ComicVineBrowseDialog([td._book(tmp_path)])
+    assert reads == [] and dialog._local_hash is None  # nothing read on the GUI thread
+    assert dialog.cover_yours.text() == dlg.LOADING
+    later.run("search_volumes")  # the series list can arrive before the file's own cover
+    later.run("_read_local_cover")
+    later.run_all()
+    assert reads == [1] and dialog._local_hash is not None
+    assert dialog._selected_volume().volume_id == "2"  # the look-alike cover, once both had arrived
+
+
+def test_card42_cover_preview_is_small_and_a_huge_page_is_not_decoded(monkeypatch):
+    from core import cover_hash as ch
+
+    out = io.BytesIO()
+    Image.new("RGB", (2400, 3200), (90, 40, 200)).save(out, "JPEG")
+    preview, digest = ch.preview_and_hash(out.getvalue())
+    assert digest is not None and preview
+    with Image.open(io.BytesIO(preview)) as shown:
+        assert max(shown.size) <= ch.PREVIEW_MAX_SIDE
+    monkeypatch.setattr(ch, "MAX_HASH_PIXELS", 1000)
+    assert ch.preview_and_hash(out.getvalue()) == (None, None)
+    assert ch.cover_hash(out.getvalue()) is None
+
+
+class _RecordingBase:
+    def __init__(self):
+        self.seen = []
+
+    def __call__(self, request):
+        self.seen.append((request.full_url, request.get_header("Authorization")))
+        return b"{}"
+
+
+def test_card43_gcd_login_goes_only_to_https_www_comics_org(monkeypatch):
+    from core import gcd_lookup as gl
+
+    recorder = _RecordingBase()
+    monkeypatch.setattr(gl, "make_default_fetch", lambda *a, **k: recorder)
+    fetch = gl.make_gcd_fetch("someone", "hunter2")
+    for url in (
+        "https://www.comics.org/api/series/1/",
+        "https://files1.comics.org//img/gcd/covers_by_id/17/w400/17183.jpg",
+        "http://evil.example/c.jpg",
+        "http://www.comics.org/api/series/1/",
+        "https://www.comics.org.evil.example/api/",
+    ):
+        fetch(url)
+    auth = {url: header for url, header in recorder.seen}
+    assert auth["https://www.comics.org/api/series/1/"].startswith("Basic ")
+    assert [h for u, h in recorder.seen if u != "https://www.comics.org/api/series/1/"] == [None] * 4
+
+
+def test_card43_gcd_next_and_series_links_off_comics_org_are_not_followed():
+    from core import gcd_lookup as gl
+
+    calls = []
+
+    def fetch(url):
+        calls.append(url)
+        page = {"next": "http://evil.example/page2", "results": [{"series_name": "Other", "descriptor": "1"}]}
+        return json.dumps(page).encode("utf-8")
+
+    gl.search_gcd("Saga", "1", fetch=fetch)
+    assert len(calls) == 1
+    calls.clear()
+    assert gl._series_info("http://evil.example/series/1/", fetch) == {}
+    assert gl._series_info("https://www.comics.org.evil.example/series/1/", fetch) == {}
+    assert calls == []
+
+
+def test_card55_comicvine_cover_date_zero_parts_stay_empty():
+    from core.comicvine_lookup import ComicVineIssueDetails, _split_cover_date
+
+    assert _split_cover_date("1985-00-00") == ("1985", "", "")
+    assert _split_cover_date("1985-06-00") == ("1985", "6", "")
+    assert _split_cover_date("1985-06-09") == ("1985", "6", "9")
+    assert _split_cover_date("0000-00-00") == ("", "", "")
+    fields = ComicVineIssueDetails(volume_name="X", cover_date="1985-00-00").as_dict()
+    assert fields["year"] == "1985" and "month" not in fields and "day" not in fields

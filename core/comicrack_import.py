@@ -152,9 +152,9 @@ def _key_date(book) -> str:
     if year is None:
         return ""
     parts = [year]
-    for tag in ("Month", "Day"):
+    for tag, highest in (("Month", 12), ("Day", 31)):
         value = _text(book, tag)
-        parts.append(int(value) if value.isdigit() and 0 < int(value) <= 31 else 0)
+        parts.append(int(value) if value.isdigit() and 0 < int(value) <= highest else 0)
     return f"{parts[0]:04d}-{parts[1]:02d}-{parts[2]:02d}"
 
 

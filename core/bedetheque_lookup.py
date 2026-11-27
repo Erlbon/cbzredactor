@@ -94,7 +94,7 @@ from urllib.parse import quote
 
 import lxml.html
 
-from redactor_common.core.lookup_client import fetch_bytes, fetch_json
+from redactor_common.core.lookup_client import as_text, dict_items, fetch_bytes, fetch_json
 
 DEFAULT_TIMEOUT = 12.0  # generous vs. the other sources' 8s -- cloudscraper's challenge-solve adds real latency
 SEARCH_URL = "https://www.bedetheque.com/ajax/tout"
@@ -219,12 +219,12 @@ def _parse_series_entries(data: list) -> list[tuple[str, str]]:
     autocomplete response -- ignores Auteurs/Revues/other categories,
     which this module doesn't look up."""
     entries = []
-    for entry in data or []:
+    for entry in dict_items(data):  # an answer that is not a list of objects gives no entries, not a crash
         if entry.get("category") != "Séries":
             continue
-        raw_id = entry.get("id", "") or ""
-        if raw_id.startswith("S") and raw_id[1:].isdigit():
-            entries.append((raw_id[1:], entry.get("label", "") or ""))
+        raw_id = as_text(entry.get("id"))
+        if raw_id.startswith("S") and raw_id[1:].isascii() and raw_id[1:].isdigit():
+            entries.append((raw_id[1:], as_text(entry.get("label"))))
     return entries
 
 

@@ -128,9 +128,11 @@ def plain_text(text: str) -> str:
     """A description as plain text: tags and markdown links dropped, entities decoded, line breaks kept."""
     text = re.sub(r"(?i)<br\s*/?>", "\n", text or "")
     text = re.sub(r"(?i)</p>", "\n\n", text)
+    text = re.sub(r"(?i)</(li|h[1-6]|tr)>", "\n", text)  # list items, headings, table rows end a line
     text = re.sub(r"<[^>]+>", "", text)
     text = re.sub(r"\[([^\]]+)\]\([^)]*\)", r"\1", text)  # [text](url) -> text
-    text = re.sub(r"[*_]{1,3}([^*_\n]+)[*_]{1,3}", r"\1", text)  # *emphasis* / **bold**
+    # *emphasis* / **bold**, only when the markers stand at word edges (file_name_here keeps its underscores)
+    text = re.sub(r"(?<![\w*_])([*_]{1,3})([^*_\n]+)\1(?![\w*_])", r"\2", text)
     text = html.unescape(text).replace("\r\n", "\n").replace("\r", "\n")
     return re.sub(r"\n{3,}", "\n\n", re.sub(r"[ \t]+", " ", text)).strip()
 
@@ -157,7 +159,7 @@ def person_name(name: str) -> str:
     """"MIURA Kentaro" (MangaUpdates: family name in capitals first) -> "Kentaro Miura"; anything else as it is."""
     name = (name or "").strip()
     parts = name.split()
-    if len(parts) >= 2 and parts[0].isupper() and len(parts[0]) > 1 and not parts[-1].isupper():
+    if len(parts) >= 2 and parts[0].isupper() and len(parts[0]) > 1 and "." not in parts[0] and not parts[-1].isupper():
         return " ".join(parts[1:] + [parts[0].capitalize()])
     return name
 
@@ -372,10 +374,7 @@ def build_details(match: MangaMatch) -> MangaDetails:
 
     put("series", match.title)
     put("summary", (ani.description if ani else "") or (mu.description if mu else ""))
-    put("year", match.year)
-    if ani and ani.year:
-        put("month", ani.month)
-        put("day", ani.day)
+    # No Year, Month or Day: both sources give when the series began, not when this volume came out.
     writers = (mu.writers if mu and mu.writers else []) or (ani.writers if ani else [])
     artists = (mu.artists if mu and mu.artists else []) or (ani.artists if ani else [])
     put("writer", ", ".join(writers))

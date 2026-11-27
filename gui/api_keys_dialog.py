@@ -43,6 +43,7 @@ COMICVINE_API_URL = "https://comicvine.gamespot.com/api/"
 class ApiKeysDialog(OwnedDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
+        self._account_removed = False
         self.setWindowTitle("API Keys")
         self.setMinimumWidth(480)
         outer = QVBoxLayout(self)
@@ -131,9 +132,13 @@ class ApiKeysDialog(OwnedDialog):
         QMessageBox.information(self, "Test Login", "Login accepted.")
 
     def _remove_account(self) -> None:
-        app_settings.save_gcd_account("", "")
+        # Like every other change in this dialog it waits for Save; Cancel keeps the account.
+        self._account_removed = True
         self.username_edit.clear()
-        self.password_field.refresh()
+        self.password_field.edit.clear()
+        self.password_field.edit.setPlaceholderText("Will be removed when you press Save")
+        self.password_field.source_label.setText("Removal pending")
+        self.password_field.remove_button.setEnabled(False)
         self.remove_account_button.setEnabled(False)
 
     def _save(self, allow: bool | None) -> None:
@@ -141,7 +146,10 @@ class ApiKeysDialog(OwnedDialog):
         # ini copy must not linger (or come back as the "legacy" fallback).
         if self.key_field.apply(allow):
             app_settings.clear_legacy_comicvine_api_key()
-        # GCD account: a blank username means no account.
+        # GCD account: a blank username means no account; so does Remove Account (applied only now).
+        if self._account_removed:
+            app_settings.save_gcd_account("", "")
+            self.password_field.refresh()
         username = self.username_edit.text().strip()
         if not username:
             app_settings.save_gcd_account("", "")

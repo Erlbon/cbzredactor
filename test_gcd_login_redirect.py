@@ -50,7 +50,8 @@ def test_the_gcd_login_is_not_sent_to_the_host_a_redirect_points_at(two_servers)
     first, second = two_servers
     first.routes["/api/series/"] = (302, {"Location": f"{second.base}/landing"}, b"")
     second.routes["/landing"] = (200, {}, b'{"results": []}')
-    fetch = make_gcd_fetch("someone", "hunter2")
+    # The login only goes to comics.org; the test server stands in for it.
+    fetch = make_gcd_fetch("someone", "hunter2", login_origins=(("http", "127.0.0.1"),))
     assert fetch(f"{first.base}/api/series/") == b'{"results": []}'
     assert first.seen[0]["authorization"].startswith("Basic ")
     assert second.seen and "authorization" not in second.seen[0]

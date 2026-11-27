@@ -81,7 +81,7 @@ from core.comicvine_browse import (
     search_volumes,
 )
 from core.comicvine_lookup import ComicVineLookupError, _split_words, fetch_issue_details
-from core.cover_hash import MATCH_THRESHOLD, cover_hash, similarity
+from core.cover_hash import MATCH_THRESHOLD, cover_hash, preview_and_hash, similarity
 from core.filename_guess import guess_series_and_number, guess_year
 from gui import app_settings
 from redactor_common.gui.owned_dialog import OwnedDialog
@@ -181,6 +181,16 @@ class _Mailbox(QObject):
 
     def _deliver(self, deliver) -> None:
         deliver()
+
+
+def _read_local_cover(book: CbzBook) -> tuple[Optional[bytes], Optional[int]]:
+    """(a small preview of the file's first page, its cover hash); (None, None) for an archive that cannot be
+    read. Runs on a worker thread."""
+    try:
+        data = book.read_first_page_bytes()
+    except Exception:  # noqa: BLE001 -- an unreadable archive just means no cover to compare
+        return None, None
+    return preview_and_hash(data)
 
 
 def start_background(mailbox: _Mailbox, fn: Callable, args: tuple, on_done: Callable) -> None:
@@ -596,12 +606,21 @@ class ComicVineBrowseDialog(OwnedDialog):
         self.year_edit.setText(guess_year(book.path, book.metadata.year))
         self.publisher_edit.setText((book.metadata.publisher or "").strip())
 
-        try:
-            local = book.read_first_page_bytes()
-        except Exception:  # noqa: BLE001 -- an unreadable archive just means no cover to compare
-            local = None
-        self._local_hash = cover_hash(local)
-        self._show_cover(self.cover_yours, local, "No cover")
+        # The file's own first page: read, decoded and hashed on a worker thread (a huge scan or a slow disk
+        # must not freeze the window). Until it arrives there is no hash and "Loading..." in the cover box.
+        self._local_hash = None
+        self._show_cover(self.cover_yours, None, LOADING)
+        gen = self._gen
+
+        def local_ready(result, error) -> None:
+            if self._shut or gen != self._gen:
+                return  # closed, or the dialog has moved on to another file
+            preview, digest = result if error is None and result else (None, None)
+            self._local_hash = digest
+            self._show_cover(self.cover_yours, preview, "No cover")
+            self._on_local_cover_ready()
+
+        start_background(self._mailbox, _read_local_cover, (book,), local_ready)
         self._show_cover(self.cover_found, None, "")
         self.match_label.setText("")
         self.info_label.setText("")
@@ -773,6 +792,10 @@ class ComicVineBrowseDialog(OwnedDialog):
 
         # The covers of the best-ranked series, to fill "Cover Match". Each arrives on its own; while the
         # user has not picked a row himself, the selection moves to a look-alike cover when one turns up.
+        self._load_series_covers()
+
+    def _load_series_covers(self) -> None:
+        """Starts the cover downloads of the best-ranked series in the table (needs the file's own hash)."""
         if self._local_hash is None:
             return
         gen = self._gen
@@ -784,10 +807,22 @@ class ComicVineBrowseDialog(OwnedDialog):
             if best >= 0 and not self._user_moved and self.volume_table.currentRow() != best:
                 self._select_row(self.volume_table, best)
 
-        for volume in volumes[:HASH_TOP_VOLUMES]:
-            url = volume.image_url
+        for row in range(min(self.volume_table.rowCount(), HASH_TOP_VOLUMES)):
+            url = self.volume_table.item(row, 0).data(Qt.ItemDataRole.UserRole).image_url
             if url and url not in self._image_cache and url not in self._image_failed:
                 self._load_cover(url, arrived)
+
+    def _on_local_cover_ready(self) -> None:
+        """The file's own first page is here (or turned out unreadable): whatever was waiting for its hash
+        (cover matching on the series list, the match line, the scores) is done now."""
+        if self._finishing:
+            return
+        if self.stack.currentIndex() == STEP_SERIES and self.volume_table.rowCount():
+            self._load_series_covers()
+            best = self._refresh_volume_scores()
+            if best >= 0 and not self._user_moved and self.volume_table.currentRow() != best:
+                self._select_row(self.volume_table, best)
+        self._redraw()
 
     def _refresh_volume_scores(self) -> int:
         """Fills "Cover Match" for every series whose cover is here. Returns the row of the best

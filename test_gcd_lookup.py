@@ -353,7 +353,7 @@ def test_search_gcd_stops_after_max_pages_if_never_found():
 
     no_match_page = {
         "count": 999,
-        "next": "https://x/next/",
+        "next": "https://www.comics.org/next/",
         "results": [{"series_name": "Something Else Entirely", "descriptor": "1",
                      "publication_date": "", "api_url": "https://x/issue/9/?format=json"}],
     }

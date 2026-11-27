@@ -1,5 +1,22 @@
 # Changelog
 
+## 2026-11-27#09 -- Lookup fixes
+
+- **An odd answer from Comic Vine, GCD or Bedetheque no longer crashes the lookup.** A reply of the wrong shape is
+  reported as an unreadable answer, or its odd parts are skipped, so the results already found are kept.
+- **Comic Vine summaries show `&` and `'` properly and keep paragraphs and list items apart.**
+- **Comic Vine dates with an unknown month or day** ("1985-00-00") leave Month and Day empty instead of writing 0.
+- **A slash in the series or number ("Batman/Superman", issue 1/2) no longer breaks the GCD online search.** A year
+  like "86" no longer sends the same GCD request twice.
+- **The GCD login is only sent to www.comics.org over https.** Covers and any other address named in an answer are
+  fetched without it, and links to other sites in an answer are not followed.
+- **The manga lookup no longer writes the series' start date** as Year, Month and Day of every volume. "J.K. Rowling"
+  stays as written, and underscores or asterisks inside words of a description are kept.
+- **ComicRack import accepts months 1 to 12 only** (a Month of 20 is ignored).
+- **Remove Account in API Keys waits for Save**, so Cancel keeps the account.
+- **The Comic Vine browser reads and decodes each file's first page in the background.** The cover box says
+  "Loading..." and a huge scan no longer freezes the window.
+
 ## 2026-11-27#08 -- Validate, Redact and scene name fixes
 
 - **Fix ComicInfo issues no longer cuts real subtitles.** "Hulk (The Missing Years)" or "Batman (Variant Edition)" keep

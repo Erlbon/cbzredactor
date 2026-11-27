@@ -832,7 +832,8 @@ def test_an_exact_title_in_both_sources_fills_the_empty_fields_and_never_the_vol
     entry = _only(_run(env, [book], _manga_recipe(env)))
     meta = book.metadata
     assert entry.status is FileStatus.CHANGED and any("auto-applied at 95%" in a and "AniList + MangaUpdates" in a for a in entry.applied)
-    assert (meta.series, meta.year, meta.writer, meta.penciller) == ("Berserk", "1989", "Kentaro Miura, Kouji Mori", "Kentaro Miura, Studio Gaga")
+    # No Year: the sources give when the series began, not this volume's release year.
+    assert (meta.series, meta.year, meta.writer, meta.penciller) == ("Berserk", "", "Kentaro Miura, Kouji Mori", "Kentaro Miura, Studio Gaga")
     assert meta.manga == "YesAndRightToLeft" and meta.genre.startswith("Action") and meta.community_rating == "4.6"
     assert meta.number == "1" and meta.publisher == "Own"  # what the file already says stays
 

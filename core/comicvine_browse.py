@@ -35,7 +35,7 @@ from core.comicvine_lookup import (
     _numbers_equivalent,
     _split_words,
 )
-from redactor_common.core.lookup_client import fetch_bytes, fetch_json
+from redactor_common.core.lookup_client import as_dict, as_int, as_text, dict_items, fetch_bytes, fetch_json
 
 PAGE_SIZE = 100  # Comic Vine's maximum per request
 MAX_PAGES = 30  # a runaway volume (3000 issues) is cut off rather than looping forever
@@ -87,21 +87,18 @@ def _url(path: str, api_key: str, **params) -> str:
 # ---------------------------------------------------------------------------
 
 def _volume_from_result(result: dict) -> ComicVineVolume:
-    image = result.get("image") or {}
-    publisher = result.get("publisher") or {}
-    try:
-        count = int(result.get("count_of_issues") or 0)
-    except (TypeError, ValueError):
-        count = 0
+    image = as_dict(result.get("image"))
+    publisher = as_dict(result.get("publisher"))
+    count = as_int(result.get("count_of_issues"))
     return ComicVineVolume(
-        volume_id=str(result.get("id", "")),
-        name=result.get("name", "") or "",
-        start_year=str(result.get("start_year") or "").strip().rstrip("- "),
+        volume_id=as_text(result.get("id")),
+        name=as_text(result.get("name")),
+        start_year=as_text(result.get("start_year")).strip().rstrip("- "),
         issue_count=count,
-        publisher=(publisher.get("name") if isinstance(publisher, dict) else "") or "",
-        image_url=image.get("small_url", "") or image.get("thumb_url", "") or "",
-        detail_url=result.get("api_detail_url", "") or "",
-        site_url=result.get("site_detail_url", "") or "",
+        publisher=as_text(publisher.get("name")),
+        image_url=as_text(image.get("small_url")) or as_text(image.get("thumb_url")),
+        detail_url=as_text(result.get("api_detail_url")),
+        site_url=as_text(result.get("site_detail_url")),
     )
 
 
@@ -120,7 +117,7 @@ def search_volumes(api_key: str, series: str, fetch=None, max_results: int = 100
     )
     data = fetch_json(url, fetch, error_cls=ComicVineLookupError, source_name="Comic Vine")
     _check_status(data)
-    return [_volume_from_result(result) for result in data.get("results") or []]
+    return [_volume_from_result(result) for result in dict_items(data.get("results"))]
 
 
 def number_as_float(number: str):
@@ -210,15 +207,15 @@ def rank_volumes(
 # ---------------------------------------------------------------------------
 
 def _issue_from_result(result: dict) -> ComicVineIssue:
-    image = result.get("image") or {}
+    image = as_dict(result.get("image"))
     return ComicVineIssue(
-        issue_id=str(result.get("id", "")),
-        number=str(result.get("issue_number") or "").strip(),
-        name=result.get("name", "") or "",
-        cover_date=result.get("cover_date", "") or "",
-        image_url=image.get("small_url", "") or image.get("thumb_url", "") or "",
-        detail_url=result.get("api_detail_url", "") or "",
-        site_url=result.get("site_detail_url", "") or "",
+        issue_id=as_text(result.get("id")),
+        number=as_text(result.get("issue_number")).strip(),
+        name=as_text(result.get("name")),
+        cover_date=as_text(result.get("cover_date")),
+        image_url=as_text(image.get("small_url")) or as_text(image.get("thumb_url")),
+        detail_url=as_text(result.get("api_detail_url")),
+        site_url=as_text(result.get("site_detail_url")),
     )
 
 
@@ -252,9 +249,9 @@ def fetch_volume_issues(api_key: str, volume_id: str, fetch=None) -> list[ComicV
         )
         data = fetch_json(url, fetch, error_cls=ComicVineLookupError, source_name="Comic Vine")
         _check_status(data)
-        results = data.get("results") or []
+        results = dict_items(data.get("results"))
         issues.extend(_issue_from_result(result) for result in results)
-        total = int(data.get("number_of_total_results") or 0)
+        total = as_int(data.get("number_of_total_results"))
         if not results or len(issues) >= total:
             break
     return sorted(issues, key=issue_sort_key)
