@@ -130,6 +130,7 @@ class RedactEnv:
     # History's entries follow the file (core/history.note_moves).
     on_move: Callable[[list[tuple[str, str]]], None] | None = None
     trash: Callable[[str], None] | None = None  # None: the Recycle Bin (move_to_trash)
+    trash_label: str = "the Recycle Bin"  # where `trash` puts a file, for the report (--trash-dir: that folder)
     pattern_history: list[str] = field(default_factory=list)  # newest first (Rename / Parse Filename)
     ascii_filenames: bool = False
     zero_pad: tuple[bool, int] = (False, 2)  # the Rename/Export dialog's Number padding
@@ -775,7 +776,8 @@ class LookupStep(Step):
                     if kind == "local" else self._comicvine(where, series, number, year)
                 )
             except ComicVineLookupError as exc:
-                env.comicvine_down = True
+                if not exc.concerns_one_item:  # "object not found" is about this issue only
+                    env.comicvine_down = True
                 notes.append(f"Comic Vine unavailable: {exc}")
                 continue
             except GcdLocalError as exc:
@@ -1079,7 +1081,7 @@ def _write_and_commit(ctx: CbzCtx, done: list[str], notes: list[str]) -> str:
             notes.append(result.warning)
             done.append(f"saved; the original is kept at {result.backup}")
         else:
-            done.append("saved in place; the original is in the Recycle Bin")
+            done.append(f"saved in place; the original is in {env.trash_label}")
         return ""
     # A converted CBR/CB7/CBT: a new .cbz name, so the engine's replace-in-place doesn't apply;
     # same order, though -- verify, put the new file in place, only then trash the original.
@@ -1098,10 +1100,10 @@ def _write_and_commit(ctx: CbzCtx, done: list[str], notes: list[str]) -> str:
         done.append(f"saved as {os.path.basename(ctx.target_path)}; the original is kept")
         return ""
     if os.path.lexists(ctx.original):
-        notes.append(f"the Recycle Bin didn't take {os.path.basename(ctx.original)}, so it is kept")
+        notes.append(f"{env.trash_label} didn't take {os.path.basename(ctx.original)}, so it is kept")
         done.append(f"saved as {os.path.basename(ctx.target_path)}; the original is kept")
     else:
-        done.append(f"saved as {os.path.basename(ctx.target_path)}; the original is in the Recycle Bin")
+        done.append(f"saved as {os.path.basename(ctx.target_path)}; the original is in {env.trash_label}")
     return ""
 
 
@@ -1166,7 +1168,7 @@ def _journal_begin(ctx: CbzCtx) -> str | None:
     if ctx.work is None:
         return None
     changes = history.diff_fields(ctx.field_baseline, history.fields_text(ctx.work.metadata))
-    note = "pages removed or resized; the old file is in the Recycle Bin" if ctx.pages_changed else ""
+    note = f"pages removed or resized; the old file is in {ctx.env.trash_label}" if ctx.pages_changed else ""
     return history.begin(ctx.target_path, history.KIND_REDACT, changes, cover_changed=ctx.pages_changed, note=note)
 
 

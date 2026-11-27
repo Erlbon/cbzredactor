@@ -66,6 +66,10 @@ STATUS_MESSAGES = {
     107: "Too many results requested",
 }
 
+# Codes that answer for one request only; 100 (bad key), the rate limit and every network
+# error leave the service unusable for the rest of a run.
+ITEM_STATUS_CODES = frozenset({101, 102, 103, 104, 105, 106, 107})
+
 # Comic Vine's person_credits role field is free text (e.g. "writer",
 # "penciler, inker", "artist", "cover"), not a fixed enum -- these are
 # substring keywords checked case-insensitively, in this order, against
@@ -87,7 +91,19 @@ ROLE_KEYWORDS = [
 class ComicVineLookupError(Exception):
     """Raised for any problem searching for, parsing, or downloading
     Comic Vine results -- including an application-level error Comic
-    Vine itself reports (e.g. an invalid API key)."""
+    Vine itself reports (e.g. an invalid API key). `status_code` is
+    Comic Vine's own code for those (None for a network or format
+    problem), so a caller can tell one missing issue from a dead key."""
+
+    def __init__(self, message: str = "", status_code: int | None = None):
+        super().__init__(message)
+        self.status_code = status_code
+
+    @property
+    def concerns_one_item(self) -> bool:
+        """True for an answer about this one request only (object not
+        found, filter error ...): the service itself still works."""
+        return self.status_code in ITEM_STATUS_CODES
 
 
 @dataclass
@@ -199,7 +215,9 @@ def _check_status(data: dict) -> None:
     status_code = data.get("status_code")
     if status_code != STATUS_OK:
         message = STATUS_MESSAGES.get(status_code, data.get("error", "Unknown error"))
-        raise ComicVineLookupError(f"Comic Vine error: {message}")
+        raise ComicVineLookupError(
+            f"Comic Vine error: {message}", status_code=status_code if isinstance(status_code, int) else None
+        )
 
 
 def _get_json(url: str, fetch) -> dict:

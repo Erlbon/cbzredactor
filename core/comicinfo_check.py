@@ -35,7 +35,7 @@ import re
 from dataclasses import dataclass
 from typing import Optional
 
-from core.scene_tags import FORMAT, NOTE, SCAN, classify
+from core.scene_tags import _NOTE_PATTERNS, _SCAN_PATTERNS, FORMAT, NOTE, SCAN, classify_by_pattern, normalize
 
 # Fields holding one line of text (runs of spaces collapsed) vs. free text
 # (only trimmed): everything else in ComicInfoMetadata is left alone.
@@ -45,6 +45,7 @@ _SINGLE_LINE_FIELDS = (
     "editor", "translator", "publisher", "imprint", "genre", "tags", "web", "language_iso",
     "format", "characters", "teams", "locations", "scan_information", "story_arc",
     "story_arc_number", "series_group", "age_rating", "main_character_or_team", "gtin",
+    "year", "month", "day",
 )
 _FREE_TEXT_FIELDS = ("summary", "notes", "review")
 _BRACKETED = re.compile(r"\s*[\(\[]([^\(\)\[\]]+)[\)\]]")
@@ -70,9 +71,27 @@ def _label(field: str) -> str:
     return special.get(field, field.replace("_", " ").title())
 
 
+def _is_scene_phrase(phrase: str) -> bool:
+    """True for a bracketed phrase that is surely scene junk: an exact entry of the phrase list, a format
+    word, or a release-group shape ("Zone-Empire"). The loose word rules (anything with "missing", "variant",
+    "preview" or "scan" in it) are for file names, where a bracket is a tag; in a Title or Series they would
+    cut real subtitles such as "(The Missing Years)"."""
+    from core.scene_tag_list import SCENE_TAGS
+
+    text = normalize(phrase)
+    if SCENE_TAGS.get(text) in (SCAN, FORMAT, NOTE):
+        return True
+    category = classify_by_pattern(text)
+    if category == FORMAT:
+        return True
+    if category == NOTE:  # only the rules that match the whole phrase from its start ("2 covers", "no ifc")
+        return any(p.pattern.startswith("^") and p.search(text) for p in _NOTE_PATTERNS)
+    return category == SCAN and any(p.search(text) for p in _SCAN_PATTERNS[:-1])
+
+
 def _without_scene_junk(text: str) -> str:
     def keep_or_drop(match: re.Match) -> str:
-        return "" if classify(match.group(1).strip()) in (SCAN, FORMAT, NOTE) else match.group(0)
+        return "" if _is_scene_phrase(match.group(1).strip()) else match.group(0)
 
     cleaned = _BRACKETED.sub(keep_or_drop, text)
     cleaned = _EXTENSION_TAIL.sub("", cleaned)
@@ -108,7 +127,7 @@ def check_metadata(meta, actual_pages: Optional[int] = None, today: Optional[dat
     if actual_pages is not None and meta.page_count and meta.page_count != str(actual_pages):
         add("page_count", f"says {meta.page_count} pages, the archive has {actual_pages}", str(actual_pages))
 
-    year, month, day = trimmed.get("year") or meta.year, meta.month, meta.day
+    year, month, day = trimmed["year"], trimmed["month"], trimmed["day"]
     year_ok = year.isdecimal() and 1800 <= int(year) <= today.year + 1
     if year and not year_ok:
         add("year", f"{year!r} isn't a plausible year", "")

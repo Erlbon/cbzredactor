@@ -58,6 +58,7 @@ def build_env(args: argparse.Namespace) -> RedactEnv:
         rename_log=None,
         on_move=history.note_moves,  # no Undo Last Rename here, but the History's entries follow a renamed / moved file
         trash=trash_to(args.trash_dir) if args.trash_dir else trash_with_retries(),
+        trash_label=args.trash_dir if args.trash_dir else "the Recycle Bin",
         pattern_history=app_settings.load_pattern_history(),
         ascii_filenames=app_settings.load_ascii_filenames(),
         zero_pad=app_settings.load_rename_zero_pad(),

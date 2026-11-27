@@ -179,18 +179,40 @@ class KnownCreditPages:
         self.load()
 
     def load(self) -> None:
+        self.unreadable = False
         try:
             with open(self.path, encoding="utf-8") as f:
                 raw = json.load(f)
-        except (OSError, ValueError):
+        except FileNotFoundError:
+            raw = []
+        except OSError:
+            # The file is there but can't be read now (a virus scanner holds it): NOT an empty list, or the next
+            # save would write only the new page over everything learned. save() waits for a readable file.
+            raw = []
+            self.unreadable = True
+        except ValueError:
+            raw = []
+        if not isinstance(raw, list):
             raw = []
         self.pages = [p for p in (KnownCreditPage.from_json(d) for d in raw if isinstance(d, dict)) if p]
 
-    def save(self) -> None:
+    def save(self) -> bool:
+        """Writes the file; False (file untouched, pages kept in memory for the next save) while the file
+        on disk can't be read, since writing then would drop what was learned earlier."""
+        if self.unreadable:
+            fresh = list(self.pages)
+            self.load()
+            if self.unreadable:
+                self.pages = fresh
+                self.unreadable = True
+                return False
+            known = {p.hash for p in self.pages}
+            self.pages += [p for p in fresh if p.hash not in known]
         tmp = self.path + ".tmp"
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump([p.to_json() for p in self.pages], f, indent=1)
         os.replace(tmp, self.path)
+        return True
 
     def match(self, page_hash: int) -> Optional[KnownCreditPage]:
         best = min(self.pages, key=lambda p: hamming(p.hash, page_hash), default=None)

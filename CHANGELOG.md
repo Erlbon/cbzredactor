@@ -1,5 +1,17 @@
 # Changelog
 
+## 2026-11-27#08 -- Validate, Redact and scene name fixes
+
+- **Fix ComicInfo issues no longer cuts real subtitles.** "Hulk (The Missing Years)" or "Batman (Variant Edition)" keep
+  their brackets; only known scene tags, format words and release-group tags are removed from Title and Series.
+- **A Year, Month or Day with spaces or line breaks round it is trimmed, not erased.**
+- **File name number "0a" stays "0a"** in Parse Filename and Redact (it became "a").
+- **One Comic Vine "not found" no longer stops Comic Vine for the whole Redact run.** Only a network error, a bad key
+  or the rate limit does.
+- **`redact --trash-dir` now says where the original went** instead of "Recycle Bin".
+- **A learned credit-pages file that cannot be read for a moment is no longer overwritten.** New pages wait in memory
+  and are saved with the old ones once the file can be read.
+
 ## 2026-11-27#07 -- Main window and panel fixes
 
 - **Undo after Save no longer hides unsaved changes.** If a Save came after the edit you undo, the file still holds

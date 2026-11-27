@@ -120,7 +120,7 @@ def _plausible_year(text: str) -> bool:
 
 def _strip_zeros(number: str) -> str:
     stripped = number.lstrip("0")
-    return stripped if stripped and not stripped.startswith(".") else "0" + stripped
+    return stripped if stripped[:1].isdecimal() else "0" + stripped
 
 
 def parse_filename(path: str, extra_tags: dict[str, str] | None = None) -> ParsedName:

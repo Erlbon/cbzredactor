@@ -1,5 +1,6 @@
 """Tests for the 2026-11-27 review cards (one test per fixed card)."""
 
+import datetime
 import io
 import os
 import zipfile
@@ -629,3 +630,104 @@ def test_card61_page_reader_follows_a_changed_page_list(gui_env):
     reader._loader.shutdown()
     reader._prefetch.shutdown()
     reader.close()
+
+
+# --- batch 6: Validate, Redact, scene names ---------------------------------------------------------------------
+
+from test_redact_steps import COMICINFO as _REDACT_COMICINFO  # noqa: E402
+from test_redact_steps import _cbz as _redact_cbz  # noqa: E402
+from test_redact_steps import _only as _redact_only  # noqa: E402
+from test_redact_steps import _recipe as _redact_recipe  # noqa: E402
+from test_redact_steps import _run as _redact_run  # noqa: E402
+from test_redact_steps import env  # noqa: E402,F401  (the fixture)
+
+
+def test_card6_real_subtitles_in_brackets_are_kept_but_scene_tags_go():
+    from core.comicinfo import ComicInfoMetadata
+    from core.comicinfo_check import check_metadata
+
+    today = datetime.date(2026, 11, 27)
+    for text in ("Hulk (The Missing Years)", "Batman (Variant Edition)", "Wolverine (Preview Edition)", "Maus (Scan Wars)"):
+        fields = {f.field for f in check_metadata(ComicInfoMetadata(series=text), None, today)}
+        assert "series" not in fields, text
+    fixes = {f.field: f.fix for f in check_metadata(ComicInfoMetadata(title="Saga (Digital) (Zone-Empire) (TPB)"), None, today)}
+    assert fixes["title"] == "Saga"
+
+
+def test_card7_year_month_day_with_spaces_are_trimmed_not_erased():
+    from core.comicinfo import ComicInfoMetadata
+    from core.comicinfo_check import check_metadata
+
+    meta = ComicInfoMetadata(series="S", year="\n  1999\n", month=" 5", day="12 ")
+    fixes = {f.field: f.fix for f in check_metadata(meta, None, datetime.date(2026, 11, 27))}
+    assert fixes == {"year": "1999", "month": "5", "day": "12"}
+
+
+def test_card27_number_zero_a_keeps_its_zero():
+    from core.scene_name import parse_filename
+
+    assert parse_filename("X-Men 0a (2020).cbz").number == "0a"
+    assert parse_filename("X-Men 007 (2020).cbz").number == "7"
+    assert parse_filename("X-Men 000 (2020).cbz").number == "0"
+
+
+def test_card28_object_not_found_does_not_switch_comicvine_off(env, tmp_path, monkeypatch):
+    import core.redact_steps as rs
+    from core.comicvine_lookup import ComicVineLookupError, _check_status
+
+    with pytest.raises(ComicVineLookupError) as not_found:
+        _check_status({"status_code": 101})
+    assert not_found.value.concerns_one_item
+    with pytest.raises(ComicVineLookupError) as bad_key:
+        _check_status({"status_code": 100})
+    assert not bad_key.value.concerns_one_item
+    assert not ComicVineLookupError("network unreachable").concerns_one_item
+
+    calls = []
+
+    def lookup(*args, **kwargs):
+        calls.append(1)
+        raise not_found.value
+
+    monkeypatch.setattr(rs, "search_comicvine", lookup)
+    env.comicvine_key = "key"
+    books = [CbzBook(_redact_cbz(tmp_path / f"Saga 00{i}.cbz", comicinfo=b"<ComicInfo/>")) for i in (1, 2, 3)]
+    report = _redact_run(env, books, _redact_recipe(env, disable=("filename_tags",)))
+    assert len(calls) == 3
+    assert not any("unreachable" in n for e in report.entries for n in e.notes)
+    assert env.comicvine_down is False
+
+
+def test_card36_trash_dir_is_named_in_the_report(env, tmp_path):
+    messy = _REDACT_COMICINFO.replace(b"<Series>Saga</Series>", b"<Series>  Saga  </Series>")
+    path = _redact_cbz(tmp_path / "Saga 001.cbz", comicinfo=messy, extra=[("Thumbs.db", b"junk")])
+    env.trash_label = str(tmp_path / "old")
+    entry = _redact_only(_redact_run(env, [CbzBook(path)]))
+    assert any(str(tmp_path / "old") in a for a in entry.applied)
+    assert not any("Recycle Bin" in a for a in entry.applied)
+
+
+def test_card50_unreadable_credit_file_is_not_overwritten_by_add(tmp_path, monkeypatch):
+    import builtins
+
+    path = tmp_path / "known.json"
+    first = credit_pages.KnownCreditPages(str(path))
+    first.add(0x0F0F0F0F0F0F0F0F, b"t1", "a.png")
+    first.add(0x00FF00FF00FF00FF, b"t2", "b.png")
+    before = path.read_bytes()
+    real_open = builtins.open
+    state = {"fail": True}
+
+    def flaky(file, *args, **kwargs):
+        if state["fail"] and os.path.abspath(str(file)) == str(path):
+            raise PermissionError(13, "held by a scanner")
+        return real_open(file, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "open", flaky)
+    held = credit_pages.KnownCreditPages(str(path))
+    assert held.unreadable
+    assert held.add(0x123456789ABCDEF0, b"t3", "c.png")
+    assert path.read_bytes() == before  # not overwritten while unreadable
+    state["fail"] = False
+    held.add(0x7777777777777777, b"t4", "d.png")
+    assert len(credit_pages.KnownCreditPages(str(path)).pages) == 4
