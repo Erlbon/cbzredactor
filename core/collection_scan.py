@@ -177,7 +177,7 @@ def cover_fingerprint(archive: zipfile.ZipFile, names: list[str],
     the entry's CRC32 and size; a cover whose key is in `known` (key ->
     fingerprint, from earlier scans) isn't decoded again -- a file that was
     moved, renamed or had its ComicInfo edited keeps its fingerprint."""
-    from PIL import UnidentifiedImageError
+    from PIL import Image, UnidentifiedImageError
 
     from core.credit_pages import dhash, is_plain, open_page_image
 
@@ -195,7 +195,7 @@ def cover_fingerprint(archive: zipfile.ZipFile, names: list[str],
         image = open_page_image(archive.read(pages[0]))
         return ("" if is_plain(image) else f"{dhash(image):016x}"), key
     except (KeyError, OSError, UnidentifiedImageError, zlib.error, ValueError, zipfile.BadZipFile,
-            EOFError, RuntimeError):
+            EOFError, RuntimeError, SyntaxError, Image.DecompressionBombError):
         return "", key
 
 
@@ -280,6 +280,7 @@ def read_comics(
     done = 0
     queue = iter(items)
     running: set = set()
+    listed_by_future: dict = {}
     with ThreadPoolExecutor(max(1, workers)) as pool:
         def top_up() -> None:
             # A bounded queue, so a cancel only waits for what's running.
@@ -287,7 +288,9 @@ def read_comics(
                 item = next(queue, None)
                 if item is None:
                     return
-                running.add(pool.submit(read_comic, root, item, cover, known_covers, stamp))
+                future = pool.submit(read_comic, root, item, cover, known_covers, stamp)
+                listed_by_future[future] = item
+                running.add(future)
 
         top_up()
         while running:
@@ -298,7 +301,12 @@ def read_comics(
             finished, _ = wait(running, timeout=0.1, return_when=FIRST_COMPLETED)
             for future in finished:
                 running.discard(future)
-                row = future.result()
+                item = listed_by_future.pop(future)
+                try:
+                    row = future.result()
+                except Exception as exc:  # noqa: BLE001 - one odd file must not end the scan of all the others
+                    row = ScanRow(item.path, item.size, item.modified)
+                    row.error = f"can't be read: {exc}"
                 rows[row.path] = row
                 done += 1
             progress(done, len(items))

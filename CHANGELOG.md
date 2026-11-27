@@ -1,5 +1,14 @@
 # Changelog
 
+## 2026-11-27#03 -- Save and scan fixes -- redactor_common 2026-11-27-07
+
+- **A stray control character no longer crashes Save.** Text pasted into a field with a hidden character (a form
+  feed from a PDF, for example) now gives a "Save Failed" box that says the field cannot be stored, and the file is
+  left untouched.
+- **One huge page no longer stops a whole scan.** A single oversized page (a giant map, say) is skipped by Scan
+  Collection Folder, Find Duplicates and the credit-page scan instead of ending the run for every other comic.
+- Moved to the newest shared code (redactor_common 2026-11-27-07).
+
 ## 2026-11-27#02 -- Shared-code update -- redactor_common 2026-11-27-06
 
 - **A file name is never just a Windows device name.** The shared code's filename tidy-up now puts "_" in front of

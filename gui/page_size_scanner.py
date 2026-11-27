@@ -48,7 +48,12 @@ class _ScanTask(QRunnable):
         self._signals = signals
 
     def run(self) -> None:
-        self._signals.done.emit(self._book, self._source, self._scan(self._path, self._page_names))
+        try:
+            result = self._scan(self._path, self._page_names)
+        except Exception:  # noqa: BLE001 - a scan that raised would leave the book "in flight" for good
+            # An empty page list is the scan's own "nothing readable" answer, whatever kind of result it makes.
+            result = self._scan(self._path, [])
+        self._signals.done.emit(self._book, self._source, result)
 
 
 class PageSizeScanner(QObject):

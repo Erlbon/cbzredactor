@@ -3273,7 +3273,11 @@ class MainWindow(QMainWindow):
 
             def _step(entry, _index: int) -> None:
                 book, source, future = entry
-                self._dupe_fingerprints.store(book, source, future.result())
+                try:
+                    result = future.result()
+                except Exception:  # noqa: BLE001 - one unreadable book must not stop the fingerprinting of the rest
+                    result = scan(book.path, [])
+                self._dupe_fingerprints.store(book, source, result)
 
             finished = run_with_progress(
                 self, futures, _step, "Fingerprinting pages...", threshold=1,

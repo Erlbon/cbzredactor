@@ -558,7 +558,10 @@ class CbzBook:
             raise CbzError("Cannot save, this file needs converting to CBZ first (Convert to CBZ)")
 
         self.metadata.page_count = str(self.actual_page_count)
-        new_xml_bytes = serialize_comicinfo_xml(self.metadata)
+        try:
+            new_xml_bytes = serialize_comicinfo_xml(self.metadata)
+        except ComicInfoError as exc:  # e.g. a control character pasted into a field: say so, don't crash
+            raise CbzError(f"Cannot save, a field holds text ComicInfo.xml cannot store: {exc}") from exc
         target = output_path or self.path
         # Preserve the original entry's name/case if it was at the archive root;
         # otherwise (none, or a nested one) write the spec-correct name at the

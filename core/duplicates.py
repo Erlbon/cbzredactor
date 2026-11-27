@@ -31,7 +31,7 @@ import zlib
 from dataclasses import dataclass, field
 from typing import Optional
 
-from PIL import UnidentifiedImageError
+from PIL import Image, UnidentifiedImageError
 
 from core.zip_names import open_zip
 from core.credit_pages import MATCH_DISTANCE, dhash, hamming, is_plain, open_page_image
@@ -69,7 +69,8 @@ def fingerprint_book(path: str, page_names: list[str]) -> BookFingerprint:
             for index in sorted(wanted):
                 try:
                     image = open_page_image(zf.read(page_names[index]))
-                except (KeyError, OSError, UnidentifiedImageError, zlib.error, ValueError, zipfile.BadZipFile):
+                except (KeyError, OSError, UnidentifiedImageError, zlib.error, ValueError, zipfile.BadZipFile,
+                        SyntaxError, Image.DecompressionBombError):
                     hashes[index] = None
                     continue
                 hashes[index] = None if is_plain(image) else dhash(image)

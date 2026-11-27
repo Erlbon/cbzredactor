@@ -245,7 +245,8 @@ def scan_book(path: str, page_names: list[str], with_thumbnails: bool = False) -
             for candidate in candidates:
                 try:
                     image = open_page_image(zf.read(candidate.name))
-                except (KeyError, OSError, UnidentifiedImageError, zipfile.BadZipFile, zlib.error, ValueError):
+                except (KeyError, OSError, UnidentifiedImageError, zipfile.BadZipFile, zlib.error, ValueError,
+                        SyntaxError, Image.DecompressionBombError):
                     continue
                 candidate.size = image.size
                 candidate.plain = is_plain(image)
