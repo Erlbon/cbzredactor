@@ -61,7 +61,7 @@ _bool = sc.coerce_bool  # a real true/false only
 _path = sc.coerce_str
 # Column widths: 0 < width < 10000, one bad entry rejects the whole map.
 _width_map = functools.partial(sc.coerce_width_map, lo=1, hi=9999, strict=True)
-# The recipe travels as a JSON object (readable in the file), "" for the
+# The recipe travels as a JSON object (readable in the file), null for the
 # default; stored back as the JSON text the app already keeps.
 _recipe = sc.recipe_from_json_value
 
@@ -215,14 +215,16 @@ class CbzSettingsAdapter(sb.SettingsAdapter):
 
     @staticmethod
     def _read_recipe() -> Any:
+        # None (not "") when there is no custom recipe: redactor_common's import only lets a value replace one
+        # of the same kind, and None accepts anything, so a file's recipe still lands on an app at the defaults.
         text = app_settings.load_redact_recipe()
         if not text:
-            return ""
+            return None
         try:
             data = json.loads(text)
         except (json.JSONDecodeError, ValueError):
-            return ""
-        return data if isinstance(data, (dict, list)) else ""
+            return None
+        return data if isinstance(data, (dict, list)) else None
 
     def _read_hidden(self) -> list[str]:
         if app_settings.has_hidden_columns_preference():

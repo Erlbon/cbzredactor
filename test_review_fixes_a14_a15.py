@@ -115,3 +115,21 @@ def test_the_database_dialogs_hand_the_shared_dialog_a_plain_check_callable():
     for module, cls in ((gcd, gcd.GcdLocalSettingsDialog), (cr, cr.ComicRackSettingsDialog)):
         assert "run_busy" not in inspect.getsource(cls.__init__).replace("no run_busy", "")
         assert not hasattr(module, "run_busy")
+
+
+def test_search_replace_filename_rejects_invalid_stems(window, tmp_path):
+    _FakeSearchReplace.changes = {0: "sub/x", 1: "CON", 2: "trailing."}
+    window.open_search_replace_dialog()
+    assert sorted(n for n in os.listdir(tmp_path) if n.endswith(".cbz")) == ["A.cbz", "B.cbz", "C.cbz"]
+    assert [os.path.basename(b.path) for b in window.books] == ["A.cbz", "B.cbz", "C.cbz"]
+
+
+def test_save_as_overwrites_the_file_the_dialog_confirmed(window, tmp_path, monkeypatch):
+    target = tmp_path / "B.cbz"
+    window.table.selectRow(0)
+    monkeypatch.setattr(mw.QFileDialog, "getSaveFileName", staticmethod(lambda *a, **k: (str(target), "")))
+    monkeypatch.setattr(mw, "run_busy", lambda parent, text, fn, *a, **k: fn(*a, **k))
+    window.books[0].metadata.title = "From A"
+    monkeypatch.setattr(window, "_commit_current_edits", lambda: None)  # keep the title set above
+    window.save_current_as()
+    assert mw.CbzBook(str(target)).metadata.title == "From A"

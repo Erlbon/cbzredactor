@@ -153,3 +153,17 @@ def test_save_raises_when_load_failed(tmp_path):
     book = CbzBook(str(bad_path))
     with pytest.raises(CbzError):
         book.save()
+
+
+def test_save_refuses_an_existing_other_file_unless_overwrite(tmp_path):
+    src = _make_cbz(tmp_path / "book.cbz")
+    other = _make_cbz(tmp_path / "other.cbz", page_names=("009.jpg",))
+    book = CbzBook(str(src))
+    book.metadata.title = "Copy"
+    with pytest.raises(Exception):
+        book.save(str(other))
+    assert CbzBook(str(other)).page_names == ["009.jpg"]  # untouched
+    book.save(str(other), overwrite=True)  # what Save As passes after the dialog confirmed
+    reloaded = CbzBook(str(other))
+    assert reloaded.metadata.title == "Copy"
+    assert reloaded.page_names == ["001.jpg", "002.jpg", "003.jpg"]

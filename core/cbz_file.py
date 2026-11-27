@@ -528,11 +528,17 @@ class CbzBook:
     # Saving
     # ------------------------------------------------------------------
 
-    def save(self, output_path: Optional[str] = None, *, journal_kind: Optional[str] = KIND_SAVE) -> None:
+    def save(
+        self, output_path: Optional[str] = None, *, journal_kind: Optional[str] = KIND_SAVE, overwrite: bool = False,
+    ) -> None:
         """Writes updated metadata back into a CBZ file. PageCount is
         always recomputed from the actual archive contents right
         before writing -- this field is never taken from the GUI form,
         only ever from the archive itself (see page_count_mismatch).
+
+        An existing output_path that is not this book's own file is refused
+        (redactor_common's rewrite_archive) unless `overwrite` is True: Save As
+        passes it, because the file dialog already asked about replacing it.
 
         If output_path is None, overwrites self.path in place (via a
         temp file + rename, so a crash mid-write can't corrupt the
@@ -574,7 +580,10 @@ class CbzBook:
             if before is not None:
                 entry_id = history.begin(target, journal_kind, diff_fields(before, new_fields))
         try:
-            rewrite_archive(self.path, target, plan, temp_suffix=".tmp_write", error_prefix="Could not save CBZ file")
+            rewrite_archive(
+                self.path, target, plan, temp_suffix=".tmp_write", error_prefix="Could not save CBZ file",
+                overwrite=overwrite,
+            )
         except RewriteError as exc:
             self.save_error = exc.detail
             history.finish(entry_id, False, exc.detail)

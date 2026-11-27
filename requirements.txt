@@ -12,6 +12,9 @@ Pillow>=10.0
 # of deleting them permanently (redactor_common.core.trash, which this
 # app uses via move_to_trash). Cross-platform.
 send2trash>=1.8
+# send2trash's modern Windows back-end. redactor_common (2026-11-27#04) refuses to trash on Windows without
+# it: the legacy back-end silently deletes a file too big for the Recycle Bin.
+pywin32>=306; sys_platform == "win32"
 
 # Optional: only needed for Repair > Convert to CBZ on a .cbr file.
 # Also needs a real unrar/unar/bsdtar-compatible binary on PATH --
@@ -47,4 +50,4 @@ keyring>=25.0
 # ("Releasing a new version") for how to bump this pin deliberately
 # when it changes, rather than floating and having one bad push there
 # break this project's next install.
-redactor_common @ git+https://github.com/Erlbon/redactor_common.git@2026-11-26-02
+redactor_common @ git+https://github.com/Erlbon/redactor_common.git@2026-11-27-04

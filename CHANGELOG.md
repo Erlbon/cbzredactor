@@ -1,5 +1,20 @@
 # Changelog
 
+## 2026-11-27#01 -- Safer saving, deleting and renaming -- redactor_common 2026-11-27-04
+
+- **Save As over an existing file still works**, after you confirm the replace in the file dialog. The shared
+  code now refuses to overwrite any other file on its own, so Save As says explicitly that you agreed.
+- **Search & Replace on the file name checks the new name first.** A name Windows would reject (a slash, a
+  reserved name such as CON, a trailing dot) is listed in the "Some Files Failed" message and the file keeps its
+  old name, instead of the rename failing half way.
+- **Recycle Bin on Windows needs the modern back-end.** The app now installs and bundles pywin32 for it. Without
+  it the shared code refuses to delete, because the old back-end deleted for good a file too big for the Recycle
+  Bin without saying so.
+- **Export/Import Settings:** a Redact recipe in a settings file now lands on an app that is still on the default
+  recipe (it was silently skipped). Names containing "key", "auth" or "cookie" are no longer exported, and a
+  value of the wrong type in a file is ignored.
+- A failing History file no longer shows a warning; the change is just not recorded and saving carries on.
+
 ## 2026-11-26#02 -- Delete Files (Recycle Bin), and the Delete key asks what you mean
 
 - **New: File > Delete Files (Recycle Bin)...** (Shift+Delete, also in the right-click menu). It asks first, then sends the selected files to the Recycle Bin and takes them off the list. A file with unsaved changes is not deleted: it stays in the list and the warning says so. The status bar tells you how many went.

@@ -41,7 +41,10 @@ a = Analysis(
         ("ABOUT.md", "."),
         ("CREDITS.md", "."),
     ] + ([] if FOLDER else [(CHANNEL, ".")]),
-    hiddenimports=[],
+    # send2trash picks its Windows back-end at run time (send2trash.win.modern needs pywin32), so static
+    # analysis misses it; without these the built exe would refuse to use the Recycle Bin.
+    hiddenimports=["send2trash.win.modern", "win32com", "win32com.shell", "win32com.shell.shell", "pythoncom",
+                   "pywintypes"] if sys.platform == "win32" else [],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

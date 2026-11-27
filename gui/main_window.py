@@ -55,7 +55,7 @@ from redactor_common.gui.async_preview import AsyncPreviewLoader
 from redactor_common.gui.table_columns import make_columns_resizable
 from redactor_common.gui.background_call import call_in_background
 from redactor_common.gui.visible_rows import VisibleRowsWatcher
-from redactor_common.core.rename_pattern import unique_path
+from redactor_common.core.rename_pattern import unique_path, validate_filename_stem
 from redactor_common.core.folder_discovery import find_by_extension
 from redactor_common.core.folder_refresh import find_new_files_in_loaded_folders
 from redactor_common.core.temp_names import is_app_temp_name
@@ -2272,13 +2272,17 @@ class MainWindow(QMainWindow):
         book = self.books[row]
         path, _ = QFileDialog.getSaveFileName(self, "Save As", book.path, "Comic Book ZIP (*.cbz)")
         if path:
-            self._save_book(row, output_path=path)
+            self._save_book(row, output_path=path, overwrite=True)  # the dialog already confirmed replacing it
 
-    def _save_book(self, row: int, output_path: str | None = None) -> None:
+    def _save_book(self, row: int, output_path: str | None = None, overwrite: bool = False) -> None:
         book = self.books[row]
         try:
             # Saving rewrites the whole archive (seconds for a big one): off the GUI thread.
-            run_busy(self, f"Saving: {os.path.basename(output_path or book.path)}", book.save, output_path)
+            if overwrite:
+                run_busy(self, f"Saving: {os.path.basename(output_path or book.path)}",
+                         lambda: book.save(output_path, overwrite=True))
+            else:
+                run_busy(self, f"Saving: {os.path.basename(output_path or book.path)}", book.save, output_path)
         except CbzError as exc:
             QMessageBox.critical(self, "Save Failed", str(exc))
         self._refresh_table_row(row, book)
@@ -2762,6 +2766,10 @@ class MainWindow(QMainWindow):
                 book = target_books[item[0]]
                 old_path = book.path
                 stem, ext = os.path.splitext(item[1])
+                problem = validate_filename_stem(item[1])
+                if problem:  # "sub/x", "CON", a trailing dot...: reported, the file left alone
+                    errors.append(f"{os.path.basename(old_path)}: {problem}")
+                    return
                 try:
                     new_path = unique_path(os.path.dirname(old_path), stem, ext or os.path.splitext(old_path)[1], taken, own_path=old_path)
                     os.rename(old_path, new_path)

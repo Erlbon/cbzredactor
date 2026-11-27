@@ -115,7 +115,7 @@ def test_save_as_over_an_existing_file_records_that_files_old_values(tmp_path, j
     book = CbzBook(source)
     book.save(output_path=str(tmp_path / "new.cbz"))  # a new file: nothing to undo, nothing recorded
     assert journal.entries() == []
-    book.save(output_path=other)
+    book.save(output_path=other, overwrite=True)  # what Save As passes once the dialog confirmed it
     entry = _only_entry(journal)
     assert entry.path == os.path.abspath(other) and entry.changes["Series"] == ("Old Series", "Saga")
     assert book.baseline["Series"] == "Saga"
@@ -134,8 +134,10 @@ def test_a_journal_failure_never_blocks_a_save(tmp_path, monkeypatch, capsys):
     book.metadata.series = "Third"
     book.save()
     assert CbzBook(path).metadata.series == "Third"
-    assert capsys.readouterr().err.count("could not record") == 1  # said once
-    assert "could not record" in history.take_warning() and history.take_warning() == ""
+    # redactor_common 2026-11-27#03 (card 40): the journal itself swallows a failed append, so the change is just
+    # left unrecorded, with nothing raised and no warning needed.
+    assert "Traceback" not in capsys.readouterr().err
+    assert history.take_warning() == ""
 
 
 # --- J4: Redact ------------------------------------------------------------------------------------
