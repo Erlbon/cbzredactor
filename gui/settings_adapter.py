@@ -32,7 +32,9 @@ import functools
 import json
 from typing import Any, Callable, Iterable
 
+from core.conversion_originals import LEGACY_LOAD_BEHAVIOR, LEGACY_ON_OPEN
 from gui import app_settings
+from redactor_common.core import conversion_policy
 from redactor_common.core import settings_bundle as sb
 from redactor_common.core import settings_coerce as sc
 
@@ -130,12 +132,23 @@ class CbzSettingsAdapter(sb.SettingsAdapter):
                 ),
             },
             "conversion": {
-                "on_load": (
-                    app_settings.load_foreign_load_behavior, app_settings.save_foreign_load_behavior,
-                    _choice(_ON_LOAD_CHOICES),
+                # The whole policy (Preferences > Conversion) is read and written through
+                # app_settings.load/save_conversion_policy, which is what the app obeys once that page has
+                # been saved. on_load and recycle_originals stay as the two keys older bundles carry; the
+                # keys after them are the rest of the policy and win when a bundle has both.
+                "on_load": (self._read_on_load, self._write_on_load, _choice(_ON_LOAD_CHOICES)),
+                "recycle_originals": (self._read_recycle, self._write_recycle, _bool),
+                "originals": (
+                    lambda: app_settings.load_conversion_policy().originals,
+                    lambda v: self._update_policy(originals=v), _choice(conversion_policy.ORIGINALS_CHOICES),
                 ),
-                "recycle_originals": (
-                    app_settings.load_recycle_originals, app_settings.save_recycle_originals, _bool,
+                "recent_minutes": (
+                    lambda: app_settings.load_conversion_policy().recent_minutes,
+                    lambda v: self._update_policy(recent_minutes=v), _int(0, 100000),
+                ),
+                "dry_run_first": (
+                    lambda: app_settings.load_conversion_policy().dry_run_first,
+                    lambda v: self._update_policy(dry_run_first=v), _bool,
                 ),
                 "resize_on_convert": (
                     app_settings.load_resize_on_convert, app_settings.save_resize_on_convert,
@@ -180,6 +193,14 @@ class CbzSettingsAdapter(sb.SettingsAdapter):
                 "comicrack_database": (
                     app_settings.load_comicrack_database, app_settings.save_comicrack_database, _path,
                 ),
+                "quarantine_folder": (
+                    lambda: app_settings.load_conversion_policy().quarantine_folder,
+                    lambda v: self._update_policy(quarantine_folder=v), _path,
+                ),
+                "undo_log_folder": (
+                    lambda: app_settings.load_conversion_policy().undo_log_folder,
+                    lambda v: self._update_policy(undo_log_folder=v), _path,
+                ),
                 "library_root": (app_settings.load_library_root, app_settings.save_library_root, _path),
                 "resize_export_folder": (
                     app_settings.load_resize_export_folder, app_settings.save_resize_export_folder, _path,
@@ -208,10 +229,10 @@ class CbzSettingsAdapter(sb.SettingsAdapter):
         entries = self._table.get(key)
         if entries is None:
             return
-        for name, value in values.items():
-            if name not in entries:
+        for name, (_reader, writer, coerce) in entries.items():  # the table's order, not the file's
+            if name not in values:
                 continue
-            _reader, writer, coerce = entries[name]
+            value = values[name]
             clean = coerce(value)
             if clean is None:
                 continue  # unusable value: keep the current setting
@@ -231,6 +252,34 @@ class CbzSettingsAdapter(sb.SettingsAdapter):
         except (json.JSONDecodeError, ValueError):
             return None
         return data if isinstance(data, (dict, list)) else None
+
+    @staticmethod
+    def _update_policy(**changes: Any) -> None:
+        policy = app_settings.load_conversion_policy()
+        for name, value in changes.items():
+            setattr(policy, name, value)
+        app_settings.save_conversion_policy(policy)
+
+    @staticmethod
+    def _read_on_load() -> str:
+        on_open = app_settings.load_conversion_policy().on_open
+        return LEGACY_LOAD_BEHAVIOR.get(on_open, app_settings.FOREIGN_LOAD_UNCONVERTED)
+
+    @classmethod
+    def _write_on_load(cls, value: str) -> None:
+        cls._update_policy(on_open=LEGACY_ON_OPEN[value])
+
+    @staticmethod
+    def _read_recycle() -> bool:
+        return app_settings.load_conversion_policy().originals == conversion_policy.ORIGINALS_RECYCLE
+
+    @classmethod
+    def _write_recycle(cls, value: bool) -> None:
+        if value:
+            cls._update_policy(originals=conversion_policy.ORIGINALS_RECYCLE)
+        elif cls._read_recycle():
+            cls._update_policy(originals=conversion_policy.ORIGINALS_KEEP)
+        # "not Recycle Bin" from an old bundle leaves a quarantine choice as it is
 
     def _read_hidden(self) -> list[str]:
         if app_settings.has_hidden_columns_preference():

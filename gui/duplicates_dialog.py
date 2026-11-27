@@ -10,6 +10,8 @@ is marked; the others start ticked for removal (to the Recycle Bin).
 
 from __future__ import annotations
 
+import html
+
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QImage, QPixmap
 from PyQt6.QtWidgets import (
@@ -85,7 +87,7 @@ class DuplicatesDialog(OwnedDialog):
                 keep = index == group.keep
                 details = QLabel(
                     ("<b>Keep (best)</b><br>" if keep else "")
-                    + f"{labels[index]}<br>"
+                    + f"{html.escape(labels[index])}<br>"
                     + f"{f.width}px wide · {f.pages} pages<br>"
                     + f"{f.metadata_fields} ComicInfo fields · {_size_text(f.file_size)}"
                 )

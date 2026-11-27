@@ -15,6 +15,8 @@ The three windows for scanner credit pages (core/credit_pages.py):
 
 from __future__ import annotations
 
+import html
+
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QIcon, QPixmap
 from PyQt6.QtWidgets import (
@@ -89,7 +91,7 @@ class CreditPagesDialog(OwnedDialog):
                 notes.append("<b>Known credit page</b>")
             if candidate.plain:
                 notes.append("Blank/plain -- can be removed, but won't be remembered")
-            notes += candidate.hints
+            notes += [html.escape(hint) for hint in candidate.hints]  # a hint quotes part of the page name
             note = QLabel("<br>".join(notes))
             note.setWordWrap(True)
             note.setTextFormat(Qt.TextFormat.RichText)
@@ -129,6 +131,7 @@ class RemoveCreditPagesDialog(OwnedDialog):
             "Recycle Bin."
             + (f"\n\n{skipped_note}" if skipped_note else "")
         )
+        intro.setTextFormat(Qt.TextFormat.PlainText)  # the note names files
         intro.setWordWrap(True)
         outer.addWidget(intro)
 

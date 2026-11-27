@@ -21,7 +21,7 @@ from core.cbz_file import CbzBook, path_needs_conversion
 from core.foreign_archive_convert import ForeignArchiveConversionError, convert_to_cbz, relabel_mislabeled_cbz
 from core.redact_steps import FILENAME_FIELD_KEYS
 from gui import app_settings
-from redactor_common.cli import Output, add_common_options, commands
+from redactor_common.cli import CliError, Output, add_common_options, commands
 from redactor_common.cli.commands import add_pattern_options, new_row, say
 from redactor_common.core.rename_pattern import zero_pad_numeric_value
 from redactor_common.core.trash import TrashError, move_to_trash, trash_with_retries
@@ -158,7 +158,14 @@ def _note_move(old: str, new: str) -> None:
 
 
 def run_rename(args: argparse.Namespace, out: Output) -> int:
-    pattern = args.pattern or DEFAULT_RENAME_PATTERN
+    if args.pattern is None:
+        pattern = DEFAULT_RENAME_PATTERN
+    elif not args.pattern.strip():
+        # "-p" with an empty value (a script's unset variable) must not fall back to the default and rename
+        # every file; the CLI has no undo.
+        raise CliError("the rename pattern is empty (leave out -p to use the default pattern)")
+    else:
+        pattern = args.pattern
     zero_pad = _zero_pad(args)
     books = load_books(collect(args.paths, out, recurse=not args.no_recurse), out)
     failed = commands.rename_items(

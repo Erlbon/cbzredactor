@@ -353,6 +353,17 @@ def fix_summary(report: Report) -> list[tuple[str, int]]:
 LIST_COLUMNS = ["Check", "File", "Folder", "Problem", "Suggestion", "Fix with"]
 
 
+_FORMULA_STARTS = ("=", "+", "-", "@", "\t", "\r")
+
+
+def csv_cell(text) -> str:
+    """One CSV cell safe to open in a spreadsheet: a cell that starts with = + - @ (or a tab or return) would be
+    run as a formula or turned into an error cell, so it gets a leading single quote. A file name can start with
+    any of these ("=HYPERLINK(...).cbz", "-1 Annual.cbz")."""
+    text = str(text)
+    return "'" + text if text.startswith(_FORMULA_STARTS) else text
+
+
 def report_list(report: Report) -> list[list[str]]:
     """Every finding as one flat row, for Save List... (a CSV to work
     through elsewhere -- e.g. read here, moved on the collection's own

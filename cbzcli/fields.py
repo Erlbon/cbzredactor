@@ -8,6 +8,8 @@ way the GUI's controls would constrain it before anything is written.
 
 from __future__ import annotations
 
+import re
+
 from core.comicinfo import (
     AGE_RATING_VALUES, ATTR_TO_TAG, BLACK_AND_WHITE_VALUES, INT_FIELDS, MANGA_VALUES, TAG_TO_ATTR,
 )
@@ -20,6 +22,8 @@ SETTABLE = {tag: attr for tag, attr in TAG_TO_ATTR.items() if tag != "PageCount"
 
 # Fields that may hold several lines; every other field is a single line.
 MULTILINE_TAGS = {"Summary", "Notes", "Review"}
+
+_PLAIN_DECIMAL = re.compile(r"[0-9]+(\.[0-9]+)?|\.[0-9]+")
 
 _ENUMS = {
     "BlackAndWhite": BLACK_AND_WHITE_VALUES,
@@ -50,7 +54,9 @@ def check_value(tag: str, value: str) -> str:
             raise CliError("Day must be 1 to 31")
     if tag == "CommunityRating":
         try:
-            if not value.isascii():
+            # A plain decimal only: float() also takes "0_1", "1e0", "nan", "+1" and " 1", which other readers
+            # of ComicInfo.xml cannot parse.
+            if not _PLAIN_DECIMAL.fullmatch(value):
                 raise ValueError(value)
             rating = float(value)
         except ValueError:

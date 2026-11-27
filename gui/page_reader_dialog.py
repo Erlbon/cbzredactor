@@ -51,12 +51,14 @@ class PageReaderDialog(OwnedDialog):
         self._prefetch.image_ready.connect(self._on_prefetched)
 
         self.name_label = QLabel()
+        self.name_label.setTextFormat(Qt.TextFormat.PlainText)  # a page name can hold "<": show it as typed
         self.name_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         self.page_label = QLabel()
         self.page_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.page_label.setMinimumWidth(110)
 
         self.image_label = QLabel()
+        self.image_label.setTextFormat(Qt.TextFormat.PlainText)  # its messages name pages and carry file errors
         self.image_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.image_label.setWordWrap(True)
         self.scroll = QScrollArea()

@@ -28,7 +28,7 @@ from core.redact_steps import (
     FINALIZE_LABEL, CbzCtx, RedactEnv, build_catalogue, recipe_for_run, recipe_from_setting, run_catalogue, save_stage,
 )
 from gui import app_settings
-from redactor_common.cli import CliError, Output, add_common_options
+from redactor_common.cli import EXIT_PARTIAL, CliError, Output, add_common_options
 from redactor_common.cli.commands import (
     add_redact_options, build_recipe, list_steps, read_recipe_file, redact_items, trash_to, trash_with_retries,
 )
@@ -93,8 +93,14 @@ def run_redact(args: argparse.Namespace, out: Output) -> int:
         env.on_move = None
         env.trash = _refuse_in_dry_run
     env.begin()  # only resets the run's "source unreachable" flags; writes nothing
-    return redact_items(
+    code = redact_items(
         books, recipe_for_run(recipe), run_catalogue(env), make_context=lambda book: CbzCtx(book, env),
         describe=lambda book: os.path.basename(book.path), finalize=save_stage, finalize_label=FINALIZE_LABEL,
         path_of=lambda book: book.path, out=out, dry_run=args.dry_run,
     )
+    # A file that could not be read was never processed: like info and set, that is a failure, not a quiet skip.
+    unreadable = [book for book in books if book.load_error]
+    if unreadable:
+        out.error(f"{len(unreadable)} file(s) could not be read and were not processed")
+        return max(code, EXIT_PARTIAL)
+    return code

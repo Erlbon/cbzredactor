@@ -981,3 +981,178 @@ def test_card55_comicvine_cover_date_zero_parts_stay_empty():
     assert _split_cover_date("0000-00-00") == ("", "", "")
     fields = ComicVineIssueDetails(volume_name="X", cover_date="1985-00-00").as_dict()
     assert fields["year"] == "1985" and "month" not in fields and "day" not in fields
+
+
+# ---------------------------------------------------------------------------
+# Batch 8: CLI and dialogs (cards 19, 34, 35, 37, 38, 39, 45)
+# ---------------------------------------------------------------------------
+
+
+def test_card19_import_changes_the_saved_conversion_policy(tmp_path):
+    from gui import app_settings
+    from gui.settings_adapter import CbzSettingsAdapter
+    from redactor_common.core import conversion_policy as cp
+
+    # Preferences > Conversion has been saved once: only the saved policy counts from now on.
+    app_settings.save_conversion_policy(cp.ConversionPolicy(
+        on_open=cp.ON_OPEN_NEVER, originals=cp.ORIGINALS_KEEP, recent_minutes=0, dry_run_first=False))
+    adapter = CbzSettingsAdapter("x")
+    adapter.write_section("conversion", {"on_load": "convert", "recycle_originals": True})
+    policy = app_settings.load_conversion_policy()
+    assert policy.on_open == cp.ON_OPEN_AUTO and policy.originals == cp.ORIGINALS_RECYCLE
+    assert adapter.read_section("conversion")["on_load"] == "convert"
+    assert adapter.read_section("conversion")["recycle_originals"] is True
+
+
+def test_card19_whole_policy_round_trips_and_folders_are_machine_paths(tmp_path):
+    from gui import app_settings
+    from gui.settings_adapter import CbzSettingsAdapter
+    from redactor_common.core import conversion_policy as cp
+
+    adapter = CbzSettingsAdapter("x")
+    quarantine = str(tmp_path / "quarantine")
+    app_settings.save_conversion_policy(cp.ConversionPolicy(
+        on_open=cp.ON_OPEN_ASK, originals=cp.ORIGINALS_QUARANTINE, quarantine_folder=quarantine,
+        undo_log_folder=str(tmp_path / "logs"), recent_minutes=25, dry_run_first=False))
+    portable = adapter.read_section("conversion")
+    machine = adapter.read_section("paths")
+    assert portable["originals"] == "quarantine" and portable["recent_minutes"] == 25
+    assert portable["dry_run_first"] is False and "quarantine_folder" not in portable
+    assert machine["quarantine_folder"] == quarantine
+    app_settings.save_conversion_policy(cp.ConversionPolicy())
+    # an old key in a bundle does not undo the newer one, whatever order the file lists them in
+    adapter.write_section("conversion", {"originals": "quarantine", "recycle_originals": False, "recent_minutes": 25,
+                                         "dry_run_first": False})
+    adapter.write_section("paths", {"quarantine_folder": quarantine})
+    policy = app_settings.load_conversion_policy()
+    assert (policy.originals, policy.recent_minutes, policy.dry_run_first) == ("quarantine", 25, False)
+    assert policy.quarantine_folder == quarantine
+
+
+def test_card34_rename_with_an_empty_pattern_is_refused(tmp_path, capsys):
+    from cbzcli.main import main
+    from redactor_common.cli import CliError
+    from test_redact_steps import _cbz
+
+    path = _cbz(tmp_path / "keep me.cbz")
+    for empty in ("", "  "):
+        with pytest.raises(CliError, match="empty"):
+            main(["rename", path, "-p", empty])
+    assert os.listdir(tmp_path) == ["keep me.cbz"]
+
+
+def test_card35_rating_is_a_plain_decimal_only():
+    from cbzcli.fields import check_value
+    from redactor_common.cli import CliError
+
+    for bad in ("0_1", "1e0", "nan", "+1", "-1", "1_0", "6", "1."):
+        with pytest.raises(CliError):
+            check_value("CommunityRating", bad)
+    for good in ("0", "3.5", "5", ".5", "4.25"):
+        assert check_value("CommunityRating", good) == good
+
+
+def test_card37_redact_exits_1_when_a_file_could_not_be_read(tmp_path, capsys):
+    from cbzcli.main import main
+
+    broken = tmp_path / "broken.cbz"
+    broken.write_bytes(b"not a zip")
+    code = main(["redact", str(broken), "--disable", "lookup"])
+    assert code == 1
+    assert "could not be read" in capsys.readouterr().err
+    assert broken.read_bytes() == b"not a zip"
+
+
+def test_card38_page_names_are_shown_as_plain_text(tmp_path):
+    from PyQt6.QtCore import Qt
+    from PyQt6.QtWidgets import QLabel
+
+    from core.credit_pages import KnownCreditPages, PageCandidate
+    from gui.credit_pages_dialogs import CreditPagesDialog, RemoveCreditPagesDialog
+    from gui.page_reader_dialog import PageReaderDialog
+
+    name = "<h1>BIG</h1>001.jpg"
+    path = _cbz_with_pages(tmp_path / "b.cbz", {name: _png(8, 8), "002.png": _png(8, 8)})
+    reader = PageReaderDialog(CbzBook(path))
+    try:
+        assert reader.name_label.textFormat() == Qt.TextFormat.PlainText
+        assert reader.image_label.textFormat() == Qt.TextFormat.PlainText
+    finally:
+        reader._loader.shutdown()
+        reader._prefetch.shutdown()
+    # a hint quotes part of the page name; the note must not render it
+    candidate = PageCandidate(0, name, hints=['name contains scan group "<b>x</b>"'])
+    dialog = CreditPagesDialog("b", [candidate], KnownCreditPages(str(tmp_path / "known.json")))
+    notes = [label.text() for label in dialog.findChildren(QLabel) if "scan group" in label.text()]
+    assert notes and "&lt;b&gt;" in notes[0] and "<b>x</b>" not in notes[0]
+    removal = RemoveCreditPagesDialog([(None, "<i>file</i>.cbz", candidate)], skipped_note="<u>x</u>.cbz skipped")
+    intro = [label for label in removal.findChildren(QLabel) if "known credit page" in label.text()]
+    assert intro and intro[0].textFormat() == Qt.TextFormat.PlainText
+
+
+def test_card38_duplicates_details_escape_the_file_name():
+    from PyQt6.QtWidgets import QLabel
+
+    from core.duplicates import BookFacts, BookFingerprint, DuplicateGroup
+    from gui.duplicates_dialog import DuplicatesDialog
+
+    facts = [BookFacts(BookFingerprint(), width=100, pages=3), BookFacts(BookFingerprint(), width=90, pages=3)]
+    dialog = DuplicatesDialog([DuplicateGroup([0, 1], 0)], facts, ["Spider <Man> 1.cbz", "Spider 1.cbz"], [None, None])
+    texts = [label.text() for label in dialog.findChildren(QLabel)]
+    assert any("Spider &lt;Man&gt; 1.cbz" in text for text in texts)
+    assert not any("<Man>" in text for text in texts)
+
+
+def _report_dialog(tmp_path, rows):
+    from core import collection_scan as scan
+    from core.collection_report import DuplicateGroup, Report
+    from gui.collection_report_dialog import CollectionReportDialog
+
+    info = scan.new_info(str(tmp_path), True)
+    report = Report(duplicates=[DuplicateGroup("S", "1", rows)])
+    return CollectionReportDialog(info, len(rows), report), report
+
+
+def test_card39_report_mb_and_pages_sort_as_numbers(tmp_path):
+    from PyQt6.QtCore import Qt
+    from PyQt6.QtWidgets import QTableWidget
+
+    from core import collection_scan as scan
+
+    megabytes = [1.2, 10.5, 100.0, 2.0]
+    pages = ["30", "100", "", "9"]
+    rows = [scan.ScanRow(f"S/{i}.cbz", size=int(mb * 1048576), pages=p) for i, (mb, p) in enumerate(zip(megabytes, pages))]
+    dialog, _report = _report_dialog(tmp_path, rows)
+    table = next(t for t in dialog.findChildren(QTableWidget) if t.columnCount() == 7)
+    table.sortItems(3, Qt.SortOrder.AscendingOrder)
+    assert [table.item(r, 3).text() for r in range(4)] == ["1.2", "2.0", "10.5", "100.0"]
+    table.sortItems(4, Qt.SortOrder.AscendingOrder)
+    assert [table.item(r, 4).text() for r in range(4)] == ["?", "9", "30", "100"]
+
+
+def test_card45_save_list_neutralises_formula_cells():
+    from core.collection_report import csv_cell
+
+    assert csv_cell('=HYPERLINK("http://x","click").cbz').startswith("'=")
+    assert csv_cell("-1 Annual.cbz") == "'-1 Annual.cbz"
+    assert csv_cell("+1") == "'+1" and csv_cell("@x") == "'@x"
+    assert csv_cell("Saga 1.cbz") == "Saga 1.cbz" and csv_cell("") == ""
+
+
+def test_card45_save_list_file_has_no_formula_cells(tmp_path, monkeypatch):
+    import csv
+
+    from PyQt6.QtWidgets import QFileDialog
+
+    from core import collection_scan as scan
+
+    rows = [scan.ScanRow('=HYPERLINK("http://x","click").cbz', size=1048576, pages="3"),
+            scan.ScanRow("-1 Annual.cbz", size=1048576, pages="3")]
+    dialog, _report = _report_dialog(tmp_path, rows)
+    target = str(tmp_path / "list.csv")
+    monkeypatch.setattr(QFileDialog, "getSaveFileName", lambda *a, **k: (target, ""))
+    dialog._save_list()
+    with open(target, encoding="utf-8-sig", newline="") as handle:
+        cells = [cell for row in csv.reader(handle) for cell in row]
+    assert not [c for c in cells if c and c[0] in "=+-@"]
+    assert any(c.startswith("'=HYPERLINK") for c in cells)

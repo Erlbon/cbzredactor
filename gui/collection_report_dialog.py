@@ -32,7 +32,8 @@ from PyQt6.QtWidgets import (
 )
 
 from core.collection_report import (
-    FIX_DUPLICATES, FIX_MISMATCH, FIX_MOVE, FIX_RENAME, LIST_COLUMNS, Report, fix_summary, format_fix_with, report_list,
+    FIX_DUPLICATES, FIX_MISMATCH, FIX_MOVE, FIX_RENAME, LIST_COLUMNS, Report, csv_cell, fix_summary, format_fix_with,
+    report_list,
 )
 from core.collection_scan import ScanInfo
 from redactor_common.gui.owned_dialog import OwnedDialog
@@ -40,10 +41,30 @@ from redactor_common.gui.owned_dialog import OwnedDialog
 _LAZY_ROWS = 2000  # a tab with more rows is filled when first shown; filling 100,000 rows takes seconds
 
 
+class _Number(str):
+    """A cell's text that sorts by a number (MB, Pages) instead of as text."""
+
+    def __new__(cls, text: str, key: float):
+        value = super().__new__(cls, text)
+        value.key = key
+        return value
+
+
+class _NumberItem(QTableWidgetItem):
+    def __init__(self, text: str, key: float):
+        super().__init__(text)
+        self.key = key
+
+    def __lt__(self, other) -> bool:
+        if isinstance(other, _NumberItem):
+            return self.key < other.key
+        return super().__lt__(other)
+
+
 def _cells(row: list[str]) -> list[QTableWidgetItem]:
     items = []
     for text in row:
-        item = QTableWidgetItem(text)
+        item = _NumberItem(text, text.key) if isinstance(text, _Number) else QTableWidgetItem(text)
         item.setToolTip(text)
         items.append(item)
     return items
@@ -92,8 +113,10 @@ class CollectionReportDialog(OwnedDialog):
         dupes = []
         for group in report.duplicates:
             for row in group.rows:
+                megabytes = row.size / 1048576
                 dupes.append([f"{group.series} {group.number}", row.file, row.folder,
-                              f"{row.size / 1048576:.1f}", row.pages or "?", group.covers, FIX_DUPLICATES])
+                              _Number(f"{megabytes:.1f}", megabytes), _Number(row.pages or "?", int(row.pages) if row.pages.isascii() and row.pages.isdigit() else -1),
+                              group.covers, FIX_DUPLICATES])
         self._add_tab("Duplicates", ["Comic", "File", "Folder", "MB", "Pages", "Covers", "Fix with"], dupes)
         self._add_tab(
             "Name vs ComicInfo", ["File", "Folder", "Field", "In the name", "In ComicInfo", "Fix with"],
@@ -169,6 +192,6 @@ class CollectionReportDialog(OwnedDialog):
             with open(path, "w", encoding="utf-8-sig", newline="") as handle:
                 writer = csv.writer(handle)
                 writer.writerow(LIST_COLUMNS)
-                writer.writerows(report_list(self.report))
+                writer.writerows([csv_cell(cell) for cell in row] for row in report_list(self.report))
         except OSError as exc:
             QMessageBox.warning(self, "Save List", f"Couldn't save the list:\n{exc}")

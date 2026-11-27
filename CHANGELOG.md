@@ -1,5 +1,19 @@
 # Changelog
 
+## 2026-11-27#10 -- Command line and dialog fixes
+
+- **Import Settings now changes the conversion settings after Preferences has been saved.** The whole conversion
+  policy (when to convert, what happens to originals, the recent-file rule, the dry-run offer) is exported and
+  imported; the quarantine and undo-log folders travel with the computer-only paths.
+- **`rename -p ""` is refused** instead of renaming every file with the default pattern.
+- **`set` accepts a plain decimal for CommunityRating only** ("3.5", not "0_1" or "1e0").
+- **`redact` exits with 1 when a file could not be read**, like `info` and `set` do.
+- **File and page names with `<` or `>` are shown as typed** in the page viewer, the Duplicates window and the
+  credit-page windows.
+- **The Collection Report's MB and Pages columns sort as numbers.**
+- **Save List protects against spreadsheet formulas.** A cell starting with `=`, `+`, `-` or `@` gets a leading
+  single quote.
+
 ## 2026-11-27#09 -- Lookup fixes
 
 - **An odd answer from Comic Vine, GCD or Bedetheque no longer crashes the lookup.** A reply of the wrong shape is
