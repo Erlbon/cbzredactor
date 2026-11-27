@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-11-28#01 -- A failed lookup no longer loses the batch
+
+- **A lookup that fails on one comic shows "(error)" on that row** (with the message in the details and the status
+  line) instead of closing the lookup window and losing the results for every comic searched before it. The same goes
+  for "Search This Item". This comes with redactor_common 2026-11-27#08.
+
 ## 2026-11-27#10 -- Command line and dialog fixes
 
 - **Import Settings now changes the conversion settings after Preferences has been saved.** The whole conversion

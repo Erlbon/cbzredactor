@@ -1156,3 +1156,22 @@ def test_card45_save_list_file_has_no_formula_cells(tmp_path, monkeypatch):
         cells = [cell for row in csv.reader(handle) for cell in row]
     assert not [c for c in cells if c and c[0] in "=+-@"]
     assert any(c.startswith("'=HYPERLINK") for c in cells)
+
+
+# ---------------------------------------------------------------------------
+# Batch 9: redactor_common 2026-11-27#08 (card 63)
+# ---------------------------------------------------------------------------
+
+def test_card63_a_lookup_error_is_shown_on_its_row_not_raised():
+    from gui.bedetheque_lookup_dialog import LookupDialogBase, LookupResult
+
+    def search(item, _query):
+        if item == "b":
+            raise ValueError("odd reply")
+        return LookupResult(fields={"series": item})
+
+    dialog = LookupDialogBase(
+        ["a", "b", "c"], None, window_title="T", info_text="i", search_label="s", item_label=str, search_one=search)
+    results = dialog.row_results()
+    assert results[1].error == "ValueError: odd reply"
+    assert results[0].found and results[2].found
