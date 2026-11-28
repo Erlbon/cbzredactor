@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026-11-28#02 -- redactor_common 2026-11-28-01
+
+- The family's shared library moves to 2026-11-28-01 (one pin across the family). Its changes since 2026-11-27-08
+  (duplicate-tier wording, a docstring) do not touch anything this app uses, so nothing changes on screen.
+
 ## 2026-11-28#01 -- A failed lookup no longer loses the batch
 
 - **A lookup that fails on one comic shows "(error)" on that row** (with the message in the details and the status
